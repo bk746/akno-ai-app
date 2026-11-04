@@ -1,0 +1,1 @@
+{"root":["./src/main.tsx","./src/components/AknoApp.tsx","./src/components/DevisPaper.tsx","./src/components/blobPath.ts","./src/lib/assistant.ts","./src/lib/devisDoc.ts","./src/lib/devisPdf.ts","./src/lib/store.ts","./vite.config.ts"],"version":"5.9.3"}
