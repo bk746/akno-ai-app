@@ -139,7 +139,7 @@ function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: 
   const { desk, s } = useC(), on = k ? s.settings.agents[k] : true
   const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${k === "rel" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
   const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
-  const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-1.5 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`mt-2 ${desk ? "text-[40px]" : "text-[32px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
+  const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-1.5 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`mt-1 ${desk ? "text-[40px]" : "text-[32px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const foot = <div className="py-8 text-center text-[12px] text-white/25">Données de démonstration</div>
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{L}{H}<div className="ml-auto w-[360px] shrink-0"><QA items={actions} /></div></motion.div><div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div>{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
@@ -147,7 +147,7 @@ function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: 
     <div className="flex h-10 shrink-0 items-center px-5"><img src="/logo.png" alt="Akno" className="h-[25px] w-auto" />{k && <div className="ml-auto flex items-center"><Capsule k={k} sm /></div>}</div>
     <motion.div variants={rise} className="mt-2 flex flex-col items-center px-5">{L}{H}</motion.div>
     <motion.div variants={rise} className="mt-6 px-4"><QA items={actions} /></motion.div>
-    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(78px + max(var(--sab) - 18px, 6px))" }} /></motion.div>
+    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
 const meName = (s: St) => s.settings.name?.trim() || "Thomas Rousseau"
@@ -168,13 +168,13 @@ const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 
 function TabBar() {
   const { page, go } = useC()
   const ids: P[] = ["rec", "ag", "rel", "dev", "set"]
-  return <nav aria-label="Navigation principale" className="pointer-events-none fixed inset-x-4 z-30 flex justify-center" style={{ bottom: "max(calc(var(--sab) - 18px), 6px)" }}>
-    <div className="pointer-events-auto flex h-[60px] w-full items-center gap-1 rounded-full border border-white/[.08] bg-[#121214]/85 p-2 shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]">
-      {ids.map(id => { const on = id === page; return <motion.button layout transition={spring} key={id} onClick={() => go(id)} aria-label={NAV_L[id]} aria-current={on ? "page" : undefined} whileTap={{ scale: .94 }}
-        className={`relative flex h-12 items-center justify-center rounded-full ${on ? "flex-[2.4] text-white" : "flex-1 text-white/55 hover:text-white/80"}`}>
-        {on && <motion.span layoutId="tab-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}
-        <motion.span layout="position" transition={spring} className="relative flex items-center gap-2">{id === "set" ? <Me size={24} on={on} /> : <NI d={NAV_I[id]} />}
-          {on && <motion.span initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: .18, delay: .06 }} className="flex items-center gap-1.5 whitespace-nowrap text-[13px] font-semibold tracking-[-0.01em]">{NAV_L[id]}<span className="h-[5px] w-[5px] rounded-full" style={{ background: NAV_C[id] }} /></motion.span>}</motion.span>
+  return <nav aria-label="Navigation principale" className="pointer-events-none fixed inset-x-4 z-30 flex justify-center" style={{ bottom: "max(calc(var(--sab) - 10px), 12px)" }}>
+    <div className="pointer-events-auto flex h-[72px] w-full items-center gap-0 rounded-full border border-white/[.10] bg-[#161618]/80 p-[6px] shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]">
+      {ids.map(id => { const on = id === page; return <motion.button key={id} onClick={() => go(id)} aria-label={NAV_L[id]} aria-current={on ? "page" : undefined} whileTap={{ scale: .94 }}
+        className={`relative flex h-full flex-1 flex-col items-center justify-center gap-[5px] rounded-full transition-colors ${on ? "text-white" : "text-white/60"}`}>
+        {on && <motion.span layoutId="tab-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/[.10]" />}
+        <span className="relative">{id === "set" ? <Me size={24} on={on} /> : id === "rec" ? <span className="flex h-6 w-6 items-center justify-center"><img src="/logo.png" alt="" className={`h-[18px] w-auto transition-opacity ${on ? "opacity-100" : "opacity-60"}`} /></span> : <NI d={NAV_I[id]} size={24} />}</span>
+        <span className="relative whitespace-nowrap text-[11px] font-semibold leading-none tracking-[-0.005em]">{NAV_L[id]}</span>
       </motion.button> })}
     </div></nav>
 }
@@ -619,6 +619,7 @@ function Chat() {
 /* ---------------- App ---------------- */
 const useDesk = () => { const q = "(min-width: 1024px)"; const [d, setD] = useState(() => matchMedia(q).matches); useEffect(() => { const m = matchMedia(q), f = () => setD(m.matches); m.addEventListener("change", f); return () => m.removeEventListener("change", f) }, []); return d }
 const font = (desk: boolean) => ({ fontFamily: "'Geist Variable', -apple-system, sans-serif", fontFeatureSettings: desk ? "'tnum'" : "'tnum','ss01'" })
+const ORD: P[] = ["rec", "ag", "rel", "dev", "set"]
 function AknoApp() {
   const pathname = useLocation().pathname, navigate = useNavigate()
   const [s, setS] = useStore(), desk = useDesk()
@@ -628,13 +629,14 @@ function AknoApp() {
   const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void } | null>(null), [q, setQ] = useState("")
   useEffect(() => { document.title = `Akno · ${page === "set" ? "Paramètres" : A[page].tab}` }, [page])
   useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo ? 5000 : 2600); return () => clearTimeout(t) }, [toastT])
-  const go = (p: P) => { setQ(""); setM(null); if (p !== page) navigate(`/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`); if (!desk) setChatS(false) }
+  const sw = useRef<{ x: number, y: number, t: number, ok: boolean } | null>(null), dir = useRef(0)
+  const go = (p: P) => { if (ORD.indexOf(p) !== ORD.indexOf(page)) dir.current = ORD.indexOf(p) > ORD.indexOf(page) ? 1 : -1; setQ(""); setM(null); if (p !== page) navigate(`/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`); if (!desk) setChatS(false) }
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal: setM, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ }
   const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP }[page]
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0, y: 8, scale: .995 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: .22, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+      : <div className="flex min-w-0 flex-1 flex-col" onTouchStart={e => { const t = e.touches[0]; sw.current = { x: t.clientX, y: t.clientY, t: Date.now(), ok: !(e.target as HTMLElement).closest("[data-noswipe],input,textarea,[role=slider]") } }} onTouchEnd={e => { const o = sw.current; sw.current = null; if (!o || !o.ok || m || chat) return; const t = e.changedTouches[0], dx = t.clientX - o.x, dy = t.clientY - o.y; if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6 || Date.now() - o.t > 600) return; const i = ORD.indexOf(page), j = i + (dx < 0 ? 1 : -1); if (j < 0 || j >= ORD.length) return; dir.current = dx < 0 ? 1 : -1; go(ORD[j]) }}><AnimatePresence mode="wait" initial={false} custom={dir.current}><motion.div key={page} custom={dir.current} className="flex min-h-0 flex-1 flex-col" variants={{ i: (d: number) => ({ opacity: 0, x: d * 28 }), a: { opacity: 1, x: 0 }, e: (d: number) => ({ opacity: 0, x: d * -28 }) }} initial="i" animate="a" exit="e" transition={{ duration: .22, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
