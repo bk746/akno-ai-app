@@ -4,7 +4,7 @@ import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } 
 import { useLocation, useNavigate } from "react-router-dom"
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
-import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText } from "lucide-react"
+import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
 import type { Client, St, Devis, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
@@ -32,7 +32,7 @@ const ttc = (ht: number, tv: number) => Math.round(ht * (1 + tv / 100))
 const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"] }
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
-type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "relView" | "devis" | "devisEdit" | "devisList" | "ev"; data?: any } | null
+type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev"; data?: any } | null
 type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void }
 const C = createContext<Ctx>(null as any)
 const useC = () => useContext(C)
@@ -114,9 +114,9 @@ function Side() {
 }
 const PLUS: Record<K, string> = { rec: "Nouvelle note d'appel", ag: "Nouveau rendez-vous", rel: "Nouvelle relance", dev: "Nouveau devis" }
 const plusKind: Record<K, any> = { rec: "call", ag: "rdv", rel: "rel", dev: "devis" }
-function Capsule({ k }: { k: K }) {
+function Capsule({ k, sm }: { k: K; sm?: boolean }) {
   const { modal, setChat, chat } = useC()
-  return <div className="flex items-center gap-4"><button data-hit aria-label={`Discuter avec l'IA ${A[k].n}`} title="Assistant" onClick={() => setChat(!chat)} className="relative flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#141416] text-white/55 hover:text-white"><Sparkles size={18} strokeWidth={1.5} /><span className="absolute right-[6px] top-[6px] h-[6px] w-[6px] rounded-full" style={{ background: A[k].c }} /></button><button aria-label={PLUS[k]} title={`${PLUS[k]} (N)`} onClick={() => modal({ kind: plusKind[k] })} className="-mx-[11px] flex h-11 w-11 items-center justify-center text-white hover:text-white/80"><Plus size={22} strokeWidth={1.5} /></button></div>
+  return <div className={`flex items-center ${sm ? "gap-2" : "gap-4"}`}><button data-hit aria-label={`Discuter avec l'IA ${A[k].n}`} title="Assistant" onClick={() => setChat(!chat)} className={`relative flex ${sm ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-[10px] bg-[#141416] text-white/55 hover:text-white`}><Sparkles size={sm ? 16 : 18} strokeWidth={1.5} /><span className="absolute right-[5px] top-[5px] h-[6px] w-[6px] rounded-full" style={{ background: A[k].c }} /></button><button aria-label={PLUS[k]} title={`${PLUS[k]} (N)`} onClick={() => modal({ kind: plusKind[k] })} className={`${sm ? "flex h-8 w-8 rounded-[10px]" : "-mx-[11px] flex h-11 w-11"} items-center justify-center text-white hover:text-white/80`}><Plus size={sm ? 20 : 22} strokeWidth={1.5} /></button></div>
 }
 function Top() {
   const { page, q, setQ, modal } = useC(), ref = useRef<HTMLInputElement>(null)
@@ -137,17 +137,17 @@ function Num({ n, u, money }: { n: number; u?: string; money?: boolean }) {
 /* Gabarit unique de page : blob + chiffre clé + actions rondes + sections */
 function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any }) {
   const { desk, s } = useC(), on = k ? s.settings.agents[k] : true
-  const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${k === "rel" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 72 : 88} /></motion.div></div>)
+  const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${k === "rel" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
   const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
-  const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-2 ${tx.cap} ${desk ? "" : "mt-4"}`}>{lab}</div><div className={`mt-2 ${desk ? "text-[64px]" : "text-[56px]"} font-light leading-none tracking-[-0.055em]`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
+  const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-1.5 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`mt-2 ${desk ? "text-[40px]" : "text-[32px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const foot = <div className="py-8 text-center text-[12px] text-white/25">Données de démonstration</div>
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{L}{H}<div className="ml-auto w-[360px] shrink-0"><QA items={actions} /></div></motion.div><div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div>{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-    <div aria-hidden className="shrink-0" style={{ height: "max(54px, env(safe-area-inset-top))" }} />
-    <div className="flex h-14 shrink-0 items-center px-5"><img src="/logo.png" alt="Akno" className="h-9" />{k && <div className="ml-auto"><Capsule k={k} /></div>}</div>
+    <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
+    <div className="flex h-10 shrink-0 items-center px-5"><img src="/logo.png" alt="Akno" className="h-[25px] w-auto" />{k && <div className="ml-auto flex items-center"><Capsule k={k} sm /></div>}</div>
     <motion.div variants={rise} className="mt-2 flex flex-col items-center px-5">{L}{H}</motion.div>
     <motion.div variants={rise} className="mt-6 px-4"><QA items={actions} /></motion.div>
-    <div className="mt-8 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(88px + env(safe-area-inset-bottom))" }} /></motion.div>
+    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(78px + max(var(--sab) - 18px, 6px))" }} /></motion.div>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
 const meName = (s: St) => s.settings.name?.trim() || "Thomas Rousseau"
@@ -168,8 +168,8 @@ const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 
 function TabBar() {
   const { page, go } = useC()
   const ids: P[] = ["rec", "ag", "rel", "dev", "set"]
-  return <nav aria-label="Navigation principale" className="pointer-events-none fixed inset-x-4 z-30 flex justify-center" style={{ bottom: "calc(12px + env(safe-area-inset-bottom))" }}>
-    <div className="pointer-events-auto flex h-16 w-full items-center gap-1 rounded-full border border-white/[.08] bg-[#121214]/85 p-2 shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]">
+  return <nav aria-label="Navigation principale" className="pointer-events-none fixed inset-x-4 z-30 flex justify-center" style={{ bottom: "max(calc(var(--sab) - 18px), 6px)" }}>
+    <div className="pointer-events-auto flex h-[60px] w-full items-center gap-1 rounded-full border border-white/[.08] bg-[#121214]/85 p-2 shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]">
       {ids.map(id => { const on = id === page; return <motion.button layout transition={spring} key={id} onClick={() => go(id)} aria-label={NAV_L[id]} aria-current={on ? "page" : undefined} whileTap={{ scale: .94 }}
         className={`relative flex h-12 items-center justify-center rounded-full ${on ? "flex-[2.4] text-white" : "flex-1 text-white/55 hover:text-white/80"}`}>
         {on && <motion.span layoutId="tab-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}
@@ -241,14 +241,13 @@ function Rec() {
   const TRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</span>} s={`${x.tag || x.topic} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={c} onClick={() => done(x)} /></div>} />
   const CRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={x.name} s={x.tag || x.topic} r={<span className={tx.cap}>{x.time}</span>} rs={<Chip c={callSt(x)[1]}>{callSt(x)[0]}</Chip>} />
   return <Shell k="rec" fig={<Num n={todo.length} />} sub={`appels à rappeler · ${urg} urgent${urg > 1 ? "s" : ""}`} actions={[
-    { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Play, l: "Écouter", on: () => { if (play) pl.toggle(); modal({ kind: "listen" }) } },
-    { I: PhoneCall, l: "Rappeler", on: () => modal({ kind: "callbacks" }) }, { I: Sparkles, l: "Assistant", on: () => setChat(true) }]}>
+    { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
+    { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Sparkles, l: "Assistant", on: () => setChat(true) }]}>
     <Col><Section t="À rappeler" aside={todoS.length ? `${todoS.length} client${todoS.length > 1 ? "s" : ""}` : undefined}><List I={Check} empty="Personne à rappeler. Tout est à jour.">{todoS.map(TRow)}</List></Section>
       {cur && <Section t="Dernier débrief" more={() => open(cur)}><Card className="overflow-hidden"><Row first label={cur.topic} onClick={() => open(cur)} lead={<Av n={cur.name} />} t={cur.topic} s={cur.short || cur.name} r={<span className={tx.cap}>{cur.at || cur.time}</span>} />
       <div className="px-4 pb-4 pt-1"><Player p={pl} c={c} onMic={() => setChat(true)} /></div></Card></Section>}</Col>
     <Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section>
-      <Section t="Hier" aside={`${hier.length} appels`}><List empty="Aucun appel">{hier.map(CRow)}</List></Section>
-      <Section t="Contacts" more={() => modal({ kind: "contacts" })} moreL={`Tout voir (${cts.length})`}><List empty="Aucun contact">{[...cts].sort((a, b) => b.last.localeCompare(a.last)).slice(0, 4).map((x, i) => <CtRow key={x.key} x={x} first={i === 0} onOpen={() => modal({ kind: "client", data: { name: x.name } })} />)}</List></Section></Col>
+</Col>
   </Shell>
 }
 
@@ -433,7 +432,7 @@ function Sheet({ title, sub, onClose, children, c, footer }: any) {
   const { desk } = useC()
   useEffect(() => { const f = (e: KeyboardEvent) => e.key === "Escape" && onClose(); addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [onClose])
   return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-center justify-center" : "items-end"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-label={title} onClick={e => e.stopPropagation()} initial={desk ? { scale: .97, opacity: 0 } : { y: 40, opacity: 0 }} animate={desk ? { scale: 1, opacity: 1 } : { y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 260, damping: 26 }} className={`w-full border-white/[.08] bg-[#121214] shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] ${desk ? "max-h-[86dvh] max-w-[480px] rounded-[24px] border" : "max-h-[90dvh] rounded-t-[24px] border-t"} ${footer ? "relative flex flex-col overflow-hidden" : desk ? "overflow-y-auto p-6" : "overflow-y-auto px-5 pt-3"}`} style={desk || footer ? {} : { paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+    <motion.div role="dialog" aria-label={title} onClick={e => e.stopPropagation()} initial={desk ? { scale: .97, opacity: 0 } : { y: 40, opacity: 0 }} animate={desk ? { scale: 1, opacity: 1 } : { y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 340, damping: 32, mass: .9 }} className={`w-full border-white/[.08] bg-[#121214] shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] ${desk ? "max-h-[86dvh] max-w-[480px] rounded-[24px] border" : "max-h-[90dvh] rounded-t-[24px] border-t"} ${footer ? "relative flex flex-col overflow-hidden" : desk ? "overflow-y-auto p-6" : "overflow-y-auto px-5 pt-3"}`} style={desk || footer ? {} : { paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
       <div className={footer ? `min-h-0 flex-1 overflow-y-auto ${desk ? "px-6 pt-6" : "px-5 pt-3"}` : "contents"} style={footer ? { paddingBottom: desk ? 104 : "calc(112px + env(safe-area-inset-bottom))" } : {}}>
       {!desk && <div className="mx-auto mb-4 h-[5px] w-9 rounded-full bg-white/20" />}
       <div className="mb-6 flex items-center gap-3">{c && <Circ><Blob c={c} s={20} /></Circ>}<div className="min-w-0"><div className={`truncate ${tx.title}`}>{title}</div>{sub && <div className={`truncate ${tx.cap}`}>{sub}</div>}</div><button aria-label="Fermer" onClick={onClose} className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/70 hover:text-white"><X size={IS} strokeWidth={SW} /></button></div>
@@ -444,13 +443,18 @@ const Sub = ({ children, dot }: any) => dot ? <Chip c={dot}>{children}</Chip> : 
 const LRow = ({ children, onClick, first }: any) => <div onClick={onClick} className={`flex min-h-[48px] items-center gap-3 text-[14px] ${onClick ? "cursor-pointer" : ""} ${first ? "" : "border-t border-white/[.05]"}`}>{children}</div>
 const CallPlayer = ({ dur, onMic }: { dur?: string; onMic: () => void }) => { const p = usePlayer(secs(dur)); return <Card className="mb-5 p-4"><Player p={p} c={A.rec.c} onMic={onMic} compact /></Card> }
 /* Ligne « à écouter » : un seul enregistrement joue à la fois */
-function ListenRow({ x, first, cur, setCur }: { x: Call; first?: boolean; cur: string | null; setCur: (id: string | null) => void }) {
-  const p = usePlayer(secs(x.dur)), { modal } = useC()
+function ListenRow({ x, first, cur, setCur, acts }: { x: Call; first?: boolean; cur: string | null; setCur: (id: string | null) => void; acts?: boolean }) {
+  const p = usePlayer(secs(x.dur)), { modal, set, toast } = useC()
   useEffect(() => { if (cur !== x.id && p.play) p.toggle() }, [cur])
   const pp = { ...p, toggle: () => { if (!p.play) setCur(x.id); p.toggle() } }
   return <div className={`px-5 py-3.5 ${first ? "" : "border-t border-white/[.05]"}`}>
-    <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}</div></div><span className={`shrink-0 ${tx.cap}`}>{x.day ? "hier " : ""}{x.time}</span></div>
-    <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div></div>
+    <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}</div></div>{acts ? <div className="flex shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => { if (x.callback) { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) } }} /></div> : <span className={`shrink-0 ${tx.cap}`}>{x.day ? "hier " : ""}{x.time}</span>}</div>
+    {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? "Hier " : ""}{x.time}</div>}{x.dur && x.dur !== "0:00" ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
+}
+function CallsList({ todo, rest }: { todo: Call[]; rest: Call[] }) {
+  const [cur, setCur] = useState<string | null>(null)
+  const G = ({ t, l }: { t: string; l: Call[] }) => l.length ? <><div className="px-0 pb-2 pt-4 text-[12px] font-medium uppercase tracking-[.06em] text-white/40">{t}</div><div className="-mx-5 bg-black/20">{l.map((x, i) => <ListenRow key={x.id} x={x} first={i === 0} cur={cur} setCur={setCur} acts />)}</div></> : null
+  return <><G t="À rappeler" l={todo} /><G t="Autres appels" l={rest} /></>
 }
 function ListenList() {
   const { s } = useC(), [cur, setCur] = useState<string | null>(null)
@@ -510,6 +514,8 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>SMS</option><option>Appel</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "listen") { const n = s.calls.filter(x => x.dur && x.dur !== "0:00").length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""} · démo`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
+  if (m.kind === "calls") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent)), rest = s.calls.filter(x => !x.callback)
+    return <Sheet title="Appels" sub={`${todo.length} à rappeler · ${s.calls.length} appels au total`} c={A.rec.c} onClose={close}><CallsList todo={todo} rest={rest} /></Sheet> }
   if (m.kind === "callbacks") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent))
     const done = (x: Call) => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) }
     return <Sheet title="À rappeler" sub={`${todo.length} client${todo.length > 1 ? "s" : ""} · ${todo.filter(x => x.urgent).length} urgent${todo.filter(x => x.urgent).length > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}>{todo.length ? <div className="-mx-5 bg-black/20">{todo.map((x, i) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</span>} s={`${x.tag || x.topic} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => done(x)} /></div>} />)}</div> : <div className={`py-8 text-center ${tx.cap}`}>Personne à rappeler. Tout est à jour.</div>}</Sheet> }
@@ -627,10 +633,10 @@ function AknoApp() {
   const ctx: Ctx = { s, set: setS, desk, page, go, modal: setM, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ }
   const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP }[page]
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
-    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><Pg /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><Pg /><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
+      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0, y: 8, scale: .995 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: .22, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
-    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[100px]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
+    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
 }
 
