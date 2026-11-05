@@ -2,7 +2,7 @@ import DevisPaper from "./DevisPaper"
 import { buildDoc } from "../lib/devisDoc"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
-import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { Component, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
 import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users } from "lucide-react"
 import { BLOB } from "./blobPath"
@@ -155,7 +155,7 @@ function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: 
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
 const meName = (s: St) => s.settings.name?.trim() || s.settings.company?.trim() || s.settings.email?.split("@")[0] || "Mon compte"
-const meIniS = (s: St): string => { const p = s.settings.name?.trim(), c = s.settings.company?.trim(); return p && c && meIni(p).length < 2 ? (p[0] + meIni(c)[0]).toUpperCase() : meIniS(s) }
+const meIniS = (s: St): string => { const p = s.settings.name?.trim(), c = s.settings.company?.trim(); return p && c && meIni(p).length < 2 ? (p[0] + meIni(c)[0]).toUpperCase() : meIni(meName(s)) }
 const meIni = (n: string) => n.replace(/^(M\.|Mme)\s*/, "").split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase()
 /* Avatar initiales du profil (remplace l'icône réglages) */
 const Me = ({ size = 24, on }: { size?: number; on?: boolean }) => { const { s } = useC(), n = meName(s); return <span aria-hidden className="flex shrink-0 select-none items-center justify-center rounded-full font-semibold leading-none tracking-normal" style={{ width: size, height: size, fontSize: size >= 24 ? 10.5 : 9.5, background: on ? "#FFFFFF" : "#2C2C2E", color: on ? "#000" : "rgba(255,255,255,.72)", paddingTop: .5, fontFeatureSettings: '"case" 1' }}>{meIniS(s)}</span> }
@@ -662,7 +662,14 @@ function AknoApp() {
 
 const noop = () => () => {}
 /** Rendu client uniquement : localStorage et matchMedia ne sont lus qu'après le montage (aucune erreur d'hydratation). */
-export default function AknoRoot() {
+class Boundary extends Component<{ children: ReactNode }, { err: boolean }> {
+  state = { err: false }
+  static getDerivedStateFromError() { return { err: true } }
+  componentDidCatch(e: unknown) { console.error("Akno crash", e) }
+  render() { return this.state.err ? <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-black px-6 text-center text-white"><p className="text-[15px] text-white/60">Un problème est survenu.</p><button onClick={() => location.reload()} className="h-[52px] rounded-full bg-white px-8 text-[16px] font-semibold text-black">Recharger</button></div> : this.props.children }
+}
+export default function AknoRoot() { return <Boundary><AknoRootInner /></Boundary> }
+function AknoRootInner() {
   const ready = useSyncExternalStore(noop, () => true, () => false), [ses, setSes] = useState<Session | null | undefined>(undefined)
   useEffect(() => { supabase.auth.getSession().then(({ data }) => setSes(data.session)); const { data } = supabase.auth.onAuthStateChange((_e, x) => setSes(x)); return () => data.subscription.unsubscribe() }, [])
   const [rec, setRec] = useState(() => new URLSearchParams(location.search).has("reset"))

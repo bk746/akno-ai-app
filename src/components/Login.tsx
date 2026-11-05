@@ -13,10 +13,11 @@ export default function Login({ mode: m0 = "login", onDone }: { mode?: "login" |
     e.preventDefault(); setMsg(null)
     if (mode === "reset" && (pw.length < 8 || pw !== pw2)) return setMsg({ t: pw.length < 8 ? "8 caractères minimum." : "Les mots de passe ne correspondent pas." })
     setBusy(true)
+    try {
     if (mode === "login") { const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw }); if (error) setMsg({ t: "E-mail ou mot de passe incorrect." }) }
     else if (mode === "forgot") { const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin + "/app?reset=1" }); setMsg(error ? { t: "Impossible d'envoyer l'e-mail. Réessayez." } : { t: "E-mail envoyé. Ouvrez le lien pour choisir un nouveau mot de passe.", ok: true }) }
     else { const { error } = await supabase.auth.updateUser({ password: pw }); if (error) setMsg({ t: "Impossible d'enregistrer ce mot de passe." }); else onDone?.() }
-    setBusy(false)
+    } catch { setMsg({ t: "Connexion impossible. Vérifiez votre réseau." }) } finally { setBusy(false) }
   }
   const sub = mode === "login" ? "Connectez-vous à votre espace" : mode === "forgot" ? "Recevez un lien pour réinitialiser votre mot de passe" : "Choisissez un nouveau mot de passe"
   return <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-black px-6 text-white">
