@@ -4,11 +4,13 @@ import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } 
 import { useLocation, useNavigate } from "react-router-dom"
 import { Component, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
-import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users } from "lucide-react"
+import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
 import { supabase } from "../lib/supabase"
 import Login from "./Login"
+import { LockScreen, LockSetup } from "./Lock"
+import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
 import type { Session } from "@supabase/supabase-js"
 import type { Client, St, Devis, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
 
@@ -412,6 +414,9 @@ function Dev() {
 /* ---------------- Paramètres ---------------- */
 function SetP() {
   const { s, set, desk, toast, modal } = useC(), st = s.settings
+  const uidL: string = (window as any).__aknoUid || "", lk = hasLock(uidL), [bio, setBio] = useState(() => !!getLock(uidL)?.cred), [canBio, setCanBio] = useState(false)
+  useEffect(() => { bioAvailable().then(setCanBio) }, [])
+  const bioTg = async () => { if (!lk) { toast("Créez d'abord un code d'accès"); return } if (bio) { disableBio(uidL); setBio(false); toast("Face ID désactivé") } else { try { await enableBio(uidL, (window as any).__aknoEmail || ""); setBio(true); toast("Face ID activé") } catch { toast("Face ID non activé") } } }
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
   const demo = () => toast("Démo : réglage non modifiable")
   const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
@@ -426,7 +431,7 @@ function SetP() {
     { I: Phone, l: "Numéro", on: demo }, { I: Clock, l: "Horaires", on: demo }, { I: LifeBuoy, l: "Aide", on: demo }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications push" onClick={() => up(x => ({ ...x, push: !x.push }))} lead={<Ic I={Bell} />} t="Notifications push" s="Appels et devis" r={<Tg on={st.push} onClick={() => up(x => ({ ...x, push: !x.push }))} label="Notifications push" />} /></List></Section>
-      <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
+      <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section></Col>
@@ -677,8 +682,18 @@ function AknoRootInner() {
   useEffect(() => { supabase.auth.getSession().then(({ data }) => setSes(data.session)); const { data } = supabase.auth.onAuthStateChange((_e, x) => setSes(x)); return () => data.subscription.unsubscribe() }, [])
   const [rec, setRec] = useState(() => new URLSearchParams(location.search).has("reset"))
   useEffect(() => { const { data } = supabase.auth.onAuthStateChange(e => { if (e === "PASSWORD_RECOVERY") setRec(true) }); return () => data.subscription.unsubscribe() }, [])
-  if (ses) (window as any).__aknoEmail = ses.user.email
+  if (ses) { (window as any).__aknoEmail = ses.user.email; (window as any).__aknoUid = ses.user.id }
+  const uid = ses?.user.id, [locked, setLocked] = useState(false), [setup, setSetup] = useState(false)
+  // Démarrage à froid avec une session déjà ouverte : verrouiller
+  useEffect(() => { supabase.auth.getSession().then(({ data }) => { if (data.session && hasLock(data.session.user.id)) setLocked(true) }) }, [])
+  // Retour d'arrière-plan après plus de 30 s : verrouiller
+  useEffect(() => { let hid = 0; const f = () => { if (document.hidden) hid = Date.now(); else if (hid && Date.now() - hid > 30000 && uid && hasLock(uid)) setLocked(true) }; document.addEventListener("visibilitychange", f); return () => document.removeEventListener("visibilitychange", f) }, [uid])
+  // Proposer la création du code une seule fois après connexion
+  useEffect(() => { if (uid && !hasLock(uid) && !localStorage.getItem(`akno-lock-asked:${uid}`)) setSetup(true); if (!uid) setLocked(false) }, [uid])
+  useEffect(() => { const f = () => setSetup(true); addEventListener("akno-lock-setup", f); return () => removeEventListener("akno-lock-setup", f) }, [])
   if (!ready || ses === undefined) return <div className="fixed inset-0 bg-black" />
+  if (ses && locked) return <LockScreen uid={ses.user.id} onUnlock={() => setLocked(false)} />
+  if (ses && setup && !rec) return <LockSetup uid={ses.user.id} email={ses.user.email || ""} onDone={() => { localStorage.setItem(`akno-lock-asked:${ses.user.id}`, "1"); setSetup(false) }} />
   if (rec && ses) return <Login mode="reset" onDone={() => { setRec(false); history.replaceState(null, "", "/reception") }} />
   return ses ? <AknoApp key={ses.user.id} /> : <Login />
 }
