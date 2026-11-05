@@ -6,7 +6,10 @@ import { createContext, useContext, useEffect, useRef, useState, useSyncExternal
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
 import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users } from "lucide-react"
 import { BLOB } from "./blobPath"
-import { useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
+import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
+import { supabase } from "../lib/supabase"
+import Login from "./Login"
+import type { Session } from "@supabase/supabase-js"
 import type { Client, St, Devis, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
@@ -96,7 +99,7 @@ const Btn = ({ children, onClick, primary, c, disabled, className = "", ...r }: 
 let CL: Client[] = []
 const ckey = (n: string) => n.replace(/^(M\.|Mme|Chantier)\s*/, "").trim().split(" ").slice(-1)[0].toLowerCase()
 const findC = (n: string) => CL.find(c => c.key === ckey(n))
-const tel = (n: string) => { const f = findC(n); if (f) return f.phone.replace(/ /g, ""); let h = 7; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) % 100000000; return "06" + String(h).padStart(8, "0") }
+const tel = (n: string) => { const p = PHONES.get(n); if (p) return p; const f = findC(n); if (f) return f.phone.replace(/ /g, ""); let h = 7; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) % 100000000; return "06" + String(h).padStart(8, "0") }
 const TBtn = ({ I, label, onClick, href, c, dis }: any) => { const cls = "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-[transform,background] duration-150 active:scale-[.9] disabled:opacity-35", st = c ? { background: c, color: ink(c) === "#fff" && c !== "#E6E6E6" ? "#fff" : "#000" } : { background: "rgba(255,255,255,.09)" }, inner = <I size={16} strokeWidth={SW} />
   return href ? <a data-hit href={href} aria-label={label} title={label} onClick={e => { e.stopPropagation(); onClick?.() }} className={cls} style={st}>{inner}</a> : <button data-hit disabled={dis} aria-label={label} title={label} onClick={e => { e.stopPropagation(); onClick?.() }} className={cls} style={st}>{inner}</button> }
 const Chev = () => <ChevronRight size={IS} strokeWidth={SW} className="text-white/30" />
@@ -407,7 +410,7 @@ function SetP() {
   const { s, set, desk, toast } = useC(), st = s.settings
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
   const demo = () => toast("Démo : réglage non modifiable")
-  const reset = () => { if (confirm("Démo : se déconnecter réinitialise toutes les données de démonstration. Continuer ?")) { set(() => seed()); toast("Démo réinitialisée") } }
+  const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
   const TVA = [10, 20, 5.5], DUR = [0.5, 1, 1.5, 2]
   const tva = `${String(st.tva).replace(".", ",")} %`, dur = durF(st.duree)
   const cycT = () => up(x => ({ ...x, tva: TVA[(TVA.indexOf(x.tva) + 1) % TVA.length] })), cycD = () => up(x => ({ ...x, duree: DUR[(DUR.indexOf(x.duree) + 1) % DUR.length] }))
@@ -646,6 +649,8 @@ function AknoApp() {
 const noop = () => () => {}
 /** Rendu client uniquement : localStorage et matchMedia ne sont lus qu'après le montage (aucune erreur d'hydratation). */
 export default function AknoRoot() {
-  const ready = useSyncExternalStore(noop, () => true, () => false)
-  return ready ? <AknoApp /> : <div className="fixed inset-0 bg-black" />
+  const ready = useSyncExternalStore(noop, () => true, () => false), [ses, setSes] = useState<Session | null | undefined>(undefined)
+  useEffect(() => { supabase.auth.getSession().then(({ data }) => setSes(data.session)); const { data } = supabase.auth.onAuthStateChange((_e, x) => setSes(x)); return () => data.subscription.unsubscribe() }, [])
+  if (!ready || ses === undefined) return <div className="fixed inset-0 bg-black" />
+  return ses ? <AknoApp key={ses.user.id} /> : <Login />
 }

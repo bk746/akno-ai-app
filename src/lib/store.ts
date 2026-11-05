@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react"
-export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string }
+import { useCallback, useEffect, useRef, useState } from "react"
+import { supabase } from "./supabase"
+export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; recording?: string }
 export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean }
 export type RelStatus = "prog" | "pause" | "env" | "rep"
 export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string }
@@ -72,10 +73,72 @@ export const seed = (): St => ({
   ],
   lastRel: { client: "Clément Dubois", type: "Avis Google", time: "10:12", canal: "SMS" },
 })
-const KEY = "akno-demo-v7"
+const KEY = "akno-local-v8" // seulement clients, relances, chat et réglages locaux (pas encore en base)
+const DEV_ST: DevStatus[] = ["aval", "brouillon", "att", "env", "val", "ref"]
+const isUuid = (x: string) => /^[0-9a-f-]{36}$/i.test(x)
+const pad = (n: number) => String(n).padStart(2, "0")
+const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const hm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>
+/** Numéros réels des appelants, par nom (utilisé par les boutons Appeler / SMS). */
+export const PHONES = new Map<string, string>()
+const toCall = (r: Row): Call => {
+  const d = new Date(r.created_at), today = isoDay(d) === isoDay(new Date()), name = r.nom_client || r.telephone_client || "Inconnu", note = r.resume || r.besoin_detail || r.notes || ""
+  if (r.telephone_client) PHONES.set(name, String(r.telephone_client).replace(/\s/g, ""))
+  const u = String(r.urgence || "").toLowerCase(), sec = r.duration || 0
+  const tr = typeof r.transcript === "string" ? r.transcript.split("\n").map((l: string) => l.match(/^\s*(Agent|User|Client|Akno)\s*:\s*(.*)$/i)).filter((m: RegExpMatchArray | null): m is RegExpMatchArray => !!m).map((m: RegExpMatchArray) => [/agent|akno/i.test(m[1]) ? "Akno" : "Client", m[2]] as [string, string]) : undefined
+  return { id: String(r.id), name, topic: r.motif || r.type_demande || "Appel", tag: r.motif || undefined, time: hm(d), day: today ? undefined : "Hier", urgent: /urg|haut|high/.test(u), callback: r.statut === "a_rappeler", note, short: note ? `${name} · ${note}` : undefined, besoin: r.besoin_detail || undefined, urgence: r.urgence || undefined, addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, suite: r.notes || undefined, dur: sec ? `${Math.floor(sec / 60)}:${pad(sec % 60)}` : undefined, transcript: tr?.length ? tr : undefined, phone: r.telephone_client || undefined, recording: r.recording_url || undefined }
+}
+const toEv = (r: Row): Ev => { const a = new Date(r.start), b = r.end ? new Date(r.end) : new Date(a.getTime() + 3600e3); return { id: r.id, date: isoDay(a), start: a.getHours() + a.getMinutes() / 60, dur: Math.max(.25, (b.getTime() - a.getTime()) / 3600e3), name: r.client || "Client", topic: r.title || "", addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1, ai: r.call_id != null } }
+const evRow = (e: Ev) => { const a = new Date(`${e.date}T00:00:00`); a.setMinutes(Math.round(e.start * 60)); const b = new Date(a.getTime() + e.dur * 3600e3); return { title: e.topic, client: e.name, start: a.toISOString(), end: b.toISOString(), adresse: e.addr ?? null } }
+const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: DEV_ST.includes(r.statut) ? r.statut : "brouillon", amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined })
+const devRow = (d: Devis, tva: number) => { const ttc = d.lines?.length ? d.lines.reduce((t, l) => t + l.q * l.pu, 0) * (1 + tva / 100) : d.amount; return { numero: String(d.num), client_nom: d.client, objet: d.objet, statut: d.status, lignes: d.lines ?? [], total_ttc: Math.round(ttc * 100) / 100, total_ht: Math.round(ttc / (1 + tva / 100) * 100) / 100, tva_taux: tva } }
+
+const empty = (): St => { const s = seed(); const loc = (() => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") } catch { return {} } })(); return { ...s, calls: [], events: [], devis: [], ...loc, settings: { ...s.settings, ...(loc.settings || {}) } } }
+
+/** Données de l'artisan connecté : appels, rendez-vous, devis et profil viennent de Supabase (RLS = artisan_id = auth.uid()). */
 export function useStore() {
-  const [s, setS] = useState<St>(() => { try { const v = localStorage.getItem(KEY); if (v) return { ...seed(), ...JSON.parse(v) } } catch { } return seed() })
-  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(s)) } catch { } }, [s])
-  return [s, setS] as const
+  const [s, setRaw] = useState<St>(empty), [loading, setLoading] = useState(true), uidRef = useRef<string | null>(null), cur = useRef(s)
+  cur.current = s
+  useEffect(() => { try { const { clients, rels, chat, lastRel, settings } = s; localStorage.setItem(KEY, JSON.stringify({ clients, rels, chat, lastRel, settings })) } catch { } }, [s])
+  const load = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser(); if (!user) return
+    uidRef.current = user.id
+    const [c, a, d, p] = await Promise.all([
+      supabase.from("calls").select("*").order("created_at", { ascending: false }).limit(200),
+      supabase.from("appointments").select("*").order("start"),
+      supabase.from("devis").select("*").order("created_at", { ascending: false }),
+      supabase.from("artisans").select("prenom,nom_entreprise,entreprise_nom").eq("id", user.id).maybeSingle()])
+    if (!p.data && !p.error) await supabase.from("artisans").insert({ id: user.id, email: user.email })
+    const dv = d.data || []
+    setRaw(x => ({ ...x, calls: (c.data || []).map(toCall), events: (a.data || []).map(toEv), devis: dv.map((r, i) => toDev(r, i, dv.length)), settings: { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company } }))
+    setLoading(false)
+  }, [])
+  useEffect(() => {
+    load()
+    const ch = supabase.channel("akno-live").on("postgres_changes", { event: "*", schema: "public", table: "calls" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => load()).subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [load])
+  const sync = useCallback(async (p: St, n: St) => {
+    const me = uidRef.current; if (!me) return
+    const jobs: PromiseLike<unknown>[] = []
+    if (p.calls !== n.calls) for (const c of n.calls) { const o = p.calls.find(x => x.id === c.id); if (o && o.callback !== c.callback) jobs.push(supabase.from("calls").update({ statut: c.callback ? "a_rappeler" : "rappele" }).eq("id", Number(c.id))) }
+    if (p.events !== n.events) {
+      for (const e of n.events) { const o = p.events.find(x => x.id === e.id); if (!o) jobs.push(supabase.from("appointments").insert({ ...evRow(e), artisan_id: me })); else if (o !== e && isUuid(e.id)) jobs.push(supabase.from("appointments").update(evRow(e)).eq("id", e.id)) }
+      for (const o of p.events) if (isUuid(o.id) && !n.events.some(x => x.id === o.id)) jobs.push(supabase.from("appointments").delete().eq("id", o.id))
+    }
+    if (p.devis !== n.devis) {
+      for (const d of n.devis) { const o = p.devis.find(x => x.id === d.id); if (!o) jobs.push(supabase.from("devis").insert({ ...devRow(d, n.settings.tva), artisan_id: me })); else if (o !== d && isUuid(d.id)) jobs.push(supabase.from("devis").update(devRow(d, n.settings.tva)).eq("id", d.id)) }
+      for (const o of p.devis) if (isUuid(o.id) && !n.devis.some(x => x.id === o.id)) jobs.push(supabase.from("devis").delete().eq("id", o.id))
+    }
+    if (p.settings.name !== n.settings.name || p.settings.company !== n.settings.company) jobs.push(supabase.from("artisans").update({ prenom: n.settings.name ?? null, nom_entreprise: n.settings.company ?? null }).eq("id", me))
+    const res = await Promise.all(jobs) as { error?: unknown }[]
+    if (res.some(r => r?.error)) console.error("Supabase sync", res.filter(r => r?.error))
+    // recharge si une ligne a été créée (récupère les vrais identifiants)
+    if (n.events.some(e => !isUuid(e.id)) || n.devis.some(d => !isUuid(d.id))) load()
+  }, [load])
+  const setS = useCallback((u: St | ((x: St) => St)) => { const p = cur.current, n = typeof u === "function" ? u(p) : u; cur.current = n; setRaw(n); sync(p, n) }, [sync])
+  return [s, setS, loading] as const
 }
 export const eur = (n: number) => n.toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, " ") + " €"
