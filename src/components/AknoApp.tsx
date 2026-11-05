@@ -35,7 +35,7 @@ const ttc = (ht: number, tv: number) => Math.round(ht * (1 + tv / 100))
 const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"] }
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
-type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev"; data?: any } | null
+type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw"; data?: any } | null
 type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void }
 const C = createContext<Ctx>(null as any)
 const useC = () => useContext(C)
@@ -154,10 +154,11 @@ function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: 
     <div className="mt-5 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
-const meName = (s: St) => s.settings.name?.trim() || "Thomas Rousseau"
+const meName = (s: St) => s.settings.name?.trim() || s.settings.company?.trim() || s.settings.email?.split("@")[0] || "Mon compte"
+const meIniS = (s: St): string => { const p = s.settings.name?.trim(), c = s.settings.company?.trim(); return p && c && meIni(p).length < 2 ? (p[0] + meIni(c)[0]).toUpperCase() : meIniS(s) }
 const meIni = (n: string) => n.replace(/^(M\.|Mme)\s*/, "").split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase()
 /* Avatar initiales du profil (remplace l'icône réglages) */
-const Me = ({ size = 24, on }: { size?: number; on?: boolean }) => { const { s } = useC(), n = meName(s); return <span aria-hidden className="flex shrink-0 select-none items-center justify-center rounded-full font-semibold leading-none tracking-normal" style={{ width: size, height: size, fontSize: size >= 24 ? 10.5 : 9.5, background: on ? "#FFFFFF" : "#2C2C2E", color: on ? "#000" : "rgba(255,255,255,.72)", paddingTop: .5, fontFeatureSettings: '"case" 1' }}>{meIni(n)}</span> }
+const Me = ({ size = 24, on }: { size?: number; on?: boolean }) => { const { s } = useC(), n = meName(s); return <span aria-hidden className="flex shrink-0 select-none items-center justify-center rounded-full font-semibold leading-none tracking-normal" style={{ width: size, height: size, fontSize: size >= 24 ? 10.5 : 9.5, background: on ? "#FFFFFF" : "#2C2C2E", color: on ? "#000" : "rgba(255,255,255,.72)", paddingTop: .5, fontFeatureSettings: '"case" 1' }}>{meIniS(s)}</span> }
 const NI = ({ d, size = 22 }: { d: any; size?: number }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{d}</svg>
 const NAV_I: Record<P, any> = {
   rec: <><path d="M5.5 4.5h3l1.5 4-2 1.25a10 10 0 0 0 6.25 6.25L15.5 14l4 1.5v3a1.5 1.5 0 0 1-1.5 1.5A14.5 14.5 0 0 1 4 6a1.5 1.5 0 0 1 1.5-1.5Z" /></>,
@@ -407,7 +408,7 @@ function Dev() {
 
 /* ---------------- Paramètres ---------------- */
 function SetP() {
-  const { s, set, desk, toast } = useC(), st = s.settings
+  const { s, set, desk, toast, modal } = useC(), st = s.settings
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
   const demo = () => toast("Démo : réglage non modifiable")
   const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
@@ -418,11 +419,11 @@ function SetP() {
   const V = ({ v }: any) => <span className="flex items-center gap-1 text-[15px] text-white/50">{v}<Chev /></span>
   const S = ({ I, l, v, onClick, first }: any) => <Row first={first} label={l} onClick={onClick || demo} lead={<Ic I={I} />} t={l} r={<V v={v} />} />
   const n = agents.filter(a => st.agents[a]).length
-  return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIni(meName(s))}</span>} label={`${meName(s)} · Rousseau Plomberie`} fig={<Num n={n} u="/ 4" />} sub="agents actifs · offre Pro" actions={[
+  return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u="/ 4" />} sub="agents actifs · offre Pro" actions={[
     { I: Phone, l: "Numéro", on: demo }, { I: Clock, l: "Horaires", on: demo }, { I: LifeBuoy, l: "Aide", on: demo }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications push" onClick={() => up(x => ({ ...x, push: !x.push }))} lead={<Ic I={Bell} />} t="Notifications push" s="Appels et devis" r={<Tg on={st.push} onClick={() => up(x => ({ ...x, push: !x.push }))} label="Notifications push" />} /></List></Section>
-      <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
+      <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="04 •• •• •• 18" /><S I={Clock} l="Horaires" v="Lun–Ven 8h–18h" /><S I={AudioLines} l="Voix" v="Claire" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="Ajouté" /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Lyon · 20 km" /></List></Section></Col>
@@ -432,6 +433,18 @@ function SetP() {
 /* ---------------- Feuilles / formulaires (même système visuel) ---------------- */
 const inp = "h-12 w-full rounded-[14px] border border-transparent bg-white/[.07] px-4 text-[15px] text-white outline-none [color-scheme:dark] placeholder:text-white/35 focus:border-white/25"
 const F = ({ l, children }: any) => <label className="block"><span className="mb-2 block px-1 text-[13px] text-white/50">{l}</span>{children}</label>
+function PwSheet({ close }: { close: () => void }) {
+  const { toast } = useC(), [a, setA] = useState(""), [b, setB] = useState(""), [busy, setBusy] = useState(false), [err, setErr] = useState("")
+  const ok = a.length >= 8 && a === b
+  const save = async (e: React.FormEvent) => { e.preventDefault(); if (!ok) return; setBusy(true); const { error } = await supabase.auth.updateUser({ password: a }); setBusy(false); if (error) setErr(error.message.includes("different") ? "Choisissez un mot de passe différent de l'actuel." : "Impossible de changer le mot de passe."); else { toast("Mot de passe modifié"); close() } }
+  return <Sheet title="Changer le mot de passe" c="#FFFFFF" onClose={close}><form onSubmit={save} className="space-y-3">
+    <input type="email" name="username" autoComplete="username" value={(window as any).__aknoEmail || ""} readOnly hidden />
+    <F l="Nouveau mot de passe"><input id="new-password" name="new-password" type="password" autoComplete="new-password" autoFocus className={inp} value={a} onChange={e => { setA(e.target.value); setErr("") }} placeholder="8 caractères minimum" /></F>
+    <F l="Confirmer"><input id="confirm-password" name="confirm-password" type="password" autoComplete="new-password" className={inp} value={b} onChange={e => { setB(e.target.value); setErr("") }} /></F>
+    {(err || (b && a !== b)) && <p className="px-1 text-[13px] text-[#FF453A]">{err || "Les mots de passe ne correspondent pas."}</p>}
+    <button disabled={!ok || busy} className="mt-2 h-12 w-full rounded-full bg-white text-[15px] font-semibold text-black disabled:opacity-40">{busy ? "Enregistrement…" : "Enregistrer"}</button>
+  </form></Sheet>
+}
 function Sheet({ title, sub, onClose, children, c, footer }: any) {
   const { desk } = useC()
   useEffect(() => { const f = (e: KeyboardEvent) => e.key === "Escape" && onClose(); addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [onClose])
@@ -517,6 +530,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     <div className="mt-6 flex gap-2"><Btn className="flex-1" onClick={() => { set(x => ({ ...x, events: x.events.filter(y => y.id !== e.id) })); toast("RDV supprimé"); close() }}><Trash2 size={15} strokeWidth={1.5} />Supprimer</Btn><Btn primary className="flex-1" onClick={close}>Fermer</Btn></div></Sheet> }
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>SMS</option><option>Appel</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
+  if (m.kind === "pw") return <PwSheet close={close} />
   if (m.kind === "listen") { const n = s.calls.filter(x => x.dur && x.dur !== "0:00").length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""} · démo`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
   if (m.kind === "calls") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent)), rest = s.calls.filter(x => !x.callback)
     return <Sheet title="Appels" sub={`${todo.length} à rappeler · ${s.calls.length} appels au total`} c={A.rec.c} onClose={close}><CallsList todo={todo} rest={rest} /></Sheet> }
@@ -651,6 +665,10 @@ const noop = () => () => {}
 export default function AknoRoot() {
   const ready = useSyncExternalStore(noop, () => true, () => false), [ses, setSes] = useState<Session | null | undefined>(undefined)
   useEffect(() => { supabase.auth.getSession().then(({ data }) => setSes(data.session)); const { data } = supabase.auth.onAuthStateChange((_e, x) => setSes(x)); return () => data.subscription.unsubscribe() }, [])
+  const [rec, setRec] = useState(() => new URLSearchParams(location.search).has("reset"))
+  useEffect(() => { const { data } = supabase.auth.onAuthStateChange(e => { if (e === "PASSWORD_RECOVERY") setRec(true) }); return () => data.subscription.unsubscribe() }, [])
+  if (ses) (window as any).__aknoEmail = ses.user.email
   if (!ready || ses === undefined) return <div className="fixed inset-0 bg-black" />
+  if (rec && ses) return <Login mode="reset" onDone={() => { setRec(false); history.replaceState(null, "", "/reception") }} />
   return ses ? <AknoApp key={ses.user.id} /> : <Login />
 }

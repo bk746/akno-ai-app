@@ -13,7 +13,7 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <Routes>
         {PAGES.map(p => <Route key={p} path={`/${p}`} element={<AknoApp />} />)}
-        <Route path="*" element={<Navigate to="/reception" replace />} />
+        <Route path="*" element={<Navigate to={"/reception" + location.search + location.hash} replace />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>
