@@ -26,7 +26,7 @@ const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel"
 const slugOf = (p: P) => p === "set" ? "parametres" : A[p].slug
 const DAYS = ["Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim."]
 const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
-const TODAY = "2026-11-04", NOW = 10.5 // horloge de démo : mercredi 4 novembre, 10:30
+const _now = new Date(), TODAY = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}-${String(_now.getDate()).padStart(2, "0")}`, NOW = _now.getHours() + _now.getMinutes() / 60
 const hh = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, "0")}`
 const dd = (iso: string) => new Date(iso + "T12:00:00")
 const dlabel = (iso: string) => `${DAYS[(dd(iso).getDay() + 6) % 7]} ${dd(iso).getDate()}`
@@ -112,7 +112,7 @@ function Side() {
     <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}</nav>
     <div className={`mt-8 px-3 ${tx.cap}`}>Agents</div>
     <div className="mt-3 space-y-3 px-3">{agents.map(a => <button key={a} onClick={() => go(a)} className="flex w-full items-center gap-3 text-[13px] text-white/70"><Blob c={A[a].c} s={16} />{A[a].n}<span className="ml-auto"><Dot c={s.settings.agents[a] ? GREEN : GREY} /></span></button>)}</div>
-    <div className="mt-auto"><It id="set" l="Paramètres" c="#fff" /><div className="mt-3 flex items-center gap-3 border-t border-white/[.07] px-3 pt-4"><Av n={meName(s)} /><div><div className="text-[13px] font-medium">{meName(s)}</div><div className="text-[12px] text-white/50">Rousseau Plomberie</div></div></div></div>
+    <div className="mt-auto"><It id="set" l="Paramètres" c="#fff" /><div className="mt-3 flex items-center gap-3 border-t border-white/[.07] px-3 pt-4"><Av n={meName(s)} /><div><div className="text-[13px] font-medium">{meName(s)}</div><div className="text-[12px] text-white/50">{s.settings.company || ""}</div></div></div></div>
   </aside>
 }
 const PLUS: Record<K, string> = { rec: "Nouvelle note d'appel", ag: "Nouveau rendez-vous", rel: "Nouvelle relance", dev: "Nouveau devis" }
@@ -144,7 +144,7 @@ function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: 
   const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
   const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-1.5 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`mt-1 ${desk ? "text-[52px]" : "text-[44px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const LB = L && <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block cursor-pointer select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{L}</button>
-  const foot = <div className="py-8 text-center text-[12px] text-white/25">Données de démonstration</div>
+  const foot = null
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0"><QA items={actions} /></div></motion.div><div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div>{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
     <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
@@ -356,7 +356,8 @@ function Ag() {
 }
 
 /* ---------------- Relance ---------------- */
-const PERF = [40, 44, 43, 50, 55, 58, 64]
+const wkAgo = (iso?: string) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 6048e5) : 99
+const perf = (rels: Rel[]) => { const v = Array.from({ length: 7 }, (_, i) => { const w = rels.filter(r => wkAgo(r.at) === 6 - i && (r.status === "env" || r.status === "rep")); return w.length ? Math.round(w.filter(r => r.status === "rep").length / w.length * 100) : 0 }); const all = rels.filter(r => r.status === "env" || r.status === "rep"); return { v, rate: all.length ? `${Math.round(all.filter(r => r.status === "rep").length / all.length * 100)} %` : "—" } }
 const canalI: Record<string, any> = { SMS: MessageSquareText, Appel: Phone, "E-mail": Send }
 function RelP() {
   const { s, set, modal, q, toast } = useC(), c = A.rel.c, on = s.settings.agents.rel
@@ -370,18 +371,20 @@ function RelP() {
     { I: Plus, l: "Nouvelle", on: () => modal({ kind: "rel" }) }, { I: Send, l: "Envoyer", on: () => nx && modal({ kind: "relView", data: nx }), dis: !nx },
     { I: on ? Pause : Play, l: on ? "Pause" : "Activer", on: tg }, { I: Repeat2, l: "Historique", on: () => modal({ kind: "relList" }) }]}>
     <Col><Section t="À envoyer" more={() => modal({ kind: "relList" })}><List I={Check} empty="Aucune relance en attente.">{rels.filter(r => r.status === "prog" || r.status === "pause").map(QRow)}</List></Section>
-      <Section t="Performance" aside="7 semaines"><Chart c={c} label="Taux de réponse" value="64 %" v={PERF} l={["S1", "S2", "S3", "S4", "S5", "S6", "S7"]} sel={6} /></Section></Col>
+      <Section t="Performance" aside="7 semaines"><Chart c={c} label="Taux de réponse" value={perf(s.rels).rate} v={perf(s.rels).v} l={["S1", "S2", "S3", "S4", "S5", "S6", "S7"]} sel={6} /></Section></Col>
     <Col><Section t="Récentes"><List empty="Aucune relance envoyée">{rels.filter(r => r.status === "env" || r.status === "rep").map(RRow)}</List></Section></Col>
   </Shell>
 }
 
 /* ---------------- Devis ---------------- */
-const PAST = [2100, 3400, 2800, 4600, 3900]
+const MO = ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"]
 function Dev() {
   const { s, set, modal, q, toast } = useC(), c = A.dev.c
   const ds = [...s.devis].filter(d => match(q, d.client, d.objet, String(d.num))).sort((a, b) => b.num - a.num)
   const val = s.devis.filter(d => d.status === "val"), sent = s.devis.filter(d => d.status !== "brouillon")
-  const cur = val.reduce((a, d) => a + d.amount, 0), m = [...PAST, cur], tot = m.reduce((a, b) => a + b, 0)
+  const now = new Date(), mk = (k: number) => { const d = new Date(now.getFullYear(), now.getMonth() - 5 + k, 1); return [d.getFullYear(), d.getMonth()] }
+  const inM = (d: Devis, k: number) => { if (!d.at) return k === 5; const a = new Date(d.at), [y, mo] = mk(k); return a.getFullYear() === y && a.getMonth() === mo }
+  const m = Array.from({ length: 6 }, (_, k) => val.filter(d => inM(d, k)).reduce((a, d) => a + d.amount, 0)), cur = m[5], tot = m.reduce((a, b) => a + b, 0), mL = Array.from({ length: 6 }, (_, k) => MO[mk(k)[1]])
   const pend = [...s.devis].sort((a, b) => b.num - a.num).find(d => d.status === "brouillon")
   const sendD = (d?: Devis) => { if (!d) return; const snap = s; set(x => ({ ...x, devis: x.devis.map(y => y.id === d.id ? { ...y, status: "env" } : y) })); toast(`Devis ${d.num} envoyé à ${d.client}`, () => set(() => snap)) }
   const send = () => sendD(pend)
@@ -401,7 +404,7 @@ function Dev() {
     { I: Repeat2, l: "Relancer", on: () => modal({ kind: "rel", data: { name: (s.devis.find(d => d.status === "env") || pend)?.client || "" } }) }, { I: ArrowUp, l: "Exporter", on: exp }]}>
     {avalS && (desk ? <div className="col-span-2">{avalS}</div> : avalS)}
     <Col><Section t="À suivre" aside={todo.length ? `${todo.length} devis` : undefined}><List I={Check} empty="Aucun devis en attente.">{todo.map(FRow)}</List></Section>
-      <Section t="Montant validé" aside="6 derniers mois"><Chart c={c} label="Total" value={eur(tot)} v={m} l={["Avr", "Mai", "Juin", "Juil", "Août", "Sept"]} sel={5} /></Section></Col>
+      <Section t="Montant validé" aside="6 derniers mois"><Chart c={c} label="Total" value={eur(tot)} v={m} l={mL} sel={5} /></Section></Col>
     <Col><Section t="Tous les devis" more={() => modal({ kind: "devisList" })}><List>{ds.map(DRow)}</List></Section></Col>
   </Shell>
 }
@@ -424,9 +427,9 @@ function SetP() {
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications push" onClick={() => up(x => ({ ...x, push: !x.push }))} lead={<Ic I={Bell} />} t="Notifications push" s="Appels et devis" r={<Tg on={st.push} onClick={() => up(x => ({ ...x, push: !x.push }))} label="Notifications push" />} /></List></Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
-    <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="04 •• •• •• 18" /><S I={Clock} l="Horaires" v="Lun–Ven 8h–18h" /><S I={AudioLines} l="Voix" v="Claire" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
-      <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="Ajouté" /></List></Section>
-      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Lyon · 20 km" /></List></Section></Col>
+    <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
+      <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
+      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section></Col>
   </Shell>
 }
 
@@ -495,11 +498,11 @@ function ClientSheet({ name, callId, close }: { name: string; callId?: string; c
     ...rels.map(r => ({ t: `${r.type} · ${r.canal}`, w: `${r.date} · ${RS[r.status][0]}`, I: Send, o: 2 })),
     ...devis.map(d => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0], I: Receipt, o: 3 }))].sort((a, b) => a.o - b.o)
   const H = ({ children }: any) => <div className="mb-2 mt-6 px-1 text-[13px] font-medium text-white/45">{children}</div>
-  return <Sheet title="Fiche client" sub="Données de démonstration" c={A.rec.c} onClose={close}>
+  return <Sheet title="Fiche client" c={A.rec.c} onClose={close}>
     <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1"><Chip c={st[1]}>{st[0]}</Chip></div></div></div>
     <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}{cl?.email ? <CQA I={Mail} l="E-mail" href={`mailto:${cl.email}`} /> : <span />}</div>
     <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{cl?.email && <KV I={Mail} l="E-mail" v={cl.email} href={`mailto:${cl.email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
-    {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative · démo</span></div>}
+    {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative</span></div>}
     {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div><p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{call.dur && call.dur !== "0:00" && <div className="mt-3"><CallInline dur={call.dur} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
     {(devis.length > 0 || evs.length > 0) && <><H>Devis et rendez-vous</H><div className="overflow-hidden rounded-[20px] bg-white/[.04]">
       {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisEdit", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
@@ -531,7 +534,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>SMS</option><option>Appel</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
-  if (m.kind === "listen") { const n = s.calls.filter(x => x.dur && x.dur !== "0:00").length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""} · démo`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
+  if (m.kind === "listen") { const n = s.calls.filter(x => x.dur && x.dur !== "0:00").length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
   if (m.kind === "calls") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent)), rest = s.calls.filter(x => !x.callback)
     return <Sheet title="Appels" sub={`${todo.length} à rappeler · ${s.calls.length} appels au total`} c={A.rec.c} onClose={close}><CallsList todo={todo} rest={rest} /></Sheet> }
   if (m.kind === "callbacks") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent))
@@ -559,7 +562,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     return <Sheet title={`Devis N° ${dv.num}`} sub={dv.status === "aval" ? "Généré par Akno · à valider" : ST[dv.status][0]} c={A.dev.c} onClose={close} footer={dv.status === "aval" ? <div className="flex gap-2"><Btn className="flex-1" onClick={() => modal({ kind: "devisEdit", data: dv })}>Modifier</Btn><Btn primary c={A.dev.c} className="flex-[1.6]" onClick={validate}><Check size={16} />Valider</Btn></div> : <Btn className="w-full" onClick={close}>Fermer</Btn>}>
       <DevisPaper d={doc} />
       <div className="mt-3"><Btn className="w-full" onClick={() => import("../lib/devisPdf").then(x => { x.downloadPdf(doc); toast(`Devis-${dv.num}.pdf téléchargé`) })}><Download size={15} strokeWidth={1.5} />Télécharger PDF</Btn></div>
-      {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"} · données de démonstration</div>}
+      {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
     </Sheet> }
   if (m.kind === "devisEdit") { const dv = s.devis.find(x => x.id === d.id) || d as Devis; const setS = (st: DevStatus) => { set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: st } : y) })); toast(`Devis ${dv.num} : ${ST[st][0]}`) }
     return <Sheet title={`Devis N° ${dv.num}`} sub={`${dv.client} · ${dv.objet}`} c={A.dev.c} onClose={close}><div className={`text-[40px] ${tx.fig}`}>{eur(dv.amount)}</div><div className="mt-2"><Sub>HT · {eur(Math.round(dv.amount * (1 + s.settings.tva / 100)))} TTC (TVA {String(s.settings.tva).replace(".", ",")} %)</Sub></div>

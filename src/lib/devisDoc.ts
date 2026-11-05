@@ -1,10 +1,15 @@
 
-/* Données d'entreprise : PLACEHOLDERS DE DÉMONSTRATION, à remplacer par les vraies données de l'artisan */
+/* Données d'entreprise : remplies depuis le profil artisan (table artisans) au chargement */
 export const CO = {
-  name: "Rousseau Plomberie (exemple)", owner: "Thomas Rousseau", form: "EI · Entreprise individuelle",
-  addr: "1 rue de l'Exemple", city: "69000 Lyon", phone: "04 00 00 00 00", email: "contact@exemple.fr",
-  siret: "000 000 000 00000", tva: "FR00 000000000", rm: "RM Lyon 000 000 000 (exemple)", ape: "4322A",
-  ins: { by: "Assureur Exemple SA", pol: "N° 0000000000", zone: "France métropolitaine", addr: "1 avenue de l'Assurance, 75000 Paris" },
+  name: "", owner: "", form: "",
+  addr: "", city: "", phone: "", email: "",
+  siret: "", tva: "", rm: "", ape: "",
+  ins: { by: "", pol: "", zone: "", addr: "" },
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function setCO(a: Record<string, any>) {
+  Object.assign(CO, { name: a.entreprise_nom || a.nom_entreprise || "", owner: a.prenom || "", form: a.entreprise_forme || "", addr: a.entreprise_adresse || "", city: a.entreprise_cp_ville || "", phone: a.entreprise_telephone || a.telephone || "", email: a.entreprise_email || a.email || "", siret: a.entreprise_siret || "", tva: a.entreprise_tva || "", rm: a.entreprise_rcs_rm || "" })
+  Object.assign(CO.ins, { by: a.assurance_nom || "", pol: a.assurance_numero || "", zone: a.assurance_zone || "" })
 }
 export type DLine = { l: string; q: number; u: string; pu: number; tv: number }
 export type DDoc = { num: number; date: string; valid: string; client: { name: string; addr?: string; phone?: string }; site: string; objet: string; lines: DLine[]; acompte: number }

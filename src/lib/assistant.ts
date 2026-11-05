@@ -106,7 +106,7 @@ const evsOf = (s: St, c: CRef) => s.events.filter(e => sameClient(e.name, c)).so
 const upcoming = (s: St, ctx: Ctx) => s.events.filter(e => e.date > ctx.today || (e.date === ctx.today && e.start + e.dur > ctx.now)).sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start)
 const monday = (d: string) => addDays(d, -((dd(d).getDay() + 6) % 7))
 
-export const HELP_CHIPS = ["Résumé de ma journée", "Qui dois-je rappeler ?", "Mes RDV de demain", "Devis à valider", "Crée un RDV avec M. Petit jeudi à 14h", "Fais un devis pour Karim Benali, 850 €"]
+export const HELP_CHIPS = ["Résumé de ma journée", "Qui dois-je rappeler ?", "Mes RDV de demain", "Devis à valider", "Crée un RDV jeudi à 14h", "Fais un devis de 850 €"]
 
 /* ---------- Moteur ---------- */
 export function answer(raw: string, s: St, ctx: Ctx): Reply {
@@ -133,7 +133,7 @@ function route(raw: string, n: string, s: St, ctx: Ctx): Reply {
   /* --- Politesse & aide --- */
   if (has(/^(merci|super|parfait|top|genial|ok merci)\b/)) return { intent: "thanks", text: "Avec plaisir. Autre chose ?", chips: HELP_CHIPS.slice(0, 3) }
   if (has(/(que (peux|sais)[- ]tu|tu (peux|sais) faire|aide|help|comment (ca marche|t'utiliser|tu marches)|quelles? (questions|commandes))/)) return help()
-  if (has(/^(bonjour|salut|hello|coucou|bonsoir|hey)\b/) && n.split(" ").length <= 3) return { intent: "hello", text: `Bonjour ${(ctx.me || "Thomas").split(" ")[0]}. Je peux résumer votre journée, créer un RDV ou un devis, relancer un client… Que voulez-vous faire ?`, chips: HELP_CHIPS.slice(0, 4) }
+  if (has(/^(bonjour|salut|hello|coucou|bonsoir|hey)\b/) && n.split(" ").length <= 3) return { intent: "hello", text: `Bonjour ${(ctx.me || "").split(" ")[0]}. Je peux résumer votre journée, créer un RDV ou un devis, relancer un client… Que voulez-vous faire ?`, chips: HELP_CHIPS.slice(0, 4) }
 
   /* --- Actions --- */
   const verbCreate = /\b(cree|creer|ajoute|ajouter|prends?|prendre|planifie|planifier|programme|programmer|fixe|fixer|cale|caler|mets?|mettre|bloque|nouveau|nouvel|nouvelle|organise|reserve)\b/
@@ -164,7 +164,7 @@ function route(raw: string, n: string, s: St, ctx: Ctx): Reply {
   if (cl && has(/\b(mail|e-mail|email|courriel)\b/)) return { intent: "client_mail", text: cl.email ? `${cl.name} : ${cl.email}.` : `Pas d'e-mail enregistré pour ${cl.name}.`, items: [clItem(cl)] }
   if (has(/\b(appels?|appele|rappeler|rappel|urgents?|urgences?|qui (m'a|ma) appele|telephone)\b/)) return callsQ(n, cl, s)
   if (cl) return clientInfo(cl, s, ctx)
-  if (has(/\b(clients?|contacts?)\b/)) { const all = allClients(s); return { intent: "clients", text: `Vous avez ${plural(all.length, "contact")} au total.`, items: all.slice(0, 6).map(clItem), chips: ["Historique de Sophie Martin", "Téléphone de M. Petit"] } }
+  if (has(/\b(clients?|contacts?)\b/)) { const all = allClients(s); return { intent: "clients", text: `Vous avez ${plural(all.length, "contact")} au total.`, items: all.slice(0, 6).map(clItem), chips: all.slice(0, 2).map(c => `Historique de ${c.name}`) } }
   return { intent: "fallback", fallback: true, text: "Je n'ai pas bien compris. Je peux répondre sur vos appels, RDV, devis, relances et clients, ou faire une action pour vous.", chips: HELP_CHIPS }
 }
 
@@ -241,7 +241,7 @@ function markCalled(cl: CRef | undefined, s: St, n: string): Reply {
 function callTo(cl: CRef | undefined): Reply { if (!cl) return ask("open_fiche", { client: undefined }, "Qui voulez-vous appeler ?"); return { intent: "call", text: `Appeler ${cl.name} au ${phoneOf(cl)}.`, items: [clItem(cl)], acts: [{ l: `Appeler ${cl.name.split(" ")[0] === "M." || cl.name.startsWith("Mme") ? cl.name : cl.name.split(" ")[0]}`, k: "tel", v: phoneOf(cl), primary: true }, { l: "SMS", k: "sms", v: phoneOf(cl) }] } }
 function smsTo(cl: CRef | undefined, raw: string, ctx: Ctx): Reply {
   if (!cl) return { intent: "sms:ask", text: "À quel client voulez-vous envoyer un SMS ?" }
-  const m = raw.match(/(?::|pour (?:lui )?dire(?: que)?|disant(?: que)?|«)\s*(.+?)»?$/i), body = m?.[1]?.trim() || `Bonjour, c'est ${(ctx.me || "Thomas Rousseau")} (plombier). `
+  const m = raw.match(/(?::|pour (?:lui )?dire(?: que)?|disant(?: que)?|«)\s*(.+?)»?$/i), body = m?.[1]?.trim() || `Bonjour, c'est ${ctx.me || ""}. `
   return { intent: "sms", text: `SMS prêt pour ${cl.name} (${phoneOf(cl)}) : « ${body} ». Touchez Envoyer pour l'ouvrir dans Messages.`, items: [clItem(cl)], acts: [{ l: "Envoyer le SMS", k: "sms", v: `${phoneOf(cl)}|${body}`, primary: true }] }
 }
 function help(): Reply {

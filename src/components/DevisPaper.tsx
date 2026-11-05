@@ -33,7 +33,7 @@ export default function DevisPaper({ d }: { d: DDoc }) {
         <div className="mt-7 space-y-2.5 text-[11px]">{MENTIONS(d).map(([a, b]) => <div key={a}><div className="font-semibold" style={{ color: TEAL }}>{a}</div><div className={mut}>{b}</div></div>)}</div>
         <div className="mt-7 flex items-start justify-between gap-6"><div className="text-[11px]"><div className="text-[13px] font-semibold" style={{ color: TEAL }}>Devis gratuit</div><div className={`max-w-[300px] ${mut}`}>Le client reconnaît avoir pris connaissance du présent devis et en accepte les conditions.</div></div>
           <div className="h-[130px] w-[320px] rounded-[8px] border border-[#D2D2D7] p-3.5 text-[11px]"><div className="text-[13px] font-semibold">Bon pour accord</div><div className={`mt-1 ${mut}`}>Date : ____ / ____ / ________</div><div className={`mt-1 ${mut}`}>Signature précédée de la mention manuscrite « Devis reçu avant l'exécution des travaux, bon pour accord »</div></div></div>
-        <div className={`mt-8 flex justify-between border-t border-[#E4E4E8] pt-2.5 text-[10px] ${mut}`}><span>{CO.name} · SIRET {CO.siret} · {CO.rm} · Données de démonstration</span><span>Page 1 / 1</span></div>
+        <div className={`mt-8 flex justify-between border-t border-[#E4E4E8] pt-2.5 text-[10px] ${mut}`}><span>{CO.name} · SIRET {CO.siret} · {CO.rm}</span><span>Page 1 / 1</span></div>
       </div>
     </div>
   </div>

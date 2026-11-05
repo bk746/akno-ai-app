@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { supabase } from "./supabase"
+import { setCO } from "./devisDoc"
 export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; recording?: string }
 export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean }
 export type RelStatus = "prog" | "pause" | "env" | "rep"
-export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string }
+export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string; at?: string }
 export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref"
-export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: { l: string; q: number; pu: number }[] }
+export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: { l: string; q: number; pu: number }[]; at?: string }
 export type Msg = { id: string; from: "me" | "ai"; text: string; devisId?: string; action?: string; card?: { num: number; client: string; objet: string; amount: number }; items?: import("./assistant").RItem[]; acts?: import("./assistant").RAct[]; chips?: string[]; done?: string[] }
 export type Settings = { agents: { rec: boolean; ag: boolean; rel: boolean; dev: boolean }; sms: boolean; push: boolean; tva: number; duree: number; name?: string; company?: string; email?: string }
 export type Client = { key: string; name: string; phone: string; email?: string; addr: string; lat: number; lon: number; hist?: { calls: number; last: string; since: string } }
 export type St = { clients: Client[]; calls: Call[]; events: Ev[]; rels: Rel[]; devis: Devis[]; settings: Settings; chat: Msg[]; lastRel: { client: string; type: string; time: string; canal: string } }
 export const uid = () => Math.random().toString(36).slice(2, 10)
-export const BASE = "2026-11-02" // lundi de la semaine de démo
+const _t = new Date(); _t.setDate(_t.getDate() - ((_t.getDay() + 6) % 7))
+export const BASE = `${_t.getFullYear()}-${String(_t.getMonth() + 1).padStart(2, "0")}-${String(_t.getDate()).padStart(2, "0")}` // lundi de la semaine en cours
 export const addDays = (iso: string, n: number) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 export const seed = (): St => ({
   // Fiches clients de démonstration : numéros fictifs (plage 06 00), adresses au format réel, coordonnées approximatives
@@ -73,7 +75,8 @@ export const seed = (): St => ({
   ],
   lastRel: { client: "Clément Dubois", type: "Avis Google", time: "10:12", canal: "SMS" },
 })
-const KEY = "akno-local-v8" // seulement clients, relances, chat et réglages locaux (pas encore en base)
+const KEY = "akno-local-v9" // seulement les réglages locaux (agents, TVA…) ; tout le reste vient de Supabase
+const OLD_KEYS = ["akno-demo-v7", "akno-local-v8"]
 const DEV_ST: DevStatus[] = ["aval", "brouillon", "att", "env", "val", "ref"]
 const isUuid = (x: string) => /^[0-9a-f-]{36}$/i.test(x)
 const pad = (n: number) => String(n).padStart(2, "0")
@@ -92,27 +95,36 @@ const toCall = (r: Row): Call => {
 }
 const toEv = (r: Row): Ev => { const a = new Date(r.start), b = r.end ? new Date(r.end) : new Date(a.getTime() + 3600e3); return { id: r.id, date: isoDay(a), start: a.getHours() + a.getMinutes() / 60, dur: Math.max(.25, (b.getTime() - a.getTime()) / 3600e3), name: r.client || "Client", topic: r.title || "", addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1, ai: r.call_id != null } }
 const evRow = (e: Ev) => { const a = new Date(`${e.date}T00:00:00`); a.setMinutes(Math.round(e.start * 60)); const b = new Date(a.getTime() + e.dur * 3600e3); return { title: e.topic, client: e.name, start: a.toISOString(), end: b.toISOString(), adresse: e.addr ?? null } }
-const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: DEV_ST.includes(r.statut) ? r.statut : "brouillon", amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined })
+const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: DEV_ST.includes(r.statut) ? r.statut : "brouillon", amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at })
 const devRow = (d: Devis, tva: number) => { const ttc = d.lines?.length ? d.lines.reduce((t, l) => t + l.q * l.pu, 0) * (1 + tva / 100) : d.amount; return { numero: String(d.num), client_nom: d.client, objet: d.objet, statut: d.status, lignes: d.lines ?? [], total_ttc: Math.round(ttc * 100) / 100, total_ht: Math.round(ttc / (1 + tva / 100) * 100) / 100, tva_taux: tva } }
 
-const empty = (): St => { const s = seed(); const loc = (() => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") } catch { return {} } })(); return { ...s, calls: [], events: [], devis: [], ...loc, settings: { ...s.settings, ...(loc.settings || {}) } } }
+const empty = (): St => {
+  try { for (const k of OLD_KEYS) localStorage.removeItem(k) } catch { }
+  const d = seed().settings, loc = (() => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") } catch { return {} } })()
+  const { name: _n, company: _c, email: _e, ...keep } = loc.settings || {}
+  return { clients: [], calls: [], events: [], rels: [], devis: [], chat: [], lastRel: { client: "", type: "", time: "", canal: "" }, settings: { ...d, ...keep } }
+}
+const toRel = (r: Row): Rel => ({ id: r.id, client: r.client || "", type: r.type || "", canal: r.canal || "SMS", status: (["prog", "pause", "env", "rep"].includes(r.statut) ? r.statut : "prog") as RelStatus, date: r.date_label || new Date(r.created_at).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" }), at: r.created_at })
+const relRow = (r: Rel) => ({ client: r.client, type: r.type, canal: r.canal, statut: r.status, date_label: r.date })
 
 /** Données de l'artisan connecté : appels, rendez-vous, devis et profil viennent de Supabase (RLS = artisan_id = auth.uid()). */
 export function useStore() {
   const [s, setRaw] = useState<St>(empty), [loading, setLoading] = useState(true), uidRef = useRef<string | null>(null), cur = useRef(s)
   cur.current = s
-  useEffect(() => { try { const { clients, rels, chat, lastRel, settings } = s; localStorage.setItem(KEY, JSON.stringify({ clients, rels, chat, lastRel, settings })) } catch { } }, [s])
+  useEffect(() => { try { const { name: _n, company: _c, email: _e, ...settings } = s.settings; localStorage.setItem(KEY, JSON.stringify({ settings })) } catch { } }, [s])
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser(); if (!user) return
     uidRef.current = user.id
-    const [c, a, d, p] = await Promise.all([
+    const [c, a, d, p, rl] = await Promise.all([
       supabase.from("calls").select("*").order("created_at", { ascending: false }).limit(200),
       supabase.from("appointments").select("*").order("start"),
       supabase.from("devis").select("*").order("created_at", { ascending: false }),
-      supabase.from("artisans").select("prenom,nom_entreprise,entreprise_nom").eq("id", user.id).maybeSingle()])
+      supabase.from("artisans").select("*").eq("id", user.id).maybeSingle(),
+      supabase.from("relances").select("*").order("created_at", { ascending: false })])
+    if (p.data) setCO(p.data)
     if (!p.data && !p.error) await supabase.from("artisans").insert({ id: user.id, email: user.email })
     const dv = d.data || []
-    setRaw(x => ({ ...x, calls: (c.data || []).map(toCall), events: (a.data || []).map(toEv), devis: dv.map((r, i) => toDev(r, i, dv.length)), settings: { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email } }))
+    setRaw(x => ({ ...x, calls: (c.data || []).map(toCall), events: (a.data || []).map(toEv), devis: dv.map((r, i) => toDev(r, i, dv.length)), rels: (rl.data || []).map(toRel), settings: { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email } }))
     setLoading(false)
   }, [])
   useEffect(() => {
@@ -132,11 +144,15 @@ export function useStore() {
       for (const d of n.devis) { const o = p.devis.find(x => x.id === d.id); if (!o) jobs.push(supabase.from("devis").insert({ ...devRow(d, n.settings.tva), artisan_id: me })); else if (o !== d && isUuid(d.id)) jobs.push(supabase.from("devis").update(devRow(d, n.settings.tva)).eq("id", d.id)) }
       for (const o of p.devis) if (isUuid(o.id) && !n.devis.some(x => x.id === o.id)) jobs.push(supabase.from("devis").delete().eq("id", o.id))
     }
+    if (p.rels !== n.rels) {
+      for (const r of n.rels) { const o = p.rels.find(x => x.id === r.id); if (!o) jobs.push(supabase.from("relances").insert({ ...relRow(r), artisan_id: me })); else if (o !== r && isUuid(r.id)) jobs.push(supabase.from("relances").update(relRow(r)).eq("id", r.id)) }
+      for (const o of p.rels) if (isUuid(o.id) && !n.rels.some(x => x.id === o.id)) jobs.push(supabase.from("relances").delete().eq("id", o.id))
+    }
     if (p.settings.name !== n.settings.name || p.settings.company !== n.settings.company) jobs.push(supabase.from("artisans").update({ prenom: n.settings.name ?? null, nom_entreprise: n.settings.company ?? null }).eq("id", me))
     const res = await Promise.all(jobs) as { error?: unknown }[]
     if (res.some(r => r?.error)) console.error("Supabase sync", res.filter(r => r?.error))
     // recharge si une ligne a été créée (récupère les vrais identifiants)
-    if (n.events.some(e => !isUuid(e.id)) || n.devis.some(d => !isUuid(d.id))) load()
+    if (n.events.some(e => !isUuid(e.id)) || n.devis.some(d => !isUuid(d.id)) || n.rels.some(r => !isUuid(r.id))) load()
   }, [load])
   const setS = useCallback((u: St | ((x: St) => St)) => { const p = cur.current, n = typeof u === "function" ? u(p) : u; cur.current = n; setRaw(n); sync(p, n) }, [sync])
   return [s, setS, loading] as const
