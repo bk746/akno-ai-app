@@ -84,8 +84,25 @@ Règles :
   · 20 : construction neuve, dépannage hors rénovation, fournitures seules, client professionnel, ou doute fort.
   En cas de doute pour un particulier dans l'existant, applique 10, sinon 20.
 - N'invente pas de prestations hors sujet. 3 à 8 lignes maximum.
+- Si des tarifs artisan sont fournis, utilise-les pour les postes concernés (déplacement, diagnostic, taux horaire, forfait entretien chaudière). N'invente pas un forfait d'entretien s'il n'est pas listé.
 - Réponds uniquement en JSON valide, sans markdown :
 {"objet":"libellé court des travaux","lines":[{"l":"désignation","q":1,"u":"u","pu":120,"tv":10}]}`
+
+function formatArtisanTarifs(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return ""
+  const t = raw as Record<string, unknown>
+  const euro = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? `${String(v).replace(".", ",")} € HT` : null
+  const lines: string[] = []
+  const dep = euro(t.deplacement); if (dep) lines.push(`- Frais de déplacement : ${dep}`)
+  const diag = euro(t.diagnostic); if (diag) lines.push(`- Frais de diagnostic : ${diag}`)
+  const th = euro(t.tauxHoraire); if (th) lines.push(`- Taux horaire : ${th}`)
+  const ent = euro(t.entretienChaudiere); if (ent) lines.push(`- Forfait entretien chaudière : ${ent}`)
+  if (t.devisGratuit === true) lines.push("- Devis : gratuit")
+  if (t.devisGratuit === false) lines.push("- Devis : payant")
+  if (typeof t.majorationUrgence === "number" && Number.isFinite(t.majorationUrgence)) lines.push(`- Majoration urgence : +${t.majorationUrgence} %`)
+  if (!lines.length) return ""
+  return `Tarifs de l'artisan (à utiliser pour les postes correspondants, sans inventer d'autres prix forfaitaires) :\n${lines.join("\n")}`
+}
 
 async function draftFromXai(input: {
   company?: string
@@ -97,6 +114,7 @@ async function draftFromXai(input: {
   notes?: string
   transcript?: string
   adresse?: string
+  tarifs?: string
 }) {
   const apiKey = env("XAI_API_KEY")
   if (!apiKey) return { error: "La clé XAI_API_KEY n'est pas encore configurée sur Vercel.", status: 503 as const }
@@ -109,6 +127,7 @@ async function draftFromXai(input: {
     input.besoin ? `Détail du besoin : ${input.besoin}` : "",
     input.resume ? `Résumé de l'appel : ${input.resume}` : "",
     input.notes ? `Notes : ${input.notes}` : "",
+    input.tarifs ? input.tarifs : "",
     input.transcript ? `Transcription :\n${input.transcript.slice(0, 8000)}` : "",
   ].filter(Boolean)
   const models = [CHAT_MODEL(), "grok-4-fast-non-reasoning", "grok-4-latest", "grok-4"].filter((m, i, a) => m && a.indexOf(m) === i)
@@ -161,7 +180,7 @@ async function handleDraft(supabase: SupabaseClient, userId: string, body: Json)
   const { data: call, error: cErr } = await supabase.from("calls").select("id, nom_client, telephone_client, email_client, adresse, ville, code_postal, motif, besoin_detail, resume, notes, transcript").eq("id", callId).maybeSingle()
   if (cErr || !call) return { status: 404, body: { error: "Appel introuvable." } }
 
-  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, prenom").eq("id", userId).maybeSingle()
+  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, prenom, tarifs").eq("id", userId).maybeSingle()
   const drafted = await draftFromXai({
     company: artisan?.entreprise_nom || artisan?.nom_entreprise || "",
     client: call.nom_client || "",
@@ -171,6 +190,7 @@ async function handleDraft(supabase: SupabaseClient, userId: string, body: Json)
     notes: call.notes || "",
     transcript: typeof call.transcript === "string" ? call.transcript : "",
     adresse: [call.adresse, call.code_postal, call.ville].filter(Boolean).join(", "),
+    tarifs: formatArtisanTarifs(artisan?.tarifs),
   })
   if ("error" in drafted) return { status: drafted.status || 502, body: { error: drafted.error } }
 

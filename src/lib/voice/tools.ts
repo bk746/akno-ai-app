@@ -1,5 +1,4 @@
 import { supabase } from "../supabase"
-import { draftDevisFromCall } from "../devisApi"
 import type { VoiceProfile } from "./script"
 
 export type BookArgs = {
@@ -224,30 +223,18 @@ export async function saveCall(
     rappel_souhaite: rappelSouhaite,
     rappel_creneau: rappelCreneau,
   }
-  const wantDevis = inferDevisRequest(args, extra.transcript)
-  if (wantDevis && row.type_demande === "autre") row.type_demande = "devis"
+  const wantDevis = args.devis_demande === true || args.type_demande === "devis"
+  if (wantDevis && (row.type_demande === "autre" || !row.type_demande)) row.type_demande = "devis"
   const { data, error } = await supabase.from("calls").insert(row).select("id").maybeSingle()
   if (error) return { ok: false, error: "Impossible d'enregistrer l'appel." }
   notifySelf({ type: "call", client: row.nom_client, motif: row.motif, call_id: data?.id, rappel_souhaite: rappelSouhaite, rappel_creneau: rappelCreneau })
   try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
 
-  let devis_id: string | undefined
-  let draftError: string | undefined
-  if (data?.id && wantDevis) {
-    const draft = await draftDevisFromCall(data.id)
-    if (draft.ok && draft.devis_id) devis_id = String(draft.devis_id)
-    else draftError = draft.error || "Le brouillon de devis n'a pas pu être généré."
-    try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
-  }
-
   return {
     ok: true,
     call_id: data?.id,
-    devis_id,
-    message: devis_id
-      ? "Appel enregistré et brouillon de devis créé — à valider avant envoi."
-      : wantDevis
-        ? `Appel enregistré. ${draftError || "Le brouillon de devis n'a pas pu être généré automatiquement."}`
-        : "Appel enregistré dans Réception.",
+    message: wantDevis
+      ? "Appel enregistré. Demande de devis notée — à générer depuis la fiche client."
+      : "Appel enregistré dans Réception.",
   }
 }

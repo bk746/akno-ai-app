@@ -9,7 +9,7 @@ import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, 
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed, DEFAULT_REVIEW_URL } from "../lib/store"
 import { mergeTarifs, tarifsSummary } from "../lib/tarifs"
-import { sendDevisEmail } from "../lib/devisApi"
+import { draftDevisFromCall, sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
 import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, registerPushWorker, updateAppBadge } from "../lib/push"
@@ -624,16 +624,50 @@ const CQA = ({ I, l, href, c, ext, onClick }: any) => {
 const KV = ({ I, l, v, href }: any) => { const inner = <><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><I size={16} strokeWidth={SW} /></span><div className="min-w-0 flex-1"><div className="text-[12px] text-white/40">{l}</div><div className="truncate text-[15px]">{v}</div></div>{href && <Chev />}</>
   return href ? <a href={href} className="flex min-h-[56px] items-center gap-3 border-t border-white/[.05] px-4 first:border-t-0 hover:bg-white/[.03]">{inner}</a> : <div className="flex min-h-[56px] items-center gap-3 border-t border-white/[.05] px-4 first:border-t-0">{inner}</div> }
 function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: string; eventId?: string; close: () => void }) {
-  const { s, modal, setChat } = useC(), ev = eventId ? s.events.find(x => x.id === eventId) : undefined
-  const k = ckey(ev?.name || name), cl = findC(ev?.name || name)
-  const nm = cl?.name || ev?.name || name, same = (n: string) => ckey(n) === k
+  const { s, set, modal, setChat } = useC(), ev = eventId ? s.events.find(x => x.id === eventId) : undefined
+  const [genBusy, setGenBusy] = useState(false), [genErr, setGenErr] = useState("")
+  const seed = callId ? s.calls.find(x => x.id === callId) : undefined
+  const k = ckey(ev?.name || seed?.name || name), cl = findC(ev?.name || seed?.name || name)
+  const nm = cl?.name || ev?.name || seed?.name || name, same = (n: string) => ckey(n) === k
   const linked = ev ? linkedCall(s, ev) : undefined
-  const calls = s.calls.filter(x => same(x.name) || (linked && x.id === linked.id) || (ev?.phone && digits(x.phone) === digits(ev.phone)))
-  const call = (callId && s.calls.find(x => x.id === callId)) || linked || calls[0]
-  const devis = s.devis.filter(x => same(x.client))
+  const phoneSet = new Set([cl?.phone, ev?.phone, seed?.phone, linked?.phone, ...s.calls.filter(x => same(x.name)).map(x => x.phone)].map(digits).filter(p => p.length >= 8))
+  const matchCall = (x: Call) => same(x.name) || (!!seed && x.id === seed.id) || (!!linked && x.id === linked.id) || (digits(x.phone).length >= 8 && phoneSet.has(digits(x.phone)))
+  const calls = s.calls.filter(matchCall)
+  const call = seed || linked || calls[0]
+  const playable = (call?.recording && call) || calls.find(x => x.recording)
+  const devis = s.devis.filter(x => same(x.client) || (x.callId && calls.some(c => c.id === x.callId)) || (digits(x.phone).length >= 8 && phoneSet.has(digits(x.phone))))
   let evs = s.events.filter(x => same(x.name) || (ev?.phone && digits(x.phone) === digits(ev.phone))).sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start)
   if (ev && !evs.some(x => x.id === ev.id)) evs = [ev, ...evs]
   const rels = s.rels.filter(x => same(x.client))
+  const existingDv = call ? s.devis.find(d => d.callId === call.id) || devis.find(d => d.callId === call.id) : undefined
+  const generateDevis = async () => {
+    if (!call || genBusy) return
+    if (existingDv) { modal({ kind: "devisPrev", data: existingDv }); return }
+    setGenBusy(true); setGenErr("")
+    try {
+      const res = await draftDevisFromCall(call.id)
+      if (!res.ok || !res.devis_id) { setGenErr(res.error || "Impossible de générer le brouillon de devis."); return }
+      const drafted: Devis = {
+        id: String(res.devis_id),
+        num: parseInt(String(res.numero || "").replace(/\D/g, ""), 10) || 0,
+        client: nm,
+        objet: String(res.objet || call.besoin || call.topic || "Demande de devis"),
+        status: (res.statut === "aval" || res.statut === "brouillon" ? String(res.statut) : "brouillon") as DevStatus,
+        amount: Number(res.total_ttc ?? res.total_ht ?? 0),
+        created: Date.now(),
+        ai: true,
+        callId: call.id,
+        lines: Array.isArray(res.lines) ? res.lines as DevisLine[] : undefined,
+      }
+      set(x => ({ ...x, devis: x.devis.some(d => d.id === drafted.id) ? x.devis : [drafted, ...x.devis] }))
+      try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
+      modal({ kind: "devisPrev", data: drafted })
+    } catch {
+      setGenErr("Impossible de générer le brouillon de devis.")
+    } finally {
+      setGenBusy(false)
+    }
+  }
   const past = ev ? ev.date < TODAY || (ev.date === TODAY && ev.start + ev.dur <= NOW) : false
   const st: [string, string] = ev ? (past ? ["Passé", GREY] : ["À venir", A.ag.c]) : call ? callSt(call) : devis.some(d => d.status === "att") ? ["Devis en attente", AMBER] : ["Client", GREY]
   const rawPhone = cl?.phone || ev?.phone || call?.phone || tel(name)
@@ -643,12 +677,12 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
     ...devis.map(d => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0], I: Receipt, o: 3 }))].sort((a, b) => a.o - b.o)
   const H = ({ children }: any) => <div className="mb-2 mt-6 px-1 text-[13px] font-medium text-white/45">{children}</div>
   return <Sheet title="Fiche client" c={A.rec.c} onClose={close}>
-    <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1 flex flex-wrap items-center gap-2"><Chip c={st[1]}>{st[0]}</Chip>{call?.callback && !/^À rappeler/.test(st[0]) && <Chip c={call.urgent ? RED : AMBER}>À rappeler</Chip>}</div>{call?.callback && call.rappelAt && <div className={`mt-1 ${tx.cap}`}>Rappel souhaité · {call.rappelAt}</div>}</div></div>
+    <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1 flex flex-wrap items-center gap-2"><Chip c={st[1]}>{st[0]}</Chip>{call?.callback && !/^À rappeler/.test(st[0]) && <Chip c={call.urgent ? RED : AMBER}>À rappeler</Chip>}{call?.wantDevis && <Chip c={A.dev.c}>Devis demandé</Chip>}</div>{call?.callback && call.rappelAt && <div className={`mt-1 ${tx.cap}`}>Rappel souhaité · {call.rappelAt}</div>}</div></div>
     <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}<CQA I={Receipt} l="Devis" onClick={() => modal({ kind: "devis", data: { client: nm, objet: ev?.topic || call?.besoin || call?.topic } })} /></div>
     <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{cl?.email && <KV I={Mail} l="E-mail" v={cl.email} href={`mailto:${cl.email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
     {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative</span></div>}
     {ev && <><H>Rendez-vous</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{ev.topic}</div><Chip c={past ? GREY : A.ag.c}>{past ? "Passé" : "À venir"}</Chip></div><div className={`mt-1 ${tx.cap}`}>{fmtD(ev.date)} · {hh(ev.start)} – {hh(ev.start + ev.dur)}</div>{(ev.notes || ev.addr) && <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{[ev.notes, ev.addr].filter(Boolean).join(" · ")}</p>}</div></>}
-    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div>{call.callback && <div className="mt-2"><Chip c={call.urgent ? RED : AMBER}>À rappeler{call.rappelAt ? ` · ${call.rappelAt}` : ""}</Chip></div>}<p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{call.recording && <div className="mt-3"><CallInline call={call} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
+    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div>{call.callback && <div className="mt-2"><Chip c={call.urgent ? RED : AMBER}>À rappeler{call.rappelAt ? ` · ${call.rappelAt}` : ""}</Chip></div>}{call.wantDevis && <div className="mt-2"><Chip c={A.dev.c}>Devis demandé</Chip></div>}<p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{playable && <div className="mt-3"><CallInline call={playable} onMic={() => { close(); setChat(true) }} /></div>}<Btn className="mt-3 w-full" disabled={genBusy} onClick={() => void generateDevis()}><Receipt size={15} strokeWidth={1.5} />{genBusy ? "Génération…" : existingDv ? "Voir le devis" : "Générer un devis"}</Btn>{genErr && <div className="mt-2 text-[13px] text-[#FF9B96]">{genErr}</div>}</div></>}
     {(devis.length > 0 || evs.length > 0) && <><H>Devis et rendez-vous</H><div className="overflow-hidden rounded-[20px] bg-white/[.04]">
       {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
       {evs.map((e, i) => <Row key={e.id} first={!devis.length && i === 0} label={`RDV ${e.topic}`} onClick={() => modal({ kind: "ev", data: e })} lead={<Ic I={CalendarDays} />} t={e.topic} s={`${fmtD(e.date)} · ${hh(e.start)} – ${hh(e.start + e.dur)}`} r={<Chev />} />)}</div></>}
@@ -671,7 +705,8 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
   const setLines = (next: DevisLine[]) => {
     const nht = next.reduce((a, x) => a + Number(x.q) * Number(x.pu), 0)
     const ntax = next.reduce((a, x) => a + Number(x.q) * Number(x.pu) * (Number(x.tv ?? tv) / 100), 0)
-    set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, lines: next, amount: Math.round((nht + ntax) * 100) / 100 } : y) }))
+    const amount = Math.round((nht + ntax) * 100) / 100
+    set(x => ({ ...x, devis: x.devis.some(y => y.id === dv.id) ? x.devis.map(y => y.id === dv.id ? { ...y, lines: next, amount } : y) : [{ ...dv, lines: next, amount }, ...x.devis] }))
   }
   const patch = (i: number, p: Partial<DevisLine>) => setLines(lines.map((x, j) => j === i ? { ...x, ...p } : x))
   const doc = buildDoc({ ...dv, lines }, cl, tv, TODAY)
@@ -961,14 +996,13 @@ function AknoApp() {
     navigator.serviceWorker.addEventListener("message", onMsg)
     return () => navigator.serviceWorker.removeEventListener("message", onMsg)
   }, [navigate])
-  const sw = useRef<{ x: number, y: number, t: number, ok: boolean } | null>(null), dir = useRef(0)
-  const go = (p: P) => { if (ORD.indexOf(p) !== ORD.indexOf(page)) dir.current = ORD.indexOf(p) > ORD.indexOf(page) ? 1 : -1; setQ(""); setM(null); if (p !== page) navigate(`/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`); if (!desk) setChatS(false) }
+  const go = (p: P) => { setQ(""); setM(null); if (p !== page) navigate(`/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`); if (!desk) setChatS(false) }
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal: setM, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ }
   const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP }[page]
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col" onTouchStart={e => { const t = e.touches[0]; sw.current = { x: t.clientX, y: t.clientY, t: Date.now(), ok: !(e.target as HTMLElement).closest("[data-noswipe],input,textarea,[role=slider]") } }} onTouchEnd={e => { const o = sw.current; sw.current = null; if (!o || !o.ok || m || chat) return; const t = e.changedTouches[0], dx = t.clientX - o.x, dy = t.clientY - o.y; if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.6 || Date.now() - o.t > 600) return; const i = ORD.indexOf(page), j = i + (dx < 0 ? 1 : -1); if (j < 0 || j >= ORD.length) return; dir.current = dx < 0 ? 1 : -1; go(ORD[j]) }}><AnimatePresence mode="wait" initial={false} custom={dir.current}><motion.div key={page} custom={dir.current} className="flex min-h-0 flex-1 flex-col" variants={{ i: (d: number) => ({ opacity: 0, x: d * 28 }), a: { opacity: 1, x: 0 }, e: (d: number) => ({ opacity: 0, x: d * -28 }) }} initial="i" animate="a" exit="e" transition={{ duration: .22, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>

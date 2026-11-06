@@ -82,7 +82,7 @@ export function formatSlotsHint(slots: SlotHint[]) {
 
 CRÉNEAUX DÉJÀ CONSULTÉS (à partir de demain, heure de Paris) :
 ${lines.join("\n")}
-Quand tu demandes la disponibilité (visite de diagnostic, créneau d'entretien / forfait, ou pose d'un remplacement simple), propose tout de suite deux de ces créneaux. N'appelle get_available_slots que s'il demande une autre période, ou si cette liste est vide. Si tu dois appeler l'outil, dis seulement « Je regarde… » puis attends le résultat. N'appelle book_appointment qu'une fois le créneau choisi et le prénom, le nom, le téléphone, l'e-mail et l'adresse collectés.`
+Demande d'abord « Quand êtes-vous disponible ? » et attends sa réponse (jour, matin / après-midi, fin de semaine…). Propose ensuite le ou les créneaux de cette liste qui correspondent le mieux, les plus proches de sa demande. N'appelle get_available_slots que si la période demandée n'est pas couverte ici, ou si cette liste est vide ; dis alors « Je regarde… ». Ne propose des créneaux sans avoir demandé sa préférence que s'il dit qu'il n'en a pas (« peu importe », « dès que possible »). N'appelle book_appointment qu'une fois le créneau choisi et le prénom, le nom, le téléphone, l'e-mail et l'adresse collectés.`
 }
 
 export function buildInstructions(p: VoiceProfile) {
@@ -106,7 +106,7 @@ TABLEAU DE DÉCISION
 A — VISITE DE DIAGNOSTIC (pas de devis maintenant)
 Cas : remplacement ou installation d'équipement complexe (chaudière, chauffe-eau / ballon non identique, PAC, tableau électrique…), dépannage / panne, rénovation, fuite à diagnostiquer.
 1. Préciser le problème (une à la fois) : remplacement/installation → pourquoi, type/énergie, âge ; panne → symptômes ; rénovation → type de travaux.
-2. « Pour [besoin], l'artisan doit venir sur place faire un diagnostic. Quand êtes-vous disponible ? » Deux vrais créneaux (préchargés, dès demain, jamais aujourd'hui sauf demande). get_available_slots seulement si autre période ou liste vide ; dis « Je regarde… ». Jamais de créneau inventé.
+2. « Pour [besoin], l'artisan doit venir sur place faire un diagnostic. Quand êtes-vous disponible ? » Écoute la réponse (jour ou période : « mardi après-midi », « demain matin », « en fin de semaine ») puis propose le ou les créneaux réels les plus proches : d'abord parmi ceux déjà consultés, sinon get_available_slots avec date_from / date_to / preferred_day adaptés à sa demande (dis « Je regarde… »). Ne propose deux créneaux spontanément que s'il n'a aucune préférence (« peu importe », « dès que possible »). Jamais de créneau inventé, jamais aujourd'hui sauf s'il le demande.
 3. Puis une à une : nom, prénom, téléphone (relire par deux), e-mail (confirmation du RDV, pas « pour le devis »), adresse. Confirmer l'orthographe de l'e-mail et de l'adresse.
 4. book_appointment (prenom, nom, telephone, email, adresse, date AAAA-MM-JJ, heure HH:MM, objet). Si refus : deux alternatives.
 5. Récap, question D, save_call (devis_demande false ; type_demande rdv / depannage / urgence).
@@ -118,7 +118,7 @@ Cas :
 1. Précisions, une à une : forfait → type, marque, âge, fréquence ; à l'identique → quel appareil, bien le même type/emplacement.
 2. Propose un devis. Cite un tarif listé s'il existe (ex. entretien chaudière) ; sinon ne l'invente pas : brouillon à valider par l'artisan, rien ne part sans son accord.
 3. Nom, prénom, téléphone, e-mail (pour le devis), adresse — une à une, confirmer l'orthographe e-mail et adresse.
-4. Propose un créneau de pose/entretien si le client veut (mêmes règles d'agenda, puis book_appointment).
+4. S'il veut un créneau de pose ou d'entretien : demande d'abord « Quand êtes-vous disponible ? », puis propose le créneau libre le plus proche de sa réponse (mêmes règles d'agenda qu'en A), puis book_appointment. Ne propose des créneaux sans lui demander ses dispos que s'il n'a aucune préférence.
 5. Récap, question D, save_call (devis_demande true, type_demande devis).
 
 C — URGENCE
@@ -160,7 +160,7 @@ export const VOICE_TOOLS = [
   {
     type: "function",
     name: "get_available_slots",
-    description: "Consulte l'agenda réel et renvoie les créneaux libres (lundi–vendredi, 8 h–18 h, heure de Paris). À appeler seulement si aucun créneau préchargé ne convient, ou si le client demande une autre période. Dis « Je regarde… » juste avant l'appel.",
+    description: "Consulte l'agenda réel et renvoie les créneaux libres (lundi–vendredi, 8 h–18 h, heure de Paris). À appeler après que le client a indiqué une période, si aucun créneau préchargé ne correspond, ou si la liste préchargée est vide. Passe date_from, date_to ou preferred_day d'après sa réponse. Dis « Je regarde… » juste avant l'appel.",
     parameters: {
       type: "object",
       properties: {
@@ -197,7 +197,7 @@ export const VOICE_TOOLS = [
   {
     type: "function",
     name: "save_call",
-    description: "Enregistre le bilan de l'appel dans Réception. À appeler après le récapitulatif confirmé, ou juste avant de conclure. Inclure toutes les informations collectées.",
+    description: "Enregistre le bilan de l'appel dans Réception. À appeler après le récapitulatif confirmé, ou juste avant de conclure. Inclure toutes les informations collectées. N'entraîne pas la génération automatique d'un devis.",
     parameters: {
       type: "object",
       properties: {
@@ -217,7 +217,7 @@ export const VOICE_TOOLS = [
         a_rappeler: { type: "boolean", description: "Identique à rappel_souhaite : true si le client souhaite être rappelé par l'artisan" },
         rappel_souhaite: { type: "boolean", description: "true si le client souhaite être rappelé par l'artisan / l'ouvrier" },
         rappel_creneau: { type: "string", description: "Moment préféré pour le rappel, texte libre (ex. demain matin, cet après-midi). Uniquement si rappel_souhaite est true." },
-        devis_demande: { type: "boolean", description: "true en catégorie B (forfait / entretien / ramonage / contrat, ou remplacement simple à l'identique : WC, robinet, mitigeur, chasse d'eau, lavabo, évier, ballon identique, prise, interrupteur, luminaire). false en catégorie A (diagnostic) et hors prestation." },
+        devis_demande: { type: "boolean", description: "true en catégorie B (forfait / entretien / ramonage / contrat, ou remplacement simple à l'identique : WC, robinet, mitigeur, chasse d'eau, lavabo, évier, ballon identique, prise, interrupteur, luminaire). false en catégorie A (diagnostic) et hors prestation. Note seulement la demande : l'artisan générera le brouillon depuis la fiche client." },
         email_client: { type: "string", description: "E-mail du client : envoi du devis (B) ou confirmation du rendez-vous (A)." },
         rdv_pris: { type: "boolean" },
         notes: { type: "string" },
@@ -250,8 +250,8 @@ export function buildSessionConfig(p: VoiceProfile, sampleRate: number, slotsNot
         transcription: { language_hint: "fr", model: "grok-transcribe", keyterms },
       },
       output: {
-        format: { type: "audio/pcm", rate: sampleRate },
-        speed: 1.2,
+        format: { type: "audio/pcm", rate: 24000 },
+        speed: 1.0,
       },
     },
   }

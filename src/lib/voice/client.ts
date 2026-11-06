@@ -1,8 +1,7 @@
 import { supabase } from "../supabase"
 import { uploadCallRecording } from "../recordings"
-import { draftDevisFromCall } from "../devisApi"
 import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, VOICE_ID, TURN_DETECTION, type SlotHint, type VoiceProfile } from "./script"
-import { bookAppointment, getAvailableSlots, inferDevisRequest, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
+import { bookAppointment, getAvailableSlots, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
 
 export type VoiceStatus = "idle" | "connecting" | "live" | "speaking" | "listening" | "thinking" | "ending" | "error"
 export type TranscriptLine = { role: "user" | "assistant"; text: string }
@@ -18,14 +17,22 @@ export type VoiceTokenResponse = {
 const WS_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 const SUPPORTED = new Set([8000, 16000, 22050, 24000, 32000, 44100, 48000])
 const PREFERRED_RATE = 24000
+const OUTPUT_RATE = 24000
 const BARGE_MS = 600
-const LOOKAHEAD = 0.06
+const LOOKAHEAD = 0.12
 const PREFETCH_MS = 2500
 const DRAIN_MS = 30000
 const END_PAD_SEC = 0.08
 const ECHO_TAIL_MS = 80
 const UPLINK_FRAME_MS = 30
 const WAIT_IDLE_QUIET_MS = 16
+
+const persistJobs = new Set<Promise<unknown>>()
+function keepAlive<T>(p: Promise<T>): Promise<T> {
+  persistJobs.add(p)
+  void p.finally(() => persistJobs.delete(p))
+  return p
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise(resolve => {
@@ -115,7 +122,9 @@ class PcmPlayer {
     src.buffer = buf
     src.connect(this.output)
     const now = this.ctx.currentTime
-    if (this.next < now + 0.02) this.next = now + LOOKAHEAD
+    // Contiguous schedule: only jump after a true underrun. Resetting whenever
+    // we were slightly late inserted extra silence and made the voice choppy.
+    if (this.next < now) this.next = now + LOOKAHEAD
     src.start(this.next)
     this.next += buf.duration
     this.sources.push(src)
@@ -308,7 +317,6 @@ export async function startVoiceSession(opts: {
   let assistantBuf = ""
   let saved = false
   let savedCallId: string | number | undefined
-  let savedDevisId: string | undefined
   let lastSaveMessage = ""
   let ready = false
   let closed = false
@@ -359,7 +367,7 @@ export async function startVoiceSession(opts: {
     tools: session.tools,
     audio: {
       input: { format: { type: "audio/pcm", rate: sampleRate }, transcription: { language_hint: "fr" } },
-      output: { format: { type: "audio/pcm", rate: sampleRate }, speed: 1.2 },
+      output: { format: { type: "audio/pcm", rate: OUTPUT_RATE }, speed: 1.0 },
     },
   }
   let usedSimple = false
@@ -474,10 +482,10 @@ export async function startVoiceSession(opts: {
 
   const finalizePlayback = () => {
     const leftover = decoder.flush()
-    if (leftover.length) player.enqueue(leftover, sampleRate)
+    if (leftover.length) player.enqueue(leftover, OUTPUT_RATE)
     if (!playbackFinalized) {
       playbackFinalized = true
-      player.padSilence(END_PAD_SEC, sampleRate)
+      player.padSilence(END_PAD_SEC, OUTPUT_RATE)
     }
   }
 
@@ -535,7 +543,6 @@ export async function startVoiceSession(opts: {
         if (result && typeof result === "object" && (result as { ok?: boolean }).ok) {
           saved = true
           savedCallId = (result as { call_id?: string | number }).call_id
-          if ((result as { devis_id?: string }).devis_id) savedDevisId = String((result as { devis_id?: string }).devis_id)
           lastSaveMessage = (result as { message?: string }).message || "Appel enregistré dans Réception."
           try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
         }
@@ -638,7 +645,7 @@ export async function startVoiceSession(opts: {
           console.info("[akno-voice] speech_stopped -> first audio", `${ms}ms`)
           logVoice("in", "turn.ttfa", { ms })
         }
-        player.enqueue(decoder.push(delta), sampleRate)
+        player.enqueue(decoder.push(delta), OUTPUT_RATE)
         opts.onStatus("speaking")
       }
       return
@@ -712,11 +719,12 @@ export async function startVoiceSession(opts: {
     try { ws.close() } catch { /* */ }
     const blobPromise = recorder.stop()
     try { mic.stop() } catch { /* */ }
-    void ctx.close().catch(() => { /* */ })
 
-    persistPromise = (async () => {
+    persistPromise = keepAlive((async () => {
       let blob: Blob | null = null
       try { blob = await blobPromise } catch { blob = null }
+      // Close the AudioContext only after MediaRecorder has flushed its last chunk.
+      try { await ctx.close() } catch { /* */ }
       if (saveFallback && !saved && Date.now() - startedAt > 4000) {
         const summary = lines.length
           ? lines.map(l => l.text).slice(-6).join(" ").slice(0, 600)
@@ -728,38 +736,26 @@ export async function startVoiceSession(opts: {
           urgence: "normal" as const,
           a_rappeler: false,
           rappel_souhaite: false,
-          devis_demande: inferDevisRequest({ resume: summary, type_demande: "autre" }, lines),
+          devis_demande: false,
         }
         try {
           const result = await saveCall(fallbackArgs, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
           if (result.ok) {
             saved = true
             savedCallId = result.call_id
-            if (result.devis_id) savedDevisId = String(result.devis_id)
             lastSaveMessage = result.message || "Appel enregistré dans Réception."
           }
         } catch { /* persist in background */ }
       }
-      if (saved && savedCallId != null && !savedDevisId && inferDevisRequest({ resume: lines.map(l => l.text).join(" ") }, lines)) {
-        try {
-          const draft = await draftDevisFromCall(savedCallId)
-          if (draft.ok && draft.devis_id) {
-            savedDevisId = String(draft.devis_id)
-            lastSaveMessage = "Appel enregistré et brouillon de devis créé — à valider avant envoi."
-          } else if (draft.error) {
-            lastSaveMessage = lastSaveMessage && !lastSaveMessage.includes("devis")
-              ? `${lastSaveMessage} ${draft.error}`
-              : (draft.error || lastSaveMessage)
-          }
-        } catch { /* persist in background */ }
-      }
       if (blob && blob.size > 64 && savedCallId != null) {
-        try { await uploadCallRecording(savedCallId, blob) } catch { /* */ }
+        try { await uploadCallRecording(savedCallId, blob) } catch (err) { console.error("[akno-voice] recording upload", err) }
+      } else if (savedCallId != null) {
+        console.warn("[akno-voice] no recording blob to upload", blob?.size ?? 0)
       }
       try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
       opts.onStatus("idle")
       return lastSaveMessage
-    })()
+    })())
     return persistPromise
   }
 
