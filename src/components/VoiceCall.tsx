@@ -68,16 +68,13 @@ export default function VoiceCall({
     return () => { alive = false; stopRef.current?.(false) }
   }, [])
 
-  const hangup = async () => {
+  const hangup = () => {
     if (hanging.current) return
     hanging.current = true
     setStatus("ending")
-    try {
-      const msg = await stopRef.current?.(true)
-      onDone(msg || (status === "error" ? undefined : "Appel terminé."))
-    } catch {
-      onDone("Appel terminé.")
-    }
+    const stopper = stopRef.current
+    if (stopper) void stopper(true)
+    onDone(status === "error" ? undefined : "Appel terminé.")
   }
 
   const pulse = status === "speaking" ? 1.06 : status === "listening" ? 1.03 : 1
@@ -95,15 +92,15 @@ export default function VoiceCall({
     >
       <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 38%, ${C}33 0%, transparent 58%)` }} />
       <div className="relative flex h-12 shrink-0 items-center justify-end px-4" style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}>
-        <button type="button" aria-label="Fermer" onClick={hangup} className="flex h-10 w-10 items-center justify-center rounded-full text-white/50 hover:bg-white/[.06] hover:text-white">
+        <button type="button" aria-label="Fermer" onPointerUp={e => { e.preventDefault(); hangup() }} onClick={hangup} className="relative z-20 flex h-10 w-10 items-center justify-center rounded-full text-white/50 hover:bg-white/[.06] hover:text-white" style={{ touchAction: "manipulation" }}>
           <X size={20} strokeWidth={1.75} />
         </button>
       </div>
-      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+      <div className="pointer-events-none relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <motion.div
           animate={{ scale: pulse, y: status === "speaking" || status === "listening" ? [0, -4, 0] : 0 }}
           transition={{ duration: status === "speaking" ? 1.1 : 3.2, repeat: Infinity, ease: "easeInOut" }}
-          className="relative"
+          className="pointer-events-none relative"
         >
           <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[280px] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${C}${status === "speaking" ? "55" : "33"} 0%, transparent 64%)` }} />
           <svg viewBox="0 0 267 279" width={148} height={148 * 279 / 267} className="relative">
@@ -131,11 +128,13 @@ export default function VoiceCall({
           <p className="mt-6 max-w-[360px] text-center text-[14px] text-white/60">{error}</p>
         )}
       </div>
-      <div className="relative flex shrink-0 flex-col items-center gap-3 px-6 pb-4" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+      <div className="relative z-20 flex shrink-0 flex-col items-center gap-3 px-6 pb-4 pointer-events-auto" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
         <button
           type="button"
+          onPointerUp={e => { e.preventDefault(); hangup() }}
           onClick={hangup}
-          className="flex h-16 w-16 items-center justify-center rounded-full bg-[#FF3B30] text-white shadow-[0_16px_32px_-12px_rgba(255,59,48,.7)] transition active:scale-95"
+          className="relative z-20 flex h-16 w-16 items-center justify-center rounded-full bg-[#FF3B30] text-white shadow-[0_16px_32px_-12px_rgba(255,59,48,.7)] transition active:scale-95"
+          style={{ touchAction: "manipulation" }}
           aria-label="Raccrocher"
         >
           <PhoneOff size={24} strokeWidth={1.8} />

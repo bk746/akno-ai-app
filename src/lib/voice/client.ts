@@ -1,7 +1,7 @@
 import { supabase } from "../supabase"
 import { uploadCallRecording } from "../recordings"
 import { draftDevisFromCall } from "../devisApi"
-import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, VOICE_ID, type SlotHint, type VoiceProfile } from "./script"
+import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, VOICE_ID, TURN_DETECTION, type SlotHint, type VoiceProfile } from "./script"
 import { bookAppointment, getAvailableSlots, inferDevisRequest, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
 
 export type VoiceStatus = "idle" | "connecting" | "live" | "speaking" | "listening" | "thinking" | "ending" | "error"
@@ -19,10 +19,13 @@ const WS_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 const SUPPORTED = new Set([8000, 16000, 22050, 24000, 32000, 44100, 48000])
 const PREFERRED_RATE = 24000
 const BARGE_MS = 600
-const LOOKAHEAD = 0.08
+const LOOKAHEAD = 0.06
 const PREFETCH_MS = 2500
 const DRAIN_MS = 30000
-const END_PAD_SEC = 0.15
+const END_PAD_SEC = 0.08
+const ECHO_TAIL_MS = 80
+const UPLINK_FRAME_MS = 30
+const WAIT_IDLE_QUIET_MS = 16
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise(resolve => {
@@ -138,7 +141,7 @@ class PcmPlayer {
         const quiet = this.buffered <= 0.001
         if (quiet) {
           if (quietSince == null) quietSince = Date.now()
-          if (Date.now() - quietSince >= 40) {
+          if (Date.now() - quietSince >= WAIT_IDLE_QUIET_MS) {
             resolve()
             return
           }
@@ -190,7 +193,7 @@ async function connectMic(ctx: AudioContext) {
     worklet.connect(mute)
     node = worklet
   } catch {
-    const proc = ctx.createScriptProcessor(4096, 1, 1)
+    const proc = ctx.createScriptProcessor(1024, 1, 1)
     proc.onaudioprocess = ev => onFrame?.(new Float32Array(ev.inputBuffer.getChannelData(0)))
     source.connect(proc)
     proc.connect(mute)
@@ -321,7 +324,11 @@ export async function startVoiceSession(opts: {
   let greetWatchdog: ReturnType<typeof setTimeout> | null = null
   let lastAudioAt = 0
   let playbackFinalized = false
+  let speechStoppedAt: number | null = null
+  let persistPromise: Promise<string | undefined> | null = null
   const decoder = new Pcm16Decoder()
+  const uplinkChunks: Float32Array[] = []
+  let uplinkSamples = 0
 
   const slotsPromise = (async (): Promise<SlotHint[]> => {
     const existing = Array.isArray(opts.slots) ? opts.slots.filter(slot => slot && (slot.label || (slot.date && slot.heure))) : []
@@ -348,7 +355,7 @@ export async function startVoiceSession(opts: {
   const simpleSession = {
     voice: VOICE_ID,
     instructions: session.instructions,
-    turn_detection: { type: "server_vad" as const, idle_timeout_ms: 8000 },
+    turn_detection: TURN_DETECTION,
     tools: session.tools,
     audio: {
       input: { format: { type: "audio/pcm", rate: sampleRate }, transcription: { language_hint: "fr" } },
@@ -401,19 +408,59 @@ export async function startVoiceSession(opts: {
     send({ type: "response.cancel" })
   }
 
+  const resetUplink = () => {
+    uplinkChunks.length = 0
+    uplinkSamples = 0
+  }
+
+  const sendUplink = (f32: Float32Array, flushAll = false) => {
+    if (f32.length) {
+      uplinkChunks.push(f32.slice())
+      uplinkSamples += f32.length
+    }
+    const target = Math.max(1, Math.round(sampleRate * UPLINK_FRAME_MS / 1000))
+    while (uplinkSamples >= target) {
+      const out = new Float32Array(target)
+      let filled = 0
+      while (filled < target && uplinkChunks.length) {
+        const head = uplinkChunks[0]
+        const need = target - filled
+        if (head.length <= need) {
+          out.set(head, filled)
+          filled += head.length
+          uplinkChunks.shift()
+        } else {
+          out.set(head.subarray(0, need), filled)
+          uplinkChunks[0] = head.subarray(need)
+          filled += need
+        }
+      }
+      uplinkSamples -= target
+      send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(out) })
+    }
+    if (flushAll && uplinkSamples) {
+      const out = new Float32Array(uplinkSamples)
+      let filled = 0
+      for (const chunk of uplinkChunks) { out.set(chunk, filled); filled += chunk.length }
+      resetUplink()
+      send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(out) })
+    }
+  }
+
   const flushMic = (f32: Float32Array) => {
     if (!ready || greetingActive || closed || ws.readyState !== WebSocket.OPEN) return
     const playing = player.buffered > 0.08
-    if (playing) echoTailUntil = Date.now() + 220
+    if (playing) echoTailUntil = Date.now() + ECHO_TAIL_MS
     const hold = playing || Date.now() < echoTailUntil
     if (hold && !bargeArmed) {
       // Mute uplink while she speaks so her own voice cannot trigger server barge-in.
+      resetUplink()
       if (rms(f32) > 0.02) {
         if (bargeSince == null) bargeSince = Date.now()
         else if (Date.now() - bargeSince >= BARGE_MS) {
           bargeArmed = true
           confirmBargeIn()
-          send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
+          sendUplink(f32, true)
           return
         }
       } else {
@@ -422,7 +469,7 @@ export async function startVoiceSession(opts: {
       return
     }
     if (!hold) resetBarge()
-    send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
+    sendUplink(f32)
   }
 
   const finalizePlayback = () => {
@@ -560,6 +607,8 @@ export async function startVoiceSession(opts: {
     if (type === "input_audio_buffer.speech_stopped") {
       if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
       if (player.buffered > 0.05) return
+      speechStoppedAt = Date.now()
+      logVoice("in", "turn.wait.start")
       opts.onStatus("thinking")
       return
     }
@@ -583,6 +632,12 @@ export async function startVoiceSession(opts: {
       const delta = String(event.delta || event.audio || "")
       if (delta) {
         lastAudioAt = Date.now()
+        if (speechStoppedAt != null) {
+          const ms = Date.now() - speechStoppedAt
+          speechStoppedAt = null
+          console.info("[akno-voice] speech_stopped -> first audio", `${ms}ms`)
+          logVoice("in", "turn.ttfa", { ms })
+        }
         player.enqueue(decoder.push(delta), sampleRate)
         opts.onStatus("speaking")
       }
@@ -593,7 +648,7 @@ export async function startVoiceSession(opts: {
       return
     }
     if (type === "response.output_audio.done" || type === "response.audio.done" || type === "response.done") {
-      // Flush du reliquat PCM16 + 150 ms de silence. Ne jamais arrêter les sources.
+      // Flush du reliquat PCM16 + pad de silence court. Ne jamais arrêter les sources.
       finalizePlayback()
       if (greetingActive) void finishGreeting(type)
       else if (!pendingTools) void settleLive()
@@ -644,8 +699,8 @@ export async function startVoiceSession(opts: {
     throw e
   }
 
-  const stop = async (saveFallback = true) => {
-    if (closed) return lastSaveMessage
+  const stop = (saveFallback = true) => {
+    if (persistPromise) return persistPromise
     closed = true
     ready = false
     if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
@@ -655,47 +710,57 @@ export async function startVoiceSession(opts: {
     mic.setHandler(null)
     player.stop()
     try { ws.close() } catch { /* */ }
-    const blob = await recorder.stop()
-    mic.stop()
-    try { await ctx.close() } catch { /* */ }
-    if (saveFallback && !saved && Date.now() - startedAt > 4000) {
-      const summary = lines.length
-        ? lines.map(l => l.text).slice(-6).join(" ").slice(0, 600)
-        : "Appel test de la réceptionniste, sans informations client collectées."
-      const fallbackArgs = {
-        nom_client: "Appel test",
-        resume: summary,
-        type_demande: "autre" as const,
-        urgence: "normal" as const,
-        a_rappeler: false,
-        rappel_souhaite: false,
-        devis_demande: inferDevisRequest({ resume: summary, type_demande: "autre" }, lines),
+    const blobPromise = recorder.stop()
+    try { mic.stop() } catch { /* */ }
+    void ctx.close().catch(() => { /* */ })
+
+    persistPromise = (async () => {
+      let blob: Blob | null = null
+      try { blob = await blobPromise } catch { blob = null }
+      if (saveFallback && !saved && Date.now() - startedAt > 4000) {
+        const summary = lines.length
+          ? lines.map(l => l.text).slice(-6).join(" ").slice(0, 600)
+          : "Appel test de la réceptionniste, sans informations client collectées."
+        const fallbackArgs = {
+          nom_client: "Appel test",
+          resume: summary,
+          type_demande: "autre" as const,
+          urgence: "normal" as const,
+          a_rappeler: false,
+          rappel_souhaite: false,
+          devis_demande: inferDevisRequest({ resume: summary, type_demande: "autre" }, lines),
+        }
+        try {
+          const result = await saveCall(fallbackArgs, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
+          if (result.ok) {
+            saved = true
+            savedCallId = result.call_id
+            if (result.devis_id) savedDevisId = String(result.devis_id)
+            lastSaveMessage = result.message || "Appel enregistré dans Réception."
+          }
+        } catch { /* persist in background */ }
       }
-      const result = await saveCall(fallbackArgs, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
-      if (result.ok) {
-        saved = true
-        savedCallId = result.call_id
-        if (result.devis_id) savedDevisId = String(result.devis_id)
-        lastSaveMessage = result.message || "Appel enregistré dans Réception."
+      if (saved && savedCallId != null && !savedDevisId && inferDevisRequest({ resume: lines.map(l => l.text).join(" ") }, lines)) {
+        try {
+          const draft = await draftDevisFromCall(savedCallId)
+          if (draft.ok && draft.devis_id) {
+            savedDevisId = String(draft.devis_id)
+            lastSaveMessage = "Appel enregistré et brouillon de devis créé — à valider avant envoi."
+          } else if (draft.error) {
+            lastSaveMessage = lastSaveMessage && !lastSaveMessage.includes("devis")
+              ? `${lastSaveMessage} ${draft.error}`
+              : (draft.error || lastSaveMessage)
+          }
+        } catch { /* persist in background */ }
       }
-    }
-    if (saved && savedCallId != null && !savedDevisId && inferDevisRequest({ resume: lines.map(l => l.text).join(" ") }, lines)) {
-      const draft = await draftDevisFromCall(savedCallId)
-      if (draft.ok && draft.devis_id) {
-        savedDevisId = String(draft.devis_id)
-        lastSaveMessage = "Appel enregistré et brouillon de devis créé — à valider avant envoi."
-      } else if (draft.error) {
-        lastSaveMessage = lastSaveMessage && !lastSaveMessage.includes("devis")
-          ? `${lastSaveMessage} ${draft.error}`
-          : (draft.error || lastSaveMessage)
+      if (blob && blob.size > 64 && savedCallId != null) {
+        try { await uploadCallRecording(savedCallId, blob) } catch { /* */ }
       }
-    }
-    if (blob && blob.size > 64 && savedCallId != null) {
-      await uploadCallRecording(savedCallId, blob)
-    }
-    try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
-    opts.onStatus("idle")
-    return lastSaveMessage
+      try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
+      opts.onStatus("idle")
+      return lastSaveMessage
+    })()
+    return persistPromise
   }
 
   return { stop }
