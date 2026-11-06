@@ -21,6 +21,8 @@ const PREFERRED_RATE = 24000
 const BARGE_MS = 600
 const LOOKAHEAD = 0.08
 const PREFETCH_MS = 2500
+const DRAIN_MS = 30000
+const END_PAD_SEC = 0.15
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise(resolve => {
@@ -55,15 +57,38 @@ function rms(input: Float32Array) {
   return Math.sqrt(sum / Math.max(1, input.length))
 }
 
-function base64Pcm16ToFloat(b64: string) {
-  const raw = atob(b64)
-  const bytes = new Uint8Array(raw.length)
-  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
-  const even = bytes.byteLength & 1 ? bytes.buffer.slice(0, bytes.byteLength - 1) : bytes.buffer
-  const pcm = new Int16Array(even)
+function pcm16BytesToFloat(bytes: Uint8Array) {
+  if (!bytes.byteLength) return new Float32Array(0)
+  const copy = bytes.byteLength === bytes.buffer.byteLength && bytes.byteOffset === 0
+    ? bytes
+    : bytes.slice()
+  const pcm = new Int16Array(copy.buffer, copy.byteOffset, copy.byteLength / 2)
   const out = new Float32Array(pcm.length)
   for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768
   return out
+}
+
+/** Décode le PCM16 base64 en conservant un octet impair d'un chunk à l'autre. */
+class Pcm16Decoder {
+  private rest = new Uint8Array(0)
+  push(b64: string) {
+    const raw = atob(b64)
+    const incoming = new Uint8Array(raw.length)
+    for (let i = 0; i < raw.length; i++) incoming[i] = raw.charCodeAt(i)
+    const merged = new Uint8Array(this.rest.length + incoming.length)
+    merged.set(this.rest, 0)
+    merged.set(incoming, this.rest.length)
+    const even = merged.byteLength & ~1
+    this.rest = even < merged.byteLength ? merged.slice(even) : new Uint8Array(0)
+    return pcm16BytesToFloat(merged.subarray(0, even))
+  }
+  flush() {
+    if (!this.rest.length) return new Float32Array(0)
+    const padded = new Uint8Array(2)
+    padded[0] = this.rest[0]
+    this.rest = new Uint8Array(0)
+    return pcm16BytesToFloat(padded)
+  }
 }
 
 class PcmPlayer {
@@ -93,18 +118,35 @@ class PcmPlayer {
     this.sources.push(src)
     src.onended = () => { this.sources = this.sources.filter(s => s !== src) }
   }
+  padSilence(seconds: number, rate: number) {
+    const n = Math.max(0, Math.round(seconds * rate))
+    if (!n) return
+    this.enqueue(new Float32Array(n), rate)
+  }
   stop() {
+    // Uniquement barge-in / raccrochage : ne jamais appeler sur response.done.
     for (const src of this.sources) { try { src.stop() } catch { /* already stopped */ } }
     this.sources = []
     this.next = 0
   }
-  waitIdle(maxMs = PREFETCH_MS) {
+  waitIdle(maxMs = DRAIN_MS) {
     if (this.ctx.state === "suspended") void this.ctx.resume()
     const start = Date.now()
+    let quietSince: number | null = null
     return new Promise<void>(resolve => {
       const tick = () => {
-        if (this.buffered <= 0.02 || Date.now() - start >= maxMs) resolve()
-        else setTimeout(tick, 40)
+        const quiet = this.buffered <= 0.001
+        if (quiet) {
+          if (quietSince == null) quietSince = Date.now()
+          if (Date.now() - quietSince >= 40) {
+            resolve()
+            return
+          }
+        } else {
+          quietSince = null
+        }
+        if (Date.now() - start >= maxMs) resolve()
+        else setTimeout(tick, 20)
       }
       tick()
     })
@@ -275,7 +317,11 @@ export async function startVoiceSession(opts: {
   let bargeArmed = false
   let echoTailUntil = 0
   let greetingActive = false
+  let greetingFinishing = false
   let greetWatchdog: ReturnType<typeof setTimeout> | null = null
+  let lastAudioAt = 0
+  let playbackFinalized = false
+  const decoder = new Pcm16Decoder()
 
   const slotsPromise = (async (): Promise<SlotHint[]> => {
     const existing = Array.isArray(opts.slots) ? opts.slots.filter(slot => slot && (slot.label || (slot.date && slot.heure))) : []
@@ -379,19 +425,48 @@ export async function startVoiceSession(opts: {
     send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
   }
 
+  const finalizePlayback = () => {
+    const leftover = decoder.flush()
+    if (leftover.length) player.enqueue(leftover, sampleRate)
+    if (!playbackFinalized) {
+      playbackFinalized = true
+      player.padSilence(END_PAD_SEC, sampleRate)
+    }
+  }
+
+  const settleLive = async () => {
+    await player.waitIdle(DRAIN_MS)
+    if (!closed && !pendingTools && !greetingActive) opts.onStatus("live")
+  }
+
   const finishGreeting = async (reason: string) => {
-    if (!greetingActive || closed) return
+    if (!greetingActive || greetingFinishing || closed) return
+    greetingFinishing = true
     if (greetWatchdog) { clearTimeout(greetWatchdog); greetWatchdog = null }
-    logVoice("in", "greeting.drain", reason)
-    await player.waitIdle(PREFETCH_MS)
-    await new Promise<void>(r => setTimeout(r, 200))
-    await player.waitIdle(800)
-    if (closed || !greetingActive) return
+    logVoice("in", "greeting.drain", { reason, buffered: Number(player.buffered.toFixed(3)) })
+    // Ne jamais player.stop() ici : laisser chaque source aller jusqu'au dernier échantillon + pad.
+    await player.waitIdle(DRAIN_MS)
+    if (closed) return
     greetingActive = false
+    greetingFinishing = false
     logVoice("in", "greeting.unlocked", reason)
     if (ctx.state === "suspended") await ctx.resume().catch(() => { /* */ })
     mic.setHandler(flushMic)
     if (!pendingTools) opts.onStatus("live")
+  }
+
+  const armGreetWatchdog = (delayMs = 20000) => {
+    if (greetWatchdog) clearTimeout(greetWatchdog)
+    greetWatchdog = setTimeout(() => {
+      if (!greetingActive || closed) return
+      // Ne pas déverrouiller tant que de l'audio arrive ou reste en file.
+      if (player.buffered > 0.02 || Date.now() - lastAudioAt < 2000) {
+        armGreetWatchdog(1500)
+        return
+      }
+      finalizePlayback()
+      void finishGreeting("watchdog")
+    }, delayMs)
   }
 
   const handleTool = async (event: { name?: string; call_id?: string; arguments?: string }) => {
@@ -465,8 +540,8 @@ export async function startVoiceSession(opts: {
         },
       })
       opts.onStatus("speaking")
-      if (greetWatchdog) clearTimeout(greetWatchdog)
-      greetWatchdog = setTimeout(() => { void finishGreeting("watchdog") }, 8000)
+      lastAudioAt = Date.now()
+      armGreetWatchdog()
       return
     }
     if (type === "input_audio_buffer.speech_started") {
@@ -479,6 +554,7 @@ export async function startVoiceSession(opts: {
     if (type === "response.created") {
       assistantBuf = ""
       newAssistantTurn = true
+      playbackFinalized = false
       return
     }
     if (type === "input_audio_buffer.speech_stopped") {
@@ -506,7 +582,8 @@ export async function startVoiceSession(opts: {
     if (type === "response.output_audio.delta" || type === "response.audio.delta") {
       const delta = String(event.delta || event.audio || "")
       if (delta) {
-        player.enqueue(base64Pcm16ToFloat(delta), sampleRate)
+        lastAudioAt = Date.now()
+        player.enqueue(decoder.push(delta), sampleRate)
         opts.onStatus("speaking")
       }
       return
@@ -515,9 +592,11 @@ export async function startVoiceSession(opts: {
       void handleTool(event as { name?: string; call_id?: string; arguments?: string })
       return
     }
-    if (type === "response.done" || type === "response.output_audio.done") {
+    if (type === "response.output_audio.done" || type === "response.audio.done" || type === "response.done") {
+      // Flush du reliquat PCM16 + 150 ms de silence. Ne jamais arrêter les sources.
+      finalizePlayback()
       if (greetingActive) void finishGreeting(type)
-      else if (!pendingTools) opts.onStatus("live")
+      else if (!pendingTools) void settleLive()
       return
     }
     if (type === "response.cancelled" || type === "conversation.item.truncated" || type === "output_audio_buffer.cleared") {

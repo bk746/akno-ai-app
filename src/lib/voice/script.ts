@@ -12,9 +12,20 @@ export type VoiceProfile = {
   tarifs?: Tarifs
 }
 
+const PLACEHOLDER_COMPANY = /^l['\u2019]entreprise$/i
+
+/** Nom d'enseigne prononcé : jamais « l'entreprise ». Vide → Akno. */
+export function companyName(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = (v ?? "").trim()
+    if (t && !PLACEHOLDER_COMPANY.test(t)) return t
+  }
+  return "Akno"
+}
+
 export const emptyProfile = (): VoiceProfile => ({
   prenom: "l'artisan",
-  company: "l'entreprise",
+  company: "Akno",
   email: "",
   phone: "",
   address: "",
@@ -31,7 +42,7 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
   const tarifs = mergeTarifs(partial.tarifs)
   return {
     prenom: pick(partial.prenom, base.prenom),
-    company: pick(partial.company, base.company),
+    company: companyName(partial.company, base.company),
     email: pick(partial.email),
     phone: pick(partial.phone),
     address: pick(partial.address),
@@ -48,7 +59,7 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
 export const VOICE_ID = "ara"
 
 export function welcomeLine(p: VoiceProfile) {
-  return `${p.company}, bonjour ! Je suis l'assistante de l'artisan. Cet appel peut être enregistré. Comment puis-je vous aider ?`
+  return `${companyName(p.company)}, bonjour, je suis l'assistante IA, comment puis-je vous aider ?`
 }
 
 export const KEYTERMS = [

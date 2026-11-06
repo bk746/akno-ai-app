@@ -1,6 +1,14 @@
 import { createClient } from "@supabase/supabase-js"
 type Json = Record<string, unknown>
 const env = (name: string) => (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]
+const PLACEHOLDER_COMPANY = /^l['\u2019]entreprise$/i
+function companyName(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = (v ?? "").trim()
+    if (t && !PLACEHOLDER_COMPANY.test(t)) return t
+  }
+  return "Akno"
+}
 
 export async function mintVoiceToken(authorization?: string): Promise<{ status: number; body: Json }> {
   const apiKey = env("XAI_API_KEY")
@@ -59,7 +67,7 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
       expires_at: payload.expires_at,
       profile: {
         prenom: artisan?.prenom || "",
-        company: artisan?.nom_entreprise || artisan?.entreprise_nom || "",
+        company: companyName(artisan?.nom_entreprise, artisan?.entreprise_nom),
         email: artisan?.entreprise_email || artisan?.email || user.email || "",
         phone: artisan?.entreprise_telephone || artisan?.telephone || "",
         address: artisan?.entreprise_adresse || "",
