@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js"
+import { handleBooking } from "./booking"
 
 type Json = Record<string, unknown>
 const env = (name: string) => (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]
@@ -37,18 +38,23 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
     .eq("id", user.id)
     .maybeSingle()
 
-  const r = await fetch("https://api.x.ai/v1/realtime/client_secrets", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ expires_after: { seconds: 300 } }),
-  })
+  const [r, slotsRes] = await Promise.all([
+    fetch("https://api.x.ai/v1/realtime/client_secrets", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expires_after: { seconds: 300 } }),
+    }),
+    handleBooking(authorization, { action: "slots" }).catch(() => ({ status: 500, body: {} as Json })),
+  ])
   const payload = await r.json().catch(() => ({})) as { value?: string; expires_at?: number }
   if (!r.ok || !payload.value) {
     return { status: 502, body: { error: "Impossible de créer la session vocale auprès de xAI." } }
   }
+  const rawSlots = (slotsRes.body as { slots?: unknown }).slots
+  const slots = Array.isArray(rawSlots) ? rawSlots : []
 
   return {
     status: 200,
@@ -64,6 +70,7 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
         city: artisan?.entreprise_cp_ville || "",
         tarifs: artisan?.tarifs && typeof artisan.tarifs === "object" ? artisan.tarifs : undefined,
       },
+      slots,
     },
   }
 }

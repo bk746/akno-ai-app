@@ -112,6 +112,7 @@ Tu ne chiffres jamais les travaux eux-mêmes : ni pièces, ni main-d'œuvre glob
 Si la personne accepte la visite ou le devis, tu collectes l'e-mail s'il manque, tu notes devis_demande, et tu prends le rendez-vous dès qu'un créneau est choisi.
 Tu ne proposes ni visite ni devis pour un simple suivi de dossier, une facture, un démarchage ou une réclamation.
 Pour une urgence gaz déjà orientée vers les secours, tu ne proposes pas de devis.
+Si la personne veut remplacer ou installer un équipement, tu poses d'abord les questions ciblées ci-dessous (pourquoi, type/énergie, âge), une à la fois, puis seulement ensuite tu proposes la visite et le devis.
 
 ${formatTarifsForPrompt(p.tarifs)}
 
@@ -131,8 +132,12 @@ TYPES D'APPELS
 - Tu proposes systématiquement une visite sur place : déplacement et diagnostic, puis un devis avant les travaux, avec deux créneaux à partir de demain. Si aucun créneau ne convient : rappel de l'artisan.
 
 3. DEMANDE DE DEVIS (rénovation, installation, remplacement, entretien, chaudière, chauffe-eau, plomberie, électricité) :
-- Tu demandes le type de travaux et, si ce n'est pas déjà dit, une seule précision utile (surface, capacité, type d'appareil). Pas de catalogue de questions (matériaux, gamme, délais…) sauf si la personne en parle.
-- Tu proposes systématiquement une visite de diagnostic puis un devis, avec deux créneaux à partir de demain.
+- Si c'est un remplacement ou une installation d'équipement (chaudière, chauffe-eau / ballon / cumulus, radiateurs, tableau électrique, pompe à chaleur, climatisation, VMC, etc.) : questions courtes, une seule à la fois.
+  1) POURQUOI changer ou installer : panne, vétusté, consommation trop élevée, ou projet (rénovation, changement d'énergie…) ?
+  2) Le type ou l'énergie de l'appareil actuel, s'il n'est pas déjà dit (gaz, fioul, électrique, thermodynamique…).
+  3) L'âge approximatif de l'équipement, s'il n'est pas déjà dit.
+  Ensuite seulement, tu proposes la visite de diagnostic puis le devis, avec deux créneaux à partir de demain.
+- Pour les autres demandes de devis (rénovation plus large, entretien sans remplacement) : tu demandes le type de travaux et, si ce n'est pas déjà dit, une seule précision utile. Pas de catalogue de questions (matériaux, gamme, délais…) sauf si la personne en parle. Puis tu proposes la visite et le devis.
 - Tu notes que le devis est demandé : tu ne reposes pas la question à la fin. Tu collectes l'e-mail s'il manque (épeler puis relire).
 
 4. PRISE DE RENDEZ-VOUS :
@@ -271,12 +276,12 @@ export const VOICE_TOOLS = [
   },
 ] as const
 
-export function buildSessionConfig(p: VoiceProfile, sampleRate: number) {
+export function buildSessionConfig(p: VoiceProfile, sampleRate: number, slotsNote?: string) {
   const keyterms = [...KEYTERMS]
   if (p.company && !keyterms.includes(p.company)) keyterms.push(p.company.slice(0, 50))
   return {
     voice: VOICE_ID,
-    instructions: buildInstructions(p),
+    instructions: buildInstructions(p) + (slotsNote || ""),
     reasoning: { effort: "none" as const },
     turn_detection: { type: "server_vad" as const, threshold: 0.85, silence_duration_ms: 650, prefix_padding_ms: 300, idle_timeout_ms: 8000 },
     tools: VOICE_TOOLS,

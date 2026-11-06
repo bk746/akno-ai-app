@@ -52,6 +52,7 @@ export default function VoiceCall({
         const session = await startVoiceSession({
           token: token.value!,
           profile,
+          slots: token.slots,
           onStatus: s => { if (alive) setStatus(s) },
           onTranscript: xs => { if (alive) setLines(xs) },
           onNotice: msg => { if (alive) setError(msg) },

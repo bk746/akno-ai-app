@@ -1,7 +1,7 @@
 import { supabase } from "../supabase"
 import { uploadCallRecording } from "../recordings"
 import { draftDevisFromCall } from "../devisApi"
-import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, VOICE_ID, type VoiceProfile } from "./script"
+import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, VOICE_ID, type SlotHint, type VoiceProfile } from "./script"
 import { bookAppointment, getAvailableSlots, inferDevisRequest, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
 
 export type VoiceStatus = "idle" | "connecting" | "live" | "speaking" | "listening" | "thinking" | "ending" | "error"
@@ -11,6 +11,7 @@ export type VoiceTokenResponse = {
   value?: string
   expires_at?: number
   profile?: Partial<VoiceProfile>
+  slots?: SlotHint[]
   error?: string
 }
 
@@ -70,6 +71,7 @@ class PcmPlayer {
   get buffered() { return Math.max(0, this.next - this.ctx.currentTime) }
   enqueue(samples: Float32Array, rate: number) {
     if (!samples.length) return
+    if (this.ctx.state === "suspended") void this.ctx.resume()
     const copy = samples.slice()
     const buf = this.ctx.createBuffer(1, copy.length, rate)
     buf.getChannelData(0).set(copy)
@@ -84,13 +86,18 @@ class PcmPlayer {
     src.onended = () => { this.sources = this.sources.filter(s => s !== src) }
   }
   stop() {
-    for (const s of this.sources) { try { s.stop() } catch { /* already stopped */ } }
+    for (const src of this.sources) { try { src.stop() } catch { /* already stopped */ } }
     this.sources = []
     this.next = 0
   }
   waitIdle() {
-    const ms = this.buffered * 1000 + 40
-    return ms <= 0 ? Promise.resolve() : new Promise<void>(r => setTimeout(r, ms))
+    return new Promise<void>(resolve => {
+      const tick = () => {
+        if (this.buffered <= 0.02) resolve()
+        else setTimeout(tick, 40)
+      }
+      tick()
+    })
   }
 }
 
@@ -223,12 +230,25 @@ export async function fetchVoiceToken(): Promise<VoiceTokenResponse> {
 export async function startVoiceSession(opts: {
   token: string
   profile: VoiceProfile
+  slots?: SlotHint[]
   onStatus: (s: VoiceStatus) => void
   onTranscript: (lines: TranscriptLine[]) => void
   onNotice?: (msg: string) => void
 }) {
   const profile = mergeProfile(opts.profile)
   const startedAt = Date.now()
+  const evRing: { ms: number; dir: "in" | "out"; type: string; extra?: string }[] = []
+  const logVoice = (dir: "in" | "out", type: string, extra?: unknown) => {
+    const rec = {
+      ms: Date.now() - startedAt,
+      dir,
+      type,
+      extra: extra === undefined ? undefined : String(typeof extra === "string" ? extra : JSON.stringify(extra)).slice(0, 220),
+    }
+    evRing.push(rec)
+    if (evRing.length > 100) evRing.shift()
+    console.debug("[akno-voice]", rec.dir, `${rec.ms}ms`, rec.type, rec.extra || "")
+  }
   const lines: TranscriptLine[] = []
   let assistantBuf = ""
   let saved = false
@@ -244,6 +264,19 @@ export async function startVoiceSession(opts: {
   let bargeSince: number | null = null
   let bargeArmed = false
   let echoTailUntil = 0
+  let greetingActive = false
+  let greetWatchdog: ReturnType<typeof setTimeout> | null = null
+
+  let prefetched = Array.isArray(opts.slots) ? opts.slots.filter(s => s && (s.label || (s.date && s.heure))) : []
+  if (!prefetched.length) {
+    try {
+      const body = await getAvailableSlots({})
+      const raw = (body as { slots?: unknown }).slots
+      prefetched = Array.isArray(raw) ? raw as SlotHint[] : []
+    } catch { /* agenda préchargé optionnel */ }
+  }
+  const slotsHint = formatSlotsHint(prefetched)
+  logVoice("out", "slots.prefetch", { n: prefetched.length, hint: slotsHint ? "yes" : "no" })
 
   const ctx = new AudioContext({ sampleRate: PREFERRED_RATE })
   if (ctx.state === "suspended") await ctx.resume()
@@ -251,7 +284,7 @@ export async function startVoiceSession(opts: {
   const player = new PcmPlayer(ctx)
   const mic = await connectMic(ctx)
   const recorder = startMixerRecorder(ctx, mic.source, player.output)
-  const session = buildSessionConfig(profile, sampleRate)
+  const session = buildSessionConfig(profile, sampleRate, slotsHint)
   const simpleSession = {
     voice: VOICE_ID,
     instructions: session.instructions,
@@ -262,7 +295,6 @@ export async function startVoiceSession(opts: {
       output: { format: { type: "audio/pcm", rate: sampleRate }, speed: 1.2 },
     },
   }
-  const slotsPromise = getAvailableSlots({})
   let usedSimple = false
   let greeted = false
 
@@ -281,7 +313,10 @@ export async function startVoiceSession(opts: {
   const ws = new WebSocket(WS_URL, [`xai-client-secret.${opts.token}`])
 
   const send = (obj: unknown) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
+    if (ws.readyState !== WebSocket.OPEN) return
+    const type = String((obj as { type?: string }).type || "unknown")
+    if (type !== "input_audio_buffer.append") logVoice("out", type)
+    ws.send(JSON.stringify(obj))
   }
 
   const resetBarge = () => {
@@ -299,7 +334,7 @@ export async function startVoiceSession(opts: {
   }
 
   const confirmBargeIn = () => {
-    if (closed || player.buffered <= 0.05) return
+    if (closed || greetingActive || player.buffered <= 0.05) return
     bargeArmed = true
     bargeSince = null
     interruptPlayback()
@@ -307,7 +342,7 @@ export async function startVoiceSession(opts: {
   }
 
   const flushMic = (f32: Float32Array) => {
-    if (!ready || closed || ws.readyState !== WebSocket.OPEN) return
+    if (!ready || greetingActive || closed || ws.readyState !== WebSocket.OPEN) return
     const playing = player.buffered > 0.08
     if (playing) echoTailUntil = Date.now() + 220
     const hold = playing || Date.now() < echoTailUntil
@@ -328,6 +363,21 @@ export async function startVoiceSession(opts: {
     }
     if (!hold) resetBarge()
     send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
+  }
+
+  const finishGreeting = async (reason: string) => {
+    if (!greetingActive || closed) return
+    if (greetWatchdog) { clearTimeout(greetWatchdog); greetWatchdog = null }
+    logVoice("in", "greeting.drain", reason)
+    await player.waitIdle()
+    await new Promise<void>(r => setTimeout(r, 280))
+    await player.waitIdle()
+    if (closed || !greetingActive) return
+    greetingActive = false
+    logVoice("in", "greeting.unlocked", reason)
+    if (ctx.state === "suspended") await ctx.resume().catch(() => { /* */ })
+    mic.setHandler(flushMic)
+    if (!pendingTools) opts.onStatus("live")
   }
 
   const handleTool = async (event: { name?: string; call_id?: string; arguments?: string }) => {
@@ -373,12 +423,21 @@ export async function startVoiceSession(opts: {
     let event: Record<string, unknown>
     try { event = JSON.parse(raw.data) } catch { return }
     const type = String(event.type || "")
+    const extra: Record<string, unknown> = {}
+    if (event.error) extra.error = event.error
+    if (event.transcript) extra.transcript = String(event.transcript).slice(0, 80)
+    if (type.includes("delta") || type.endsWith(".audio")) extra.bytes = String(event.delta || event.audio || "").length
+    const resp = event.response as { id?: string; status?: string } | undefined
+    if (resp?.status) extra.status = resp.status
+    if (event.item_id) extra.item_id = event.item_id
+    logVoice("in", type, Object.keys(extra).length ? extra : undefined)
 
     if (type === "session.updated") {
       ready = true
-      mic.setHandler(flushMic)
       if (greeted) return
       greeted = true
+      greetingActive = true
+      // Un seul accueil, déjà dans la config initiale (créneaux + tarifs). Pas de session.update ni de response.create.
       send({
         type: "conversation.item.create",
         item: {
@@ -388,19 +447,13 @@ export async function startVoiceSession(opts: {
           content: [{ type: "output_text", text: welcomeLine(profile) }],
         },
       })
-      void slotsPromise.then(async body => {
-        if (closed) return
-        const slots = Array.isArray((body as { slots?: unknown }).slots) ? (body as { slots: { label?: string; date?: string; heure?: string }[] }).slots : []
-        const hint = formatSlotsHint(slots)
-        if (!hint) return
-        await player.waitIdle()
-        if (closed || ws.readyState !== WebSocket.OPEN) return
-        send({ type: "session.update", session: { instructions: buildSessionConfig(profile, sampleRate).instructions + hint } })
-      }).catch(() => { /* agenda préchargé optionnel */ })
       opts.onStatus("speaking")
+      if (greetWatchdog) clearTimeout(greetWatchdog)
+      greetWatchdog = setTimeout(() => { void finishGreeting("watchdog") }, 20000)
       return
     }
     if (type === "input_audio_buffer.speech_started") {
+      if (greetingActive) return
       if (bargeTimer) clearTimeout(bargeTimer)
       if (player.buffered <= 0.05) return
       bargeTimer = setTimeout(() => { bargeTimer = null; confirmBargeIn() }, BARGE_MS)
@@ -445,8 +498,13 @@ export async function startVoiceSession(opts: {
       void handleTool(event as { name?: string; call_id?: string; arguments?: string })
       return
     }
-    if (type === "response.done") {
-      if (!pendingTools) opts.onStatus("live")
+    if (type === "response.done" || type === "response.output_audio.done") {
+      if (greetingActive) void finishGreeting(type)
+      else if (!pendingTools) opts.onStatus("live")
+      return
+    }
+    if (type === "response.cancelled" || type === "conversation.item.truncated" || type === "output_audio_buffer.cleared") {
+      // Ne pas vider le lecteur local : laisser jouer l'audio déjà en file.
       return
     }
     if (type === "error") {
@@ -495,6 +553,8 @@ export async function startVoiceSession(opts: {
     closed = true
     ready = false
     if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
+    if (greetWatchdog) { clearTimeout(greetWatchdog); greetWatchdog = null }
+    greetingActive = false
     opts.onStatus("ending")
     mic.setHandler(null)
     player.stop()
