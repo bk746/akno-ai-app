@@ -18,12 +18,15 @@ const WS_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 const SUPPORTED = new Set([8000, 16000, 22050, 24000, 32000, 44100, 48000])
 const PREFERRED_RATE = 24000
 const OUTPUT_RATE = 24000
-const BARGE_MS = 600
-const LOOKAHEAD = 0.12
+const BARGE_MS = 700
+const BARGE_RMS = 0.05
+const ECHO_RATIO = 1.25
+const LOOKAHEAD_MIN = 0.06
+const LOOKAHEAD_MAX = 0.14
 const PREFETCH_MS = 2500
 const DRAIN_MS = 30000
 const END_PAD_SEC = 0.08
-const ECHO_TAIL_MS = 80
+const ECHO_TAIL_MS = 220
 const UPLINK_FRAME_MS = 30
 const WAIT_IDLE_QUIET_MS = 16
 
@@ -105,6 +108,8 @@ class PcmPlayer {
   private ctx: AudioContext
   private next = 0
   private sources: AudioBufferSourceNode[] = []
+  private lookahead = LOOKAHEAD_MIN
+  private playRms = 0
   readonly output: GainNode
   constructor(ctx: AudioContext) {
     this.ctx = ctx
@@ -112,19 +117,29 @@ class PcmPlayer {
     this.output.connect(ctx.destination)
   }
   get buffered() { return Math.max(0, this.next - this.ctx.currentTime) }
+  get outputLevel() { return this.buffered < 0.03 ? 0 : this.playRms }
+  get startDelay() { return this.lookahead }
+  beginUtterance() { this.lookahead = LOOKAHEAD_MIN }
   enqueue(samples: Float32Array, rate: number) {
     if (!samples.length) return
     if (this.ctx.state === "suspended") void this.ctx.resume()
     const copy = samples.slice()
+    const level = rms(copy)
+    if (level > 0.001) this.playRms = Math.max(this.playRms * 0.55, level)
     const buf = this.ctx.createBuffer(1, copy.length, rate)
     buf.getChannelData(0).set(copy)
     const src = this.ctx.createBufferSource()
     src.buffer = buf
     src.connect(this.output)
     const now = this.ctx.currentTime
-    // Contiguous schedule: only jump after a true underrun. Resetting whenever
-    // we were slightly late inserted extra silence and made the voice choppy.
-    if (this.next < now) this.next = now + LOOKAHEAD
+    // Contiguous schedule: only jump after a true underrun.
+    // First chunk starts at ~60 ms; lookahead grows if underruns keep happening.
+    if (this.next < now) {
+      this.next = now + this.lookahead
+      this.lookahead = Math.min(LOOKAHEAD_MAX, this.lookahead + 0.02)
+    } else if (this.next - now > this.lookahead + 0.08) {
+      this.lookahead = Math.max(LOOKAHEAD_MIN, this.lookahead - 0.005)
+    }
     src.start(this.next)
     this.next += buf.duration
     this.sources.push(src)
@@ -140,6 +155,8 @@ class PcmPlayer {
     for (const src of this.sources) { try { src.stop() } catch { /* already stopped */ } }
     this.sources = []
     this.next = 0
+    this.lookahead = LOOKAHEAD_MIN
+    this.playRms = 0
   }
   waitIdle(maxMs = DRAIN_MS) {
     if (this.ctx.state === "suspended") void this.ctx.resume()
@@ -457,13 +474,16 @@ export async function startVoiceSession(opts: {
 
   const flushMic = (f32: Float32Array) => {
     if (!ready || greetingActive || closed || ws.readyState !== WebSocket.OPEN) return
-    const playing = player.buffered > 0.08
+    const playing = player.buffered > 0.02
     if (playing) echoTailUntil = Date.now() + ECHO_TAIL_MS
     const hold = playing || Date.now() < echoTailUntil
     if (hold && !bargeArmed) {
-      // Mute uplink while she speaks so her own voice cannot trigger server barge-in.
+      // Mute uplink the whole time she speaks. Only strong, sustained speech
+      // louder than her playback (echo gate) may interrupt — iPhone speaker echo
+      // otherwise triggers server VAD + response.cancel mid-sentence.
       resetUplink()
-      if (rms(f32) > 0.02) {
+      const need = Math.max(BARGE_RMS, player.outputLevel * ECHO_RATIO)
+      if (rms(f32) > need) {
         if (bargeSince == null) bargeSince = Date.now()
         else if (Date.now() - bargeSince >= BARGE_MS) {
           bargeArmed = true
@@ -600,15 +620,16 @@ export async function startVoiceSession(opts: {
     }
     if (type === "input_audio_buffer.speech_started") {
       if (greetingActive) return
-      if (bargeTimer) clearTimeout(bargeTimer)
-      if (player.buffered <= 0.05) return
-      bargeTimer = setTimeout(() => { bargeTimer = null; confirmBargeIn() }, BARGE_MS)
+      if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
+      // Do not barge-in from server VAD while she speaks or during the echo tail:
+      // speaker echo looks like user speech and would cancel her mid-sentence.
       return
     }
     if (type === "response.created") {
       assistantBuf = ""
       newAssistantTurn = true
       playbackFinalized = false
+      player.beginUtterance()
       return
     }
     if (type === "input_audio_buffer.speech_stopped") {
@@ -639,11 +660,12 @@ export async function startVoiceSession(opts: {
       const delta = String(event.delta || event.audio || "")
       if (delta) {
         lastAudioAt = Date.now()
+        const lookaheadMs = Math.round(player.startDelay * 1000)
         if (speechStoppedAt != null) {
           const ms = Date.now() - speechStoppedAt
           speechStoppedAt = null
-          console.info("[akno-voice] speech_stopped -> first audio", `${ms}ms`)
-          logVoice("in", "turn.ttfa", { ms })
+          console.info("[akno-voice] speech_stopped -> first audio", `${ms}ms`, `lookahead ${lookaheadMs}ms`)
+          logVoice("in", "turn.ttfa", { ms, lookaheadMs })
         }
         player.enqueue(decoder.push(delta), OUTPUT_RATE)
         opts.onStatus("speaking")
