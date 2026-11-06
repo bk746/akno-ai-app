@@ -1,4 +1,5 @@
 import DevisPaper from "./DevisPaper"
+import VoiceCall from "./VoiceCall"
 import { buildDoc } from "../lib/devisDoc"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -237,6 +238,7 @@ function ContactsSheet({ close }: { close: () => void }) {
 }
 function Rec() {
   const { s, set, modal, q, setChat, toast } = useC(), c = A.rec.c
+  const [voiceOn, setVoiceOn] = useState(false)
   const today = s.calls.filter(x => !x.day && match(q, x.name, x.topic, x.note)), hier = s.calls.filter(x => x.day && match(q, x.name, x.topic, x.note))
   const [sel] = useState(s.calls[0]?.id), [all, setAll] = useState(false)
   const cur = s.calls.find(x => x.id === sel) || s.calls[0]
@@ -247,15 +249,23 @@ function Rec() {
   const done = (x: Call) => { const snap = s; set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`, () => set(() => snap)) }
   const TRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</span>} s={`${x.tag || x.topic} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={c} onClick={() => done(x)} /></div>} />
   const CRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={x.name} s={x.tag || x.topic} r={<span className={tx.cap}>{x.time}</span>} rs={<Chip c={callSt(x)[1]}>{callSt(x)[0]}</Chip>} />
-  return <Shell k="rec" fig={<Num n={todo.length} />} sub={`appels à rappeler · ${urg} urgent${urg > 1 ? "s" : ""}`} actions={[
+  return <><Shell k="rec" fig={<Num n={todo.length} />} sub={`appels à rappeler · ${urg} urgent${urg > 1 ? "s" : ""}`} actions={[
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Sparkles, l: "Assistant", on: () => setChat(true) }]}>
+    <div className="col-span-2">
+      <button type="button" onClick={() => setVoiceOn(true)} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium text-white transition active:scale-[.98]" style={{ background: c, boxShadow: `0 12px 32px -12px ${c}99` }}>
+        <Phone size={18} strokeWidth={1.75} />
+        Appeler ma réceptionniste
+      </button>
+    </div>
     <Col><Section t="À rappeler" aside={todoS.length ? `${todoS.length} client${todoS.length > 1 ? "s" : ""}` : undefined}><List I={Check} empty="Personne à rappeler. Tout est à jour.">{todoS.map(TRow)}</List></Section>
       {cur && <Section t="Dernier débrief" more={() => open(cur)}><Card className="overflow-hidden"><Row first label={cur.topic} onClick={() => open(cur)} lead={<Av n={cur.name} />} t={cur.topic} s={cur.short || cur.name} r={<span className={tx.cap}>{cur.at || cur.time}</span>} />
       <div className="px-4 pb-4 pt-1"><Player p={pl} c={c} onMic={() => setChat(true)} /></div></Card></Section>}</Col>
     <Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section>
 </Col>
   </Shell>
+  {voiceOn && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email }} onDone={msg => { setVoiceOn(false); if (msg) toast(msg) }} />}
+  </>
 }
 
 /* ---------------- Agenda ---------------- */

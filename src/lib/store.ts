@@ -129,7 +129,7 @@ export function useStore() {
   }, [])
   useEffect(() => {
     load()
-    const ch = supabase.channel("akno-live").on("postgres_changes", { event: "*", schema: "public", table: "calls" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => load()).subscribe()
+    const ch = supabase.channel("akno-live").on("postgres_changes", { event: "*", schema: "public", table: "calls" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "devis" }, () => load()).subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [load])
   const sync = useCallback(async (p: St, n: St) => {
