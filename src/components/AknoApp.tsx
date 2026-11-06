@@ -24,9 +24,9 @@ import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from
 type K = "rec" | "ag" | "rel" | "dev"
 type P = K | "set"
 const A = {
-  rec: { n: "Réceptionniste", c: "#5B1BE0", tab: "Réception", I: PhoneCall, slug: "reception", d: "Décroche 24/7" },
+  rec: { n: "Réceptionniste", c: "#E6E6E6", tab: "Réception", I: PhoneCall, slug: "reception", d: "Décroche 24/7" },
   ag: { n: "Agenda", c: "#FF7070", tab: "Agenda", I: CalendarDays, slug: "agenda", d: "Cale vos RDV" },
-  rel: { n: "Relance", c: "#E6E6E6", tab: "Relance", I: Repeat2, slug: "relance", d: "Avis et rappels" },
+  rel: { n: "Relance", c: "#5B1BE0", tab: "Relance", I: Repeat2, slug: "relance", d: "Avis et rappels" },
   dev: { n: "Devis", c: "#0E8F8F", tab: "Devis", I: Receipt, slug: "devis", d: "Chiffre en direct" },
 } as const
 const agents = ["rec", "ag", "rel", "dev"] as const
@@ -150,7 +150,7 @@ function Num({ n, u, money }: { n: number; u?: string; money?: boolean }) {
 /* Gabarit unique de page : blob + chiffre clé + actions rondes + sections */
 function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any }) {
   const { desk, s, setChat } = useC(), on = k ? s.settings.agents[k] : true
-  const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${k === "rel" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
+  const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${A[k].c === "#E6E6E6" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
   const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
   const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-4 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`${desk ? "mt-1 text-[52px]" : "mt-3 text-[44px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const LB = L && <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block cursor-pointer select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{L}</button>
@@ -177,7 +177,7 @@ const NAV_I: Record<P, any> = {
   dev: <><path d="M7 3.5h7l4.5 4.5v10.5A2 2 0 0 1 16.5 20.5h-9.5A2 2 0 0 1 5 18.5v-13a2 2 0 0 1 2-2Z" /><path d="M13.5 3.5V8h5M8.5 12.5h7M8.5 16h4.5" /></>,
   set: <><path d="M4.5 7.5h8M16.5 7.5h3M4.5 16.5h3M11.5 16.5h8" /><circle cx="14.5" cy="7.5" r="2" /><circle cx="9.5" cy="16.5" r="2" /></>,
 }
-const NAV_C: Record<P, string> = { rec: A.rec.c, ag: A.ag.c, rel: "#fff", dev: A.dev.c, set: "#fff" }
+const NAV_C: Record<P, string> = { rec: "#fff", ag: A.ag.c, rel: A.rel.c, dev: A.dev.c, set: "#fff" }
 const NAV_L: Record<P, string> = { rec: "Réception", ag: "Agenda", rel: "Relance", dev: "Devis", set: "Réglages" }
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
 function TabBar() {
@@ -267,7 +267,7 @@ function Player({ p, c, onMic, compact }: { p: ReturnType<typeof usePlayer>; c: 
       {WAVE.map((h, i) => <span key={i} className="w-[2px] shrink-0 rounded-full transition-colors duration-150" style={{ height: `${Math.round(h * 100)}%`, background: i < played ? c : "rgba(255,255,255,.18)" }} />)}</div>
     <span className="w-9 shrink-0 text-right text-[13px] tabular-nums text-white/50">{p.play || p.pos > 0 ? mmss(p.pos) : mmss(p.total)}</span>
     <button type="button" data-hit aria-label="Vitesse de lecture" onClick={e => { e.stopPropagation(); p.cycleRate() }} className="flex h-8 shrink-0 items-center justify-center rounded-full bg-white/[.08] px-2.5 text-[12px] font-semibold tabular-nums text-white/80 hover:bg-white/[.14]">{rateLabel(p.rate)}</button>
-    {onMic && <button data-hit aria-label="Parler à l'assistant" onClick={e => { e.stopPropagation(); onMic() }} className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-[.94]" style={{ background: c, boxShadow: `0 4px 12px -6px ${c}80` }}><Mic size={16} strokeWidth={SW} /></button>}
+    {onMic && <button data-hit aria-label="Parler à l'assistant" onClick={e => { e.stopPropagation(); onMic() }} className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-[.94]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 4px 12px -6px ${c}80` }}><Mic size={16} strokeWidth={SW} /></button>}
   </div>
 }
 
@@ -328,7 +328,7 @@ function Rec() {
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Sparkles, l: "Assistant", on: () => setChat(true) }]}>
     <div className="col-span-2">
-      <button type="button" onClick={() => setVoiceOn(true)} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium text-white transition active:scale-[.98]" style={{ background: c, boxShadow: `0 12px 32px -12px ${c}99` }}>
+      <button type="button" onClick={() => setVoiceOn(true)} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium transition active:scale-[.98]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 12px 32px -12px ${c}99` }}>
         <Phone size={18} strokeWidth={1.75} />
         Appeler ma réceptionniste
       </button>
@@ -628,7 +628,7 @@ function linkedCall(s: St, e: Ev): Call | undefined {
   return s.calls.find(c => ckey(c.name) === ckey(e.name))
 }
 const CQA = ({ I, l, href, c, ext, onClick }: any) => {
-  const inner = <><span className="flex h-12 w-12 items-center justify-center rounded-full transition active:scale-[.94]" style={c ? { background: c, color: "#fff" } : { background: "rgba(255,255,255,.08)" }}><I size={18} strokeWidth={SW} /></span>{l}</>
+  const inner = <><span className="flex h-12 w-12 items-center justify-center rounded-full transition active:scale-[.94]" style={c ? { background: c, color: c === "#E6E6E6" || c === "#FFFFFF" || c === "#fff" ? "#000" : "#fff" } : { background: "rgba(255,255,255,.08)" }}><I size={18} strokeWidth={SW} /></span>{l}</>
   const cls = "flex flex-col items-center gap-2 text-[12.5px] text-white/70 hover:text-white"
   if (onClick) return <button type="button" onClick={onClick} className={cls}>{inner}</button>
   return <a href={href} {...(ext ? { target: "_blank", rel: "noreferrer" } : {})} className={cls}>{inner}</a>

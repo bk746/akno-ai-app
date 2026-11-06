@@ -5,7 +5,7 @@ import { BLOB } from "./blobPath"
 import { fetchVoiceToken, startVoiceSession, type TranscriptLine, type VoiceStatus } from "../lib/voice/client"
 import { mergeProfile, type VoiceProfile } from "../lib/voice/script"
 
-const C = "#5B1BE0"
+const C = "#E6E6E6"
 
 const STATUS: Record<VoiceStatus, string> = {
   idle: "",
@@ -90,7 +90,7 @@ export default function VoiceCall({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[70] flex flex-col bg-black text-white"
     >
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 38%, ${C}33 0%, transparent 58%)` }} />
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 38%, ${C}1A 0%, transparent 58%)` }} />
       <div className="relative flex h-12 shrink-0 items-center justify-end px-4" style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}>
         <button type="button" aria-label="Fermer" onPointerUp={e => { e.preventDefault(); hangup() }} onClick={hangup} className="relative z-20 flex h-10 w-10 items-center justify-center rounded-full text-white/50 hover:bg-white/[.06] hover:text-white" style={{ touchAction: "manipulation" }}>
           <X size={20} strokeWidth={1.75} />
@@ -102,7 +102,7 @@ export default function VoiceCall({
           transition={{ duration: status === "speaking" ? 1.1 : 3.2, repeat: Infinity, ease: "easeInOut" }}
           className="pointer-events-none relative"
         >
-          <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[280px] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${C}${status === "speaking" ? "55" : "33"} 0%, transparent 64%)` }} />
+          <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[280px] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${C}${status === "speaking" ? "33" : "1A"} 0%, transparent 64%)` }} />
           <svg viewBox="0 0 267 279" width={148} height={148 * 279 / 267} className="relative">
             <path d={BLOB} fill={C} />
             <ellipse cx={106.5} cy={104.5} rx={22.5} ry={status === "listening" ? 28 : 31} fill="#000" />
