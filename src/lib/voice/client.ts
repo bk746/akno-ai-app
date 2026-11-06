@@ -1,5 +1,6 @@
 import { supabase } from "../supabase"
-import { buildSessionConfig, mergeProfile, welcomeLine, type VoiceProfile } from "./script"
+import { uploadCallRecording } from "../recordings"
+import { buildSessionConfig, mergeProfile, welcomeLine, VOICE_ID, type VoiceProfile } from "./script"
 import { bookAppointment, getAvailableSlots, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
 
 export type VoiceStatus = "idle" | "connecting" | "live" | "speaking" | "listening" | "thinking" | "ending" | "error"
@@ -14,6 +15,9 @@ export type VoiceTokenResponse = {
 
 const WS_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 const SUPPORTED = new Set([8000, 16000, 22050, 24000, 32000, 44100, 48000])
+const PREFERRED_RATE = 24000
+const BARGE_MS = 320
+const LOOKAHEAD = 0.08
 
 function nearestRate(n: number) {
   if (SUPPORTED.has(n)) return n
@@ -50,17 +54,23 @@ class PcmPlayer {
   private ctx: AudioContext
   private next = 0
   private sources: AudioBufferSourceNode[] = []
-  constructor(ctx: AudioContext) { this.ctx = ctx }
+  readonly output: GainNode
+  constructor(ctx: AudioContext) {
+    this.ctx = ctx
+    this.output = ctx.createGain()
+    this.output.connect(ctx.destination)
+  }
   get buffered() { return Math.max(0, this.next - this.ctx.currentTime) }
   enqueue(samples: Float32Array, rate: number) {
     if (!samples.length) return
-    const buf = this.ctx.createBuffer(1, samples.length, rate)
-    buf.getChannelData(0).set(samples)
+    const copy = samples.slice()
+    const buf = this.ctx.createBuffer(1, copy.length, rate)
+    buf.getChannelData(0).set(copy)
     const src = this.ctx.createBufferSource()
     src.buffer = buf
-    src.connect(this.ctx.destination)
+    src.connect(this.output)
     const now = this.ctx.currentTime
-    if (this.next < now) this.next = now
+    if (this.next < now + 0.02) this.next = now + LOOKAHEAD
     src.start(this.next)
     this.next += buf.duration
     this.sources.push(src)
@@ -81,7 +91,7 @@ const WORKLET = `
 class AknoCapture extends AudioWorkletProcessor {
   process(inputs) {
     const ch = inputs[0] && inputs[0][0]
-    if (ch && ch.length) this.port.postMessage(ch)
+    if (ch && ch.length) this.port.postMessage(ch.slice())
     return true
   }
 }
@@ -90,7 +100,13 @@ registerProcessor('akno-capture', AknoCapture)
 
 async function connectMic(ctx: AudioContext) {
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: ctx.sampleRate,
+    },
   })
   const source = ctx.createMediaStreamSource(stream)
   const mute = ctx.createGain()
@@ -116,11 +132,48 @@ async function connectMic(ctx: AudioContext) {
   }
   return {
     stream,
+    source,
     setHandler(fn: ((f32: Float32Array) => void) | null) { onFrame = fn },
     stop() {
       onFrame = null
       try { source.disconnect(); node.disconnect(); mute.disconnect() } catch { /* */ }
       stream.getTracks().forEach(t => t.stop())
+    },
+  }
+}
+
+function pickRecorderMime() {
+  const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"]
+  for (const t of types) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t
+  }
+  return ""
+}
+
+function startMixerRecorder(ctx: AudioContext, micSource: MediaStreamAudioSourceNode, agentOut: AudioNode) {
+  const mix = ctx.createMediaStreamDestination()
+  try { micSource.connect(mix) } catch { /* */ }
+  try { agentOut.connect(mix) } catch { /* */ }
+  const chunks: Blob[] = []
+  let rec: MediaRecorder | null = null
+  try {
+    const mime = pickRecorderMime()
+    rec = mime ? new MediaRecorder(mix.stream, { mimeType: mime }) : new MediaRecorder(mix.stream)
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data) }
+    rec.start(1000)
+  } catch {
+    rec = null
+  }
+  return {
+    stop(): Promise<Blob | null> {
+      return new Promise(resolve => {
+        if (!rec || rec.state === "inactive") {
+          resolve(chunks.length ? new Blob(chunks, { type: rec?.mimeType || "audio/webm" }) : null)
+          return
+        }
+        rec.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: rec?.mimeType || "audio/webm" }) : null)
+        try { rec.stop() } catch { resolve(null) }
+      })
     },
   }
 }
@@ -151,23 +204,26 @@ export async function startVoiceSession(opts: {
   const lines: TranscriptLine[] = []
   let assistantBuf = ""
   let saved = false
+  let savedCallId: string | number | undefined
   let lastSaveMessage = ""
   let ready = false
   let closed = false
   let pendingTools = 0
   let newUserTurn = false
   let newAssistantTurn = false
+  let bargeTimer: ReturnType<typeof setTimeout> | null = null
 
-  const ctx = new AudioContext()
+  const ctx = new AudioContext({ sampleRate: PREFERRED_RATE })
   if (ctx.state === "suspended") await ctx.resume()
   const sampleRate = nearestRate(ctx.sampleRate)
   const player = new PcmPlayer(ctx)
   const mic = await connectMic(ctx)
+  const recorder = startMixerRecorder(ctx, mic.source, player.output)
   const session = buildSessionConfig(profile, sampleRate)
   const simpleSession = {
-    voice: "carina",
+    voice: VOICE_ID,
     instructions: session.instructions,
-    turn_detection: { type: "server_vad" as const },
+    turn_detection: { type: "server_vad" as const, idle_timeout_ms: 8000 },
     tools: session.tools,
     audio: {
       input: { format: { type: "audio/pcm", rate: sampleRate }, transcription: { language_hint: "fr" } },
@@ -199,6 +255,13 @@ export async function startVoiceSession(opts: {
     send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
   }
 
+  const interruptPlayback = () => {
+    player.stop()
+    assistantBuf = ""
+    newUserTurn = true
+    opts.onStatus("listening")
+  }
+
   const handleTool = async (event: { name?: string; call_id?: string; arguments?: string }) => {
     pendingTools++
     opts.onStatus("thinking")
@@ -217,6 +280,7 @@ export async function startVoiceSession(opts: {
         })
         if (result && typeof result === "object" && (result as { ok?: boolean }).ok) {
           saved = true
+          savedCallId = (result as { call_id?: string | number }).call_id
           lastSaveMessage = (result as { message?: string }).message || "Appel enregistré dans Réception."
         }
       }
@@ -256,10 +320,10 @@ export async function startVoiceSession(opts: {
       return
     }
     if (type === "input_audio_buffer.speech_started") {
-      player.stop()
-      assistantBuf = ""
-      newUserTurn = true
-      opts.onStatus("listening")
+      if (bargeTimer) clearTimeout(bargeTimer)
+      const delay = player.buffered > 0.05 ? BARGE_MS : 0
+      if (delay === 0) interruptPlayback()
+      else bargeTimer = setTimeout(() => { bargeTimer = null; interruptPlayback() }, delay)
       return
     }
     if (type === "response.created") {
@@ -268,6 +332,7 @@ export async function startVoiceSession(opts: {
       return
     }
     if (type === "input_audio_buffer.speech_stopped") {
+      if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
       opts.onStatus("thinking")
       return
     }
@@ -338,6 +403,7 @@ export async function startVoiceSession(opts: {
   } catch (e) {
     mic.stop()
     player.stop()
+    void recorder.stop()
     void ctx.close()
     try { ws.close() } catch { /* */ }
     throw e
@@ -347,10 +413,12 @@ export async function startVoiceSession(opts: {
     if (closed) return lastSaveMessage
     closed = true
     ready = false
+    if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
     opts.onStatus("ending")
     mic.setHandler(null)
     player.stop()
     try { ws.close() } catch { /* */ }
+    const blob = await recorder.stop()
     mic.stop()
     try { await ctx.close() } catch { /* */ }
     if (saveFallback && !saved && Date.now() - startedAt > 4000) {
@@ -367,8 +435,12 @@ export async function startVoiceSession(opts: {
       }, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
       if (result.ok) {
         saved = true
+        savedCallId = result.call_id
         lastSaveMessage = result.message || "Appel enregistré dans Réception."
       }
+    }
+    if (blob && savedCallId != null) {
+      await uploadCallRecording(savedCallId, blob)
     }
     opts.onStatus("idle")
     return lastSaveMessage

@@ -36,6 +36,11 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
   }
 }
 
+/** Voix xAI (session.update.voice). Toutes parlent français.
+ *  ara : originale retravaillée (rythme plus naturel), chaleureuse — mieux qu'une voix « flagship »
+ *  trop lisse comme carina, et sans l'accent britannique d'eve. */
+export const VOICE_ID = "ara"
+
 export function welcomeLine(p: VoiceProfile) {
   return `${p.company}, bonjour ! Je suis l'assistante de ${p.prenom}. Cet appel peut être enregistré. Comment puis-je vous aider ?`
 }
@@ -56,8 +61,11 @@ export function buildInstructions(p: VoiceProfile) {
 
 LANGUE ET TON
 - Tu réponds TOUJOURS en français, même si on te parle dans une autre langue. Si la personne ne parle pas français, tu dis poliment, en phrases très simples, que ${p.prenom} la rappellera.
-- Ton chaleureux, poli et naturel, comme une vraie secrétaire. Vouvoiement toujours.
-- Phrases courtes. Une seule question à la fois. Tu ne coupes jamais la parole.
+- Ton chaleureux, poli et naturel, comme une vraie secrétaire au téléphone. Vouvoiement toujours.
+- Phrases courtes et parlées. Une seule question à la fois. Tu ne coupes jamais la parole.
+- Tu parles comme une personne, pas comme un robot : un peu de liant (« d'accord », « très bien », « je vois », « bien sûr »), sans en abuser.
+- Tu ne lis jamais de listes à puces, de markdown, d'astérisques, de titres ou de numéros d'énumération à voix haute. Tout est formulé en phrases naturelles.
+- Les numéros, les heures et les montants se disent naturellement (« zéro six », « mardi à quatorze heures »), jamais comme du texte écrit (« 14:00 », « 06 12 34 56 78 » d'un bloc).
 - Tu ne dis jamais que tu es une IA, sauf si on te le demande directement. Dans ce cas, tu dis honnêtement : « Je suis l'assistante virtuelle de ${p.prenom}, je prends vos informations et il vous rappelle. »
 
 DÉBUT DE L'APPEL
@@ -132,7 +140,9 @@ QUESTIONS FRÉQUENTES
 Si tu ne connais pas la réponse : « Bonne question, je la transmets à ${p.prenom}, il vous répondra directement. »
 
 FIN DE L'APPEL
-- Tu récapitules : « Je récapitule : [nom], au [numéro], au [adresse], pour [besoin], [créneau ou rappel]. C'est bien ça ? »
+- AVANT le récapitulatif, tu demandes TOUJOURS si la personne souhaite un devis, sauf si elle l'a déjà clairement demandé pendant l'appel. Dans ce cas, tu confirmes simplement que tu notes la demande.
+- Exemple : « Souhaitez-vous que ${p.prenom} vous prépare un devis ? »
+- Ensuite tu récapitules : « Je récapitule : [nom], au [numéro], au [adresse], pour [besoin], [créneau ou rappel], [devis ou non]. C'est bien ça ? »
 - Tu corriges si besoin.
 - Dès que le récapitulatif est confirmé, ou si la personne dit au revoir, tu appelles l'outil save_call avec toutes les informations collectées. Si un devis a été demandé, tu mets devis_demande à true.
 - Tu conclus : « Merci beaucoup, ${p.prenom} revient vers vous très vite. Bonne journée ! »
@@ -218,10 +228,10 @@ export function buildSessionConfig(p: VoiceProfile, sampleRate: number) {
   if (p.company && !keyterms.includes(p.company)) keyterms.push(p.company.slice(0, 50))
   if (p.prenom && p.prenom !== "l'artisan" && !keyterms.includes(p.prenom)) keyterms.push(p.prenom.slice(0, 50))
   return {
-    voice: "carina",
+    voice: VOICE_ID,
     instructions: buildInstructions(p),
     reasoning: { effort: "none" as const },
-    turn_detection: { type: "server_vad" as const, idle_timeout_ms: 8000 },
+    turn_detection: { type: "server_vad" as const, threshold: 0.75, silence_duration_ms: 700, prefix_padding_ms: 300, idle_timeout_ms: 8000 },
     tools: VOICE_TOOLS,
     audio: {
       input: {

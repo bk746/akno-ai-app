@@ -8,6 +8,7 @@ import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from
 import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
+import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
 import Login from "./Login"
 import { LockScreen, LockSetup } from "./Lock"
@@ -187,25 +188,77 @@ function TabBar() {
     </div></nav>
 }
 
-/* Lecteur d'appel : play contour, onde ~40 barres (progression + seek), durée, micro assistant */
-const secs = (d?: string) => { const [m, x] = (d || "2:14").split(":").map(Number); return (m || 0) * 60 + (x || 0) || 1 }
+/* Lecteur d'appel : audio réel (URL signée) + vitesse 1x / 1.25x / 1.5x / 2x */
+const secs = (d?: string) => { const [m, x] = (d || "0:00").split(":").map(Number); return (m || 0) * 60 + (x || 0) || 1 }
 const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`
-function usePlayer(total: number) {
-  const [play, setPlay] = useState(false), [pos, setPos] = useState(0)
+const RATES = [1, 1.25, 1.5, 2] as const
+const rateLabel = (n: number) => n === 1 ? "1x" : n === 1.25 ? "1.25x" : n === 1.5 ? "1.5x" : "2x"
+function usePlayer(total: number, recording?: string) {
+  const [play, setPlay] = useState(false), [pos, setPos] = useState(0), [rate, setRate] = useState(1), [dur, setDur] = useState(total || 1), [src, setSrc] = useState<string>()
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   useEffect(() => { setListen(play); return () => setListen(false) }, [play])
-  useEffect(() => { if (!play) return; const t = setInterval(() => setPos(p => { const n = p + .1; if (n >= total) { setPlay(false); return total } return n }), 100); return () => clearInterval(t) }, [play, total])
-  const toggle = () => { if (!play && pos >= total) setPos(0); setPlay(!play) }
-  return { play, pos, setPos, toggle, total }
+  useEffect(() => {
+    let on = true
+    setSrc(undefined)
+    if (!recording) return
+    signedRecordingUrl(recording).then(u => { if (on && u) setSrc(u) })
+    return () => { on = false }
+  }, [recording])
+  useEffect(() => {
+    setPos(0); setPlay(false); setDur(total || 1)
+    if (!src) { audioRef.current = null; return }
+    const a = new Audio(src)
+    a.preload = "metadata"
+    a.playbackRate = rate
+    audioRef.current = a
+    const onTime = () => setPos(a.currentTime)
+    const onMeta = () => { if (Number.isFinite(a.duration) && a.duration > 0) setDur(a.duration) }
+    const onEnd = () => { setPlay(false); setPos(a.duration || 0) }
+    a.addEventListener("timeupdate", onTime)
+    a.addEventListener("loadedmetadata", onMeta)
+    a.addEventListener("ended", onEnd)
+    return () => {
+      a.pause()
+      a.removeEventListener("timeupdate", onTime)
+      a.removeEventListener("loadedmetadata", onMeta)
+      a.removeEventListener("ended", onEnd)
+      a.removeAttribute("src"); a.load()
+      if (audioRef.current === a) audioRef.current = null
+    }
+  }, [src, total])
+  useEffect(() => { if (audioRef.current) audioRef.current.playbackRate = rate }, [rate])
+  useEffect(() => {
+    if (src || !play) return
+    const t = setInterval(() => setPos(p => { const n = p + .1 * rate; if (n >= dur) { setPlay(false); return dur } return n }), 100)
+    return () => clearInterval(t)
+  }, [play, dur, src, rate])
+  const seek = (t: number) => { const n = Math.max(0, Math.min(dur, t)); setPos(n); if (audioRef.current) audioRef.current.currentTime = n }
+  const toggle = () => {
+    const a = audioRef.current
+    if (a) {
+      if (play) { a.pause(); setPlay(false) }
+      else {
+        if (a.ended || pos >= (a.duration || dur) - 0.05) { a.currentTime = 0; setPos(0) }
+        void a.play().then(() => setPlay(true)).catch(() => setPlay(false))
+      }
+      return
+    }
+    if (!play && pos >= dur) setPos(0)
+    setPlay(!play)
+  }
+  const cycleRate = () => { const i = RATES.findIndex(x => x === rate); setRate(RATES[(i + 1) % RATES.length]) }
+  return { play, pos, setPos: seek, toggle, total: dur, rate, cycleRate }
 }
 const WAVE = Array.from({ length: 32 }, (_, i) => .25 + Math.abs(Math.sin(i * 1.9) * .5 + Math.sin(i * .55) * .3) * .85)
 function Player({ p, c, onMic, compact }: { p: ReturnType<typeof usePlayer>; c: string; onMic?: () => void; compact?: boolean }) {
-  const f = p.pos / p.total, played = Math.round(f * WAVE.length)
+  const f = p.total ? p.pos / p.total : 0, played = Math.round(f * WAVE.length)
   const seek = (e: any) => { const r = e.currentTarget.getBoundingClientRect(); p.setPos(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * p.total) }
   return <div className={`flex items-center ${compact && !onMic ? "h-9 gap-2.5" : "h-11 gap-3"}`}>
     <button data-hit aria-label={p.play ? "Pause" : "Écouter l'appel"} onClick={e => { e.stopPropagation(); p.toggle() }} className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[.12] transition-colors hover:border-white/25">{p.play ? <Pause size={14} fill="white" strokeWidth={0} /> : <Play size={14} fill="white" strokeWidth={0} className="ml-[1px]" />}</button>
     <div role="slider" tabIndex={0} aria-label="Position de lecture" aria-valuemin={0} aria-valuemax={Math.round(p.total)} aria-valuenow={Math.round(p.pos)} aria-valuetext={mmss(p.pos)} onClick={e => { e.stopPropagation(); seek(e) }} onKeyDown={e => { if (e.key === "ArrowRight") p.setPos(Math.min(p.total, p.pos + 5)); if (e.key === "ArrowLeft") p.setPos(Math.max(0, p.pos - 5)) }} className="flex h-[22px] min-w-0 flex-1 cursor-pointer items-center justify-between">
       {WAVE.map((h, i) => <span key={i} className="w-[2px] shrink-0 rounded-full transition-colors duration-150" style={{ height: `${Math.round(h * 100)}%`, background: i < played ? c : "rgba(255,255,255,.18)" }} />)}</div>
     <span className="w-9 shrink-0 text-right text-[13px] tabular-nums text-white/50">{p.play || p.pos > 0 ? mmss(p.pos) : mmss(p.total)}</span>
+    <button type="button" data-hit aria-label="Vitesse de lecture" onClick={e => { e.stopPropagation(); p.cycleRate() }} className="flex h-8 shrink-0 items-center justify-center rounded-full bg-white/[.08] px-2.5 text-[12px] font-semibold tabular-nums text-white/80 hover:bg-white/[.14]">{rateLabel(p.rate)}</button>
     {onMic && <button data-hit aria-label="Parler à l'assistant" onClick={e => { e.stopPropagation(); onMic() }} className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-[.94]" style={{ background: c, boxShadow: `0 4px 12px -6px ${c}80` }}><Mic size={16} strokeWidth={SW} /></button>}
   </div>
 }
@@ -236,20 +289,34 @@ function ContactsSheet({ close }: { close: () => void }) {
       : <List empty="Aucun contact ne correspond">{[]}</List>}
   </Sheet>
 }
+function parisYmd(d: Date) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/Paris" }) }
+function mondayParisYmd() {
+  const now = new Date()
+  const dow = now.toLocaleString("en-US", { timeZone: "Europe/Paris", weekday: "short" })
+  const fromMon = (["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(dow) + 6) % 7
+  const [y, m, d] = parisYmd(now).split("-").map(Number)
+  const mon = new Date(Date.UTC(y, m - 1, d - fromMon))
+  return `${mon.getUTCFullYear()}-${String(mon.getUTCMonth() + 1).padStart(2, "0")}-${String(mon.getUTCDate()).padStart(2, "0")}`
+}
+function weekCallCount(calls: Call[]) {
+  const mon = mondayParisYmd()
+  return calls.filter(c => c.createdAt && parisYmd(new Date(c.createdAt)) >= mon).length
+}
 function Rec() {
   const { s, set, modal, q, setChat, toast } = useC(), c = A.rec.c
   const [voiceOn, setVoiceOn] = useState(false)
   const today = s.calls.filter(x => !x.day && match(q, x.name, x.topic, x.note)), hier = s.calls.filter(x => x.day && match(q, x.name, x.topic, x.note))
   const [sel] = useState(s.calls[0]?.id), [all, setAll] = useState(false)
   const cur = s.calls.find(x => x.id === sel) || s.calls[0]
-  const pl = usePlayer(secs(cur?.dur)), play = pl.play
+  const pl = usePlayer(secs(cur?.dur), cur?.recording), play = pl.play
   const todo = s.calls.filter(x => x.callback), urg = todo.filter(x => x.urgent).length
+  const weekN = weekCallCount(s.calls)
   const open = (x: Call) => modal({ kind: "client", data: { name: x.name, call: x.id } }), cts = contacts(s)
   const todoS = todo.filter(x => match(q, x.name, x.topic, x.note)).sort((a, b) => Number(b.urgent) - Number(a.urgent))
   const done = (x: Call) => { const snap = s; set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`, () => set(() => snap)) }
   const TRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</span>} s={`${x.tag || x.topic} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={c} onClick={() => done(x)} /></div>} />
   const CRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={x.name} s={x.tag || x.topic} r={<span className={tx.cap}>{x.time}</span>} rs={<Chip c={callSt(x)[1]}>{callSt(x)[0]}</Chip>} />
-  return <><Shell k="rec" fig={<Num n={todo.length} />} sub={`appels à rappeler · ${urg} urgent${urg > 1 ? "s" : ""}`} actions={[
+  return <><Shell k="rec" fig={<Num n={weekN} />} sub="appels reçus cette semaine" actions={[
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Sparkles, l: "Assistant", on: () => setChat(true) }]}>
     <div className="col-span-2">
@@ -328,7 +395,7 @@ function AgCal() {
   const onEv = (e: Ev) => modal({ kind: "ev", data: e }), onSlot = (dt: string, h: number) => modal({ kind: "rdv", data: { date: dt, start: h } })
   const dayList = evs.filter(e => e.date === cur).sort((a, b) => a.start - b.start)
   const hot = (e: Ev) => e.date === TODAY && e.start <= NOW && NOW < e.start + e.dur
-  const ERow = (e: Ev, i: number) => <Row key={e.id} first={i === 0} label={e.name} onClick={() => modal({ kind: "client", data: { name: e.name } })} lead={<span className="flex h-10 w-12 shrink-0 flex-col items-center justify-center rounded-[12px]" style={hot(e) ? { background: c + "29", color: c } : { background: "rgba(255,255,255,.07)" }}><span className="text-[13px] font-semibold leading-none">{hh(e.start)}</span><span className="mt-1 text-[10px] leading-none opacity-60">{durF(e.dur)}</span></span>} t={<span className="flex items-center gap-2"><span className="truncate">{e.name}</span>{hot(e) && <Chip c={c}>En cours</Chip>}</span>} s={e.topic} r={<TBtn I={Phone} label={`Appeler ${e.name}`} href={`tel:${tel(e.name)}`} />} />
+  const ERow = (e: Ev, i: number) => <Row key={e.id} first={i === 0} label={e.name} onClick={() => modal({ kind: "ev", data: e })} lead={<span className="flex h-10 w-12 shrink-0 flex-col items-center justify-center rounded-[12px]" style={hot(e) ? { background: c + "29", color: c } : { background: "rgba(255,255,255,.07)" }}><span className="text-[13px] font-semibold leading-none">{hh(e.start)}</span><span className="mt-1 text-[10px] leading-none opacity-60">{durF(e.dur)}</span></span>} t={<span className="flex items-center gap-2"><span className="truncate">{e.name}</span>{hot(e) && <Chip c={c}>En cours</Chip>}</span>} s={e.topic} r={<TBtn I={Phone} label={`Appeler ${e.name}`} href={`tel:${tel(e.name)}`} />} />
   const seg = <div role="tablist" aria-label="Vue du calendrier" className="flex h-9 rounded-full bg-white/[.07] p-[3px]">{([["j", "Jour"], ["s", "Semaine"], ["m", "Mois"], ["a", "Année"]] as [CV, string][]).map(([k, l]) => <button key={k} role="tab" aria-selected={v === k} onClick={() => setV(k)} className={`relative flex-1 rounded-full px-3 text-[13px] font-medium transition-colors ${v === k ? "text-black" : "text-white/60 hover:text-white"}`}>{v === k && <motion.span layoutId="cal-seg" transition={spring} className="absolute inset-0 rounded-full bg-white" />}<span className="relative">{l}</span></button>)}</div>
   const nav = <div className="flex items-center gap-1.5"><button onClick={() => setCur(TODAY)} disabled={isNow} className="h-9 rounded-full bg-white/[.07] px-3.5 text-[13px] font-medium text-white transition hover:bg-white/[.12] disabled:opacity-40">Aujourd'hui</button><button aria-label="Précédent" onClick={() => move(-1)} className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:bg-white/[.07] hover:text-white"><ChevronLeft size={20} strokeWidth={SW} /></button><button aria-label="Suivant" onClick={() => move(1)} className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:bg-white/[.07] hover:text-white"><ChevronRight size={20} strokeWidth={SW} /></button></div>
   const view = v === "a" ? <YearGrid cur={cur} evs={evs} onMonth={f => { setCur(f); setV("m") }} />
@@ -356,7 +423,7 @@ function Ag() {
   const d0 = dd(days[0]), d4 = dd(days[4])
   const range = `${d0.getDate()}${d0.getMonth() !== d4.getMonth() ? " " + MONTHS[d0.getMonth()] : ""} – ${d4.getDate()} ${MONTHS[d4.getMonth()]}`
   const addrOf = (e: Ev) => e.addr || s.calls.find(x => x.name.split(" ").slice(-1)[0] === e.name.split(" ").slice(-1)[0])?.addr
-  const ERow = (e: Ev, i: number) => { const ad = addrOf(e); return <Row key={e.id} first={i === 0} label={e.name} onClick={() => modal({ kind: "client", data: { name: e.name } })} lead={<span className={`flex h-10 w-12 shrink-0 flex-col items-center justify-center rounded-[12px] ${hot(e) ? "" : "bg-white/[.07]"}`} style={hot(e) ? { background: c + "29", color: c } : {}}><span className="text-[13px] font-semibold leading-none">{hh(e.start)}</span><span className="mt-1 text-[10px] leading-none opacity-60">{durF(e.dur)}</span></span>} t={<span className="flex items-center gap-2"><span className="truncate">{e.name}</span>{hot(e) && <Chip c={c}>En cours</Chip>}</span>} s={`${e.topic}${ad ? " · " + ad : ""}`} r={<div className="flex items-center gap-2">{ad && <TBtn I={MapPin} label={`Itinéraire vers ${e.name}`} href={`https://maps.google.com/?q=${encodeURIComponent(ad)}`} />}<TBtn I={Phone} label={`Appeler ${e.name}`} href={`tel:${tel(e.name)}`} /></div>} /> }
+  const ERow = (e: Ev, i: number) => { const ad = addrOf(e); return <Row key={e.id} first={i === 0} label={e.name} onClick={() => modal({ kind: "ev", data: e })} lead={<span className={`flex h-10 w-12 shrink-0 flex-col items-center justify-center rounded-[12px] ${hot(e) ? "" : "bg-white/[.07]"}`} style={hot(e) ? { background: c + "29", color: c } : {}}><span className="text-[13px] font-semibold leading-none">{hh(e.start)}</span><span className="mt-1 text-[10px] leading-none opacity-60">{durF(e.dur)}</span></span>} t={<span className="flex items-center gap-2"><span className="truncate">{e.name}</span>{hot(e) && <Chip c={c}>En cours</Chip>}</span>} s={`${e.topic}${ad ? " · " + ad : ""}`} r={<div className="flex items-center gap-2">{ad && <TBtn I={MapPin} label={`Itinéraire vers ${e.name}`} href={`https://maps.google.com/?q=${encodeURIComponent(ad)}`} />}<TBtn I={Phone} label={`Appeler ${e.name}`} href={`tel:${tel(e.name)}`} /></div>} /> }
   return <Shell k="ag" fig={<Num n={wkE.length} />} sub={`rendez-vous · semaine du ${range}`} actions={[
     { I: Plus, l: "Nouveau", on: () => modal({ kind: "rdv", data: { date: day } }) }, { I: ChevronLeft, l: "Précédente", on: () => goWk(wk - 1) },
     { I: ChevronRight, l: "Suivante", on: () => goWk(wk + 1) }, { I: RotateCcw, l: "Aujourd'hui", on: () => goWk(0), dis: wk === 0 && day === TODAY }]}>
@@ -476,15 +543,15 @@ function Sheet({ title, sub, onClose, children, c, footer }: any) {
 }
 const Sub = ({ children, dot }: any) => dot ? <Chip c={dot}>{children}</Chip> : <div className={tx.cap}>{children}</div>
 const LRow = ({ children, onClick, first }: any) => <div onClick={onClick} className={`flex min-h-[48px] items-center gap-3 text-[14px] ${onClick ? "cursor-pointer" : ""} ${first ? "" : "border-t border-white/[.05]"}`}>{children}</div>
-const CallPlayer = ({ dur, onMic }: { dur?: string; onMic: () => void }) => { const p = usePlayer(secs(dur)); return <Card className="mb-5 p-4"><Player p={p} c={A.rec.c} onMic={onMic} compact /></Card> }
+const CallPlayer = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); return <Card className="mb-5 p-4"><Player p={p} c={A.rec.c} onMic={onMic} compact /></Card> }
 /* Ligne « à écouter » : un seul enregistrement joue à la fois */
 function ListenRow({ x, first, cur, setCur, acts }: { x: Call; first?: boolean; cur: string | null; setCur: (id: string | null) => void; acts?: boolean }) {
-  const p = usePlayer(secs(x.dur)), { modal, set, toast } = useC()
+  const p = usePlayer(secs(x.dur), x.recording), { modal, set, toast } = useC()
   useEffect(() => { if (cur !== x.id && p.play) p.toggle() }, [cur])
   const pp = { ...p, toggle: () => { if (!p.play) setCur(x.id); p.toggle() } }
   return <div className={`px-5 py-3.5 ${first ? "" : "border-t border-white/[.05]"}`}>
     <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}</div></div>{acts ? <div className="flex shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => { if (x.callback) { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) } }} /></div> : <span className={`shrink-0 ${tx.cap}`}>{x.day ? "hier " : ""}{x.time}</span>}</div>
-    {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? "Hier " : ""}{x.time}</div>}{x.dur && x.dur !== "0:00" ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
+    {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? "Hier " : ""}{x.time}</div>}{x.recording || (x.dur && x.dur !== "0:00") ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
 }
 function CallsList({ todo, rest }: { todo: Call[]; rest: Call[] }) {
   const [cur, setCur] = useState<string | null>(null)
@@ -499,33 +566,54 @@ function ListenList() {
 }
 /* ---------------- Fiche client ---------------- */
 const osm = (c: Client) => { const dx = .006, dy = .0035; return `https://www.openstreetmap.org/export/embed.html?bbox=${c.lon - dx}%2C${c.lat - dy}%2C${c.lon + dx}%2C${c.lat + dy}&layer=mapnik&marker=${c.lat}%2C${c.lon}` }
-const CQA = ({ I, l, href, c, ext }: any) => <a href={href} {...(ext ? { target: "_blank", rel: "noreferrer" } : {})} className="flex flex-col items-center gap-2 text-[12.5px] text-white/70 hover:text-white"><span className="flex h-12 w-12 items-center justify-center rounded-full transition active:scale-[.94]" style={c ? { background: c, color: "#fff" } : { background: "rgba(255,255,255,.08)" }}><I size={18} strokeWidth={SW} /></span>{l}</a>
+const digits = (p?: string) => (p || "").replace(/\D/g, "").replace(/^33/, "0")
+function linkedCall(s: St, e: Ev): Call | undefined {
+  if (e.callId) { const hit = s.calls.find(c => c.id === String(e.callId)); if (hit) return hit }
+  const ep = digits(e.phone)
+  if (ep.length >= 8) { const hit = s.calls.find(c => digits(c.phone) === ep || digits(PHONES.get(c.name)) === ep); if (hit) return hit }
+  return s.calls.find(c => ckey(c.name) === ckey(e.name))
+}
+const CQA = ({ I, l, href, c, ext, onClick }: any) => {
+  const inner = <><span className="flex h-12 w-12 items-center justify-center rounded-full transition active:scale-[.94]" style={c ? { background: c, color: "#fff" } : { background: "rgba(255,255,255,.08)" }}><I size={18} strokeWidth={SW} /></span>{l}</>
+  const cls = "flex flex-col items-center gap-2 text-[12.5px] text-white/70 hover:text-white"
+  if (onClick) return <button type="button" onClick={onClick} className={cls}>{inner}</button>
+  return <a href={href} {...(ext ? { target: "_blank", rel: "noreferrer" } : {})} className={cls}>{inner}</a>
+}
 const KV = ({ I, l, v, href }: any) => { const inner = <><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><I size={16} strokeWidth={SW} /></span><div className="min-w-0 flex-1"><div className="text-[12px] text-white/40">{l}</div><div className="truncate text-[15px]">{v}</div></div>{href && <Chev />}</>
   return href ? <a href={href} className="flex min-h-[56px] items-center gap-3 border-t border-white/[.05] px-4 first:border-t-0 hover:bg-white/[.03]">{inner}</a> : <div className="flex min-h-[56px] items-center gap-3 border-t border-white/[.05] px-4 first:border-t-0">{inner}</div> }
-function ClientSheet({ name, callId, close }: { name: string; callId?: string; close: () => void }) {
-  const { s, modal, setChat } = useC(), k = ckey(name), cl = findC(name)
-  const nm = cl?.name || name, same = (n: string) => ckey(n) === k
-  const calls = s.calls.filter(x => same(x.name)), call = calls.find(x => x.id === callId) || calls[0]
-  const devis = s.devis.filter(x => same(x.client)), evs = s.events.filter(x => same(x.name)).sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start), rels = s.rels.filter(x => same(x.client))
-  const st: [string, string] = call ? callSt(call) : devis.some(d => d.status === "att") ? ["Devis en attente", AMBER] : ["Client", GREY]
-  const ph = cl?.phone || tel(name).replace(/(\d\d)(?=\d)/g, "$1 "), raw = ph.replace(/ /g, ""), addr = cl?.addr || call?.addr
+function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: string; eventId?: string; close: () => void }) {
+  const { s, modal, setChat } = useC(), ev = eventId ? s.events.find(x => x.id === eventId) : undefined
+  const k = ckey(ev?.name || name), cl = findC(ev?.name || name)
+  const nm = cl?.name || ev?.name || name, same = (n: string) => ckey(n) === k
+  const linked = ev ? linkedCall(s, ev) : undefined
+  const calls = s.calls.filter(x => same(x.name) || (linked && x.id === linked.id) || (ev?.phone && digits(x.phone) === digits(ev.phone)))
+  const call = (callId && s.calls.find(x => x.id === callId)) || linked || calls[0]
+  const devis = s.devis.filter(x => same(x.client))
+  let evs = s.events.filter(x => same(x.name) || (ev?.phone && digits(x.phone) === digits(ev.phone))).sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start)
+  if (ev && !evs.some(x => x.id === ev.id)) evs = [ev, ...evs]
+  const rels = s.rels.filter(x => same(x.client))
+  const past = ev ? ev.date < TODAY || (ev.date === TODAY && ev.start + ev.dur <= NOW) : false
+  const st: [string, string] = ev ? (past ? ["Passé", GREY] : ["À venir", A.ag.c]) : call ? callSt(call) : devis.some(d => d.status === "att") ? ["Devis en attente", AMBER] : ["Client", GREY]
+  const rawPhone = cl?.phone || ev?.phone || call?.phone || tel(name)
+  const raw = rawPhone.replace(/ /g, ""), ph = raw.replace(/(\d\d)(?=\d)/g, "$1 "), addr = cl?.addr || ev?.addr || call?.addr
   const hist = [...calls.map(x => ({ t: `Appel · ${x.tag || x.topic}`, w: `${x.day ? "Hier" : "Aujourd'hui"} ${x.time}`, I: Phone, o: 0 + (x.day ? 1 : 0) })),
     ...rels.map(r => ({ t: `${r.type} · ${r.canal}`, w: `${r.date} · ${RS[r.status][0]}`, I: Send, o: 2 })),
     ...devis.map(d => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0], I: Receipt, o: 3 }))].sort((a, b) => a.o - b.o)
   const H = ({ children }: any) => <div className="mb-2 mt-6 px-1 text-[13px] font-medium text-white/45">{children}</div>
   return <Sheet title="Fiche client" c={A.rec.c} onClose={close}>
     <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1"><Chip c={st[1]}>{st[0]}</Chip></div></div></div>
-    <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}{cl?.email ? <CQA I={Mail} l="E-mail" href={`mailto:${cl.email}`} /> : <span />}</div>
+    <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}<CQA I={Receipt} l="Devis" onClick={() => modal({ kind: "devis", data: { client: nm, objet: ev?.topic || call?.besoin || call?.topic } })} /></div>
     <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{cl?.email && <KV I={Mail} l="E-mail" v={cl.email} href={`mailto:${cl.email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
     {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative</span></div>}
-    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div><p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{call.dur && call.dur !== "0:00" && <div className="mt-3"><CallInline dur={call.dur} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
+    {ev && <><H>Rendez-vous</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{ev.topic}</div><Chip c={past ? GREY : A.ag.c}>{past ? "Passé" : "À venir"}</Chip></div><div className={`mt-1 ${tx.cap}`}>{fmtD(ev.date)} · {hh(ev.start)} – {hh(ev.start + ev.dur)}</div>{(ev.notes || ev.addr) && <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{[ev.notes, ev.addr].filter(Boolean).join(" · ")}</p>}</div></>}
+    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div><p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{(call.recording || (call.dur && call.dur !== "0:00")) && <div className="mt-3"><CallInline call={call} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
     {(devis.length > 0 || evs.length > 0) && <><H>Devis et rendez-vous</H><div className="overflow-hidden rounded-[20px] bg-white/[.04]">
       {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisEdit", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
       {evs.map((e, i) => <Row key={e.id} first={!devis.length && i === 0} label={`RDV ${e.topic}`} onClick={() => modal({ kind: "ev", data: e })} lead={<Ic I={CalendarDays} />} t={e.topic} s={`${fmtD(e.date)} · ${hh(e.start)} – ${hh(e.start + e.dur)}`} r={<Chev />} />)}</div></>}
     {hist.length > 0 && <><H>Historique</H><div className="relative pl-2">{hist.map((h, i) => <div key={i} className="relative flex gap-3 pb-4 last:pb-0">{i < hist.length - 1 && <span className="absolute left-[15px] top-8 bottom-0 w-px bg-white/[.08]" />}<span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><h.I size={14} strokeWidth={SW} /></span><div className="min-w-0 pt-1"><div className="truncate text-[14px]">{h.t}</div><div className={tx.cap}>{h.w}</div></div></div>)}</div></>}
   </Sheet>
 }
-const CallInline = ({ dur, onMic }: { dur?: string; onMic: () => void }) => { const p = usePlayer(secs(dur)); return <Player p={p} c={A.rec.c} onMic={onMic} /> }
+const CallInline = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); return <Player p={p} c={A.rec.c} onMic={onMic} /> }
 function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   const { s, set, toast, go, modal, setChat, desk } = useC(), d = m.data || {}
   const clients = [...new Set([...s.calls.map(x => x.name), ...s.devis.map(x => x.client), ...s.rels.map(x => x.client)])]
@@ -538,14 +626,13 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     <div className="flex items-center gap-3 px-1 text-[15px]"><Tg on={f.urgent} onClick={() => setF({ ...f, urgent: !f.urgent })} label="Urgent" />Urgent</div><div className="flex items-center gap-3 px-1 text-[15px]"><Tg on={f.callback} onClick={() => setF({ ...f, callback: !f.callback })} label="À rappeler" />À rappeler</div></div>
     {foot("Enregistrer", !!f.name.trim(), () => { const now = new Date(); set(x => ({ ...x, calls: [{ id: uid(), name: f.name.trim(), topic: f.topic || "Appel", tag: f.topic || "Appel", note: f.note || "Note ajoutée manuellement.", urgent: f.urgent, callback: f.callback, time: `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`, dur: "0:00" }, ...x.calls] })); toast("Note d'appel ajoutée") })}</Sheet>
   if (m.kind === "contacts") return <ContactsSheet close={close} />
-  if (m.kind === "client") return <ClientSheet name={d.name} callId={d.call} close={close} />
+  if (m.kind === "client") return <ClientSheet name={d.name} callId={d.call} eventId={d.event} close={close} />
   if (m.kind === "callView") { const x = s.calls.find(y => y.id === d.id) || d as Call
-    return <Sheet title={x.name} sub={`${x.time} · ${x.topic}`} c={A.rec.c} onClose={close}><CallPlayer dur={x.dur} onMic={() => { close(); setChat(true) }} /><div className="text-[15px] leading-relaxed text-white/70">{x.note}</div>{x.addr && <div className="mt-3"><Sub>{x.addr}</Sub></div>}<div className="mt-3"><Sub dot={x.callback ? (x.urgent ? "#FF5F57" : "#FFB340") : "#30D158"}>{x.callback ? (x.urgent ? "À rappeler · urgent" : "À rappeler") : "Traité"}</Sub></div>
+    return <Sheet title={x.name} sub={`${x.time} · ${x.topic}`} c={A.rec.c} onClose={close}><CallPlayer call={x} onMic={() => { close(); setChat(true) }} /><div className="text-[15px] leading-relaxed text-white/70">{x.note}</div>{x.addr && <div className="mt-3"><Sub>{x.addr}</Sub></div>}<div className="mt-3"><Sub dot={x.callback ? (x.urgent ? "#FF5F57" : "#FFB340") : "#30D158"}>{x.callback ? (x.urgent ? "À rappeler · urgent" : "À rappeler") : "Traité"}</Sub></div>
       <div className="mt-6 grid gap-2">{x.callback && <Btn primary onClick={() => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast("Marqué comme rappelé"); close() }}><Check size={15} />Marquer rappelé</Btn>}<div className="grid grid-cols-2 gap-2"><Btn onClick={() => modal({ kind: "devis", data: { client: x.name, objet: x.besoin || x.topic } })}><Receipt size={15} strokeWidth={1.5} />Créer un devis</Btn><Btn onClick={() => modal({ kind: "rdv", data: { name: x.name, topic: x.tag || x.topic, addr: x.addr } })}><CalendarDays size={15} strokeWidth={1.5} />Prendre RDV</Btn></div></div></Sheet> }
   if (m.kind === "rdv") return <Sheet title="Nouveau rendez-vous" c={A.ag.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><div className="grid grid-cols-[1.4fr_1fr_1fr] gap-2"><F l="Date"><input type="date" className={inp} {...v("date")} /></F><F l="Heure"><input type="time" step={900} className={inp} {...v("start")} /></F><F l="Durée (h)"><select className={inp} {...v("dur")}>{["0.5", "1", "1.5", "2", "3", "4"].map(x => <option key={x} value={x}>{x.replace(".", ",")}</option>)}</select></F></div><F l="Adresse"><input className={inp} {...v("addr")} /></F></div>
     {foot("Créer le RDV", !!f.name.trim() && !!f.date, () => { set(x => ({ ...x, events: [...x.events, { id: uid(), date: f.date, start: toH(f.start), dur: Number(f.dur), name: f.name.trim(), topic: f.topic || "Intervention", addr: f.addr, created: Date.now() }] })); const wd = dd(f.date).getDay(); toast(wd === 0 || wd === 6 ? "RDV créé (week-end : visible sur mobile)" : "RDV créé"); go("ag") }, A.ag.c)}</Sheet>
-  if (m.kind === "ev") { const e = s.events.find(y => y.id === d.id) || d as Ev; return <Sheet title={e.name} sub={e.topic} c={A.ag.c} onClose={close}><div className="space-y-2"><Sub>{fmtD(e.date)} · {hh(e.start)} – {hh(e.start + e.dur)}</Sub>{e.addr && <Sub>{e.addr}</Sub>}<Sub dot={s.settings.sms ? "#30D158" : "rgba(255,255,255,.3)"}>{s.settings.sms ? "Confirmé par SMS" : "Confirmé"}</Sub></div>
-    <div className="mt-6 flex gap-2"><Btn className="flex-1" onClick={() => { set(x => ({ ...x, events: x.events.filter(y => y.id !== e.id) })); toast("RDV supprimé"); close() }}><Trash2 size={15} strokeWidth={1.5} />Supprimer</Btn><Btn primary className="flex-1" onClick={close}>Fermer</Btn></div></Sheet> }
+  if (m.kind === "ev") { const e = s.events.find(y => y.id === d.id) || d as Ev; return <ClientSheet name={e.name} callId={linkedCall(s, e)?.id} eventId={e.id} close={close} /> }
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>SMS</option><option>Appel</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
