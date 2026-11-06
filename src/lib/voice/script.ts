@@ -91,10 +91,14 @@ TYPES D'APPELS
 - Tu proposes un rendez-vous pour une visite gratuite.
 
 4. PRISE DE RENDEZ-VOUS :
-- Créneaux possibles : du lundi au vendredi, de 8 h à 18 h.
-- Tu proposes deux créneaux, la personne choisit, puis tu confirmes la date et l'heure.
-- Dès que le créneau est confirmé, tu appelles l'outil book_appointment.
-- Tu précises qu'une confirmation sera envoyée par SMS.
+- Tu appelles TOUJOURS l'outil get_available_slots avant de proposer le moindre horaire. Tu n'inventes jamais de créneau.
+- Si la personne indique un jour ou une période, passe-le via preferred_day, date_from ou date_to.
+- Tu proposes exactement deux créneaux libres parmi ceux renvoyés, en disant le jour, la date et l'heure.
+- La personne choisit, tu confirmes, puis tu appelles book_appointment avec la date (AAAA-MM-JJ) et l'heure (HH:MM).
+- Si book_appointment refuse (créneau déjà pris) et renvoie des alternatives, tu proposes deux de ces alternatives. Tu ne réserves jamais un créneau refusé.
+- S'il n'y a aucun créneau, tu le dis clairement et tu proposes un autre jour ou un rappel.
+- Si l'outil demande un e-mail, tu le demandes poliment ; sinon le téléphone suffit.
+- Tu précises qu'une confirmation sera envoyée.
 
 5. SUIVI D'UN CHANTIER OU D'UN DEVIS EN COURS :
 - Tu demandes le nom et la référence si la personne l'a, et tu dis que ${p.prenom} la rappelle avec les détails.
@@ -135,6 +139,7 @@ FIN DE L'APPEL
 
 RÈGLES ABSOLUES
 - Ne jamais inventer d'information : pas de prix, pas de disponibilité non prévue, pas de promesse.
+- Ne jamais proposer d'horaire sans avoir appelé get_available_slots juste avant.
 - Ne jamais donner le numéro personnel de ${p.prenom}.
 - Ne jamais demander de coordonnées bancaires.
 - Rester court : un appel dure idéalement moins de 3 minutes.
@@ -145,13 +150,28 @@ RÈGLES ABSOLUES
 export const VOICE_TOOLS = [
   {
     type: "function",
+    name: "get_available_slots",
+    description: "Consulte l'agenda réel et renvoie les créneaux libres (lundi–vendredi, 8 h–18 h, heure de Paris). À appeler TOUJOURS avant de proposer des horaires.",
+    parameters: {
+      type: "object",
+      properties: {
+        date_from: { type: "string", description: "Début de période YYYY-MM-DD" },
+        date_to: { type: "string", description: "Fin de période YYYY-MM-DD" },
+        preferred_day: { type: "string", description: "Jour souhaité : lundi…vendredi, aujourd'hui, demain, ou YYYY-MM-DD" },
+        duree_minutes: { type: "number", description: "Durée en minutes, 60 par défaut" },
+      },
+    },
+  },
+  {
+    type: "function",
     name: "book_appointment",
-    description: "Enregistre un rendez-vous confirmé dans l'agenda de l'artisan. À appeler dès que le client a choisi un créneau (lundi–vendredi, 8 h–18 h).",
+    description: "Réserve un créneau déjà proposé. Vérifie qu'il est encore libre ; s'il est pris, renvoie des alternatives sans l'enregistrer.",
     parameters: {
       type: "object",
       properties: {
         client: { type: "string", description: "Nom et prénom du client" },
         telephone: { type: "string", description: "Numéro de téléphone" },
+        email: { type: "string", description: "E-mail du client, si connu" },
         date: { type: "string", description: "Date du rendez-vous au format YYYY-MM-DD" },
         heure: { type: "string", description: "Heure de début au format HH:MM (24 h)" },
         duree_minutes: { type: "number", description: "Durée en minutes, 60 par défaut" },

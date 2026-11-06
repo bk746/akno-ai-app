@@ -1,6 +1,6 @@
 import { supabase } from "../supabase"
 import { buildSessionConfig, mergeProfile, welcomeLine, type VoiceProfile } from "./script"
-import { bookAppointment, saveCall, type BookArgs, type SaveArgs } from "./tools"
+import { bookAppointment, getAvailableSlots, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
 
 export type VoiceStatus = "idle" | "connecting" | "live" | "speaking" | "listening" | "thinking" | "ending" | "error"
 export type TranscriptLine = { role: "user" | "assistant"; text: string }
@@ -205,7 +205,9 @@ export async function startVoiceSession(opts: {
     let result: unknown = { ok: false, error: "Outil inconnu." }
     try {
       const args = event.arguments ? JSON.parse(event.arguments) : {}
-      if (event.name === "book_appointment") {
+      if (event.name === "get_available_slots") {
+        result = await getAvailableSlots(args as SlotsArgs)
+      } else if (event.name === "book_appointment") {
         result = await bookAppointment(args as BookArgs)
       } else if (event.name === "save_call") {
         result = await saveCall(args as SaveArgs, {

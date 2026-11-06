@@ -4,6 +4,7 @@ import type { VoiceProfile } from "./script"
 export type BookArgs = {
   client?: string
   telephone?: string
+  email?: string
   date?: string
   heure?: string
   duree_minutes?: number
@@ -11,6 +12,13 @@ export type BookArgs = {
   adresse?: string
   ville?: string
   notes?: string
+}
+
+export type SlotsArgs = {
+  date_from?: string
+  date_to?: string
+  preferred_day?: string
+  duree_minutes?: number
 }
 
 export type SaveArgs = {
@@ -56,27 +64,60 @@ async function me() {
   return user
 }
 
+async function bookingApi(action: "slots" | "book", payload: object) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return { ok: false, error: "Session expirée." }
+    const r = await fetch("/api/booking", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...payload }),
+    })
+    const body = await r.json().catch(() => ({})) as Record<string, unknown>
+    if (typeof body.ok !== "boolean" && !r.ok) {
+      return { ok: false, error: String(body.error || "Impossible de joindre l'agenda.") }
+    }
+    return body
+  } catch {
+    return { ok: false, error: "Impossible de joindre l'agenda." }
+  }
+}
+
+export async function getAvailableSlots(args: SlotsArgs) {
+  const body = await bookingApi("slots", args)
+  if (body.ok === true) return body
+  return { ok: false, error: body.error || "Impossible de lire les créneaux.", slots: body.slots || [] }
+}
+
 export async function bookAppointment(args: BookArgs) {
+  const booked = await bookingApi("book", args) as {
+    ok?: boolean; error?: string; alternatives?: unknown; confirmation?: string
+    start?: string; end?: string; cal_uid?: string; label?: string
+  }
+  if (!booked.ok) {
+    return { ok: false, error: booked.error || "Créneau indisponible.", alternatives: booked.alternatives || [] }
+  }
   const user = await me()
-  const slot = parseSlot(args.date, args.heure)
-  if ("error" in slot) return { ok: false, error: slot.error }
+  const parsed = parseSlot(args.date, args.heure)
+  const start = booked.start || ("start" in parsed && parsed.start ? parsed.start.toISOString() : new Date().toISOString())
   const minutes = Math.max(30, Number(args.duree_minutes) || 60)
-  const end = new Date(slot.start.getTime() + minutes * 60_000)
+  const end = booked.end || new Date(new Date(start).getTime() + minutes * 60_000).toISOString()
   const row = {
     artisan_id: user.id,
     title: args.objet?.trim() || "Rendez-vous",
     client: args.client?.trim() || "Client",
     telephone_client: args.telephone?.trim() || null,
-    start: slot.start.toISOString(),
-    end: end.toISOString(),
+    start,
+    end,
     adresse: args.adresse?.trim() || null,
     ville: args.ville?.trim() || null,
-    notes: args.notes?.trim() || null,
+    notes: [args.notes?.trim(), booked.cal_uid ? `cal:${booked.cal_uid}` : ""].filter(Boolean).join(" ") || null,
   }
   const { data, error } = await supabase.from("appointments").insert(row).select("id").maybeSingle()
-  if (error) return { ok: false, error: "Impossible d'enregistrer le rendez-vous." }
-  const when = slot.start.toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
-  return { ok: true, appointment_id: data?.id, confirmation: `Rendez-vous confirmé le ${when} pour ${row.client}.` }
+  if (error) {
+    return { ok: true, appointment_id: null, confirmation: booked.confirmation || "Rendez-vous confirmé dans l'agenda.", warning: "Enregistré dans Cal.com, mais pas encore visible dans l'Agenda." }
+  }
+  return { ok: true, appointment_id: data?.id, confirmation: booked.confirmation || `Rendez-vous confirmé pour ${row.client}.` }
 }
 
 function formatTranscript(lines: { role: "user" | "assistant"; text: string }[]) {
