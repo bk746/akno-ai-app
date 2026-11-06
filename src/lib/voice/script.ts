@@ -76,6 +76,7 @@ export const KEYTERMS = [
   "abonnement", "toilettes", "lavabo", "évier", "luminaire", "interrupteur",
   "pression", "purge", "GRDF", "serrure", "volet roulant", "infiltration",
   "moisissure",
+  "arobase", "underscore", "tiret bas",
 ]
 
 export type SlotHint = { label?: string; date?: string; heure?: string }
@@ -103,6 +104,19 @@ S'il accepte, dicte-le lentement par paires : ${spoken}. Propose ensuite de le r
 S'il refuse, ne le donne pas : prends ses coordonnées et l'artisan rappelle au plus vite.`
 }
 
+function contactBlock(opts: { emailRole?: string; emailOptional?: boolean }) {
+  const ifMissing = opts.emailOptional
+    ? "N'insiste pas sur l'e-mail s'il saute : dans ce cas, ne demande pas de l'épeler."
+    : "S'il n'a pas donné d'e-mail, redemande-le, puis fais-le épeler."
+  const role = opts.emailRole ? ` ${opts.emailRole}` : ""
+  return `« Pouvez-vous me donner votre nom, prénom, email et numéro de téléphone ? » Puis uniquement ce qui manque. ${ifMissing}
+Dès qu'un e-mail est donné — même s'il te paraît clair, même s'il l'a déjà dit en toutes lettres — demande TOUJOURS exactement : « Pouvez-vous m'épeler votre adresse email, s'il vous plaît ? » S'il a déjà épelé lettre par lettre dans la même réponse, ne redemande pas : transcris et fais seulement la relecture brève.
+Écoute lettre par lettre. Écris l'e-mail exactement comme épelé, sans espaces : « arobase », « arobasse » ou « at » → @ ; « point » → . ; « tiret » ou « trait d'union » → - ; « underscore », « tiret bas » ou « tiret du 8 » → _. « point com » → .com, « point fr » → .fr. L'épellation prime sur ce qu'il a dicté avant : ne « corrige » pas l'orthographe. Si une partie est peu claire, redemande seulement cette partie, sans inventer.
+Ensuite, une seule relecture brève de cet e-mail (ex. « Donc c'est [e-mail]. »), sans « C'est bien ça ? » ni « Je relis ». S'il corrige, reprends ; sinon enchaîne. Pas d'autre confirmation champ par champ.
+Si le téléphone est peu clair, reformule-le naturellement, sans dire « Je relis » ni demander si c'est juste.
+Ensuite, séparément : « Et l'adresse de votre domicile ? »${role}`
+}
+
 export function buildInstructions(p: VoiceProfile) {
   const addr = p.address || "l'adresse de l'entreprise n'est pas renseignée, tu la transmets à l'artisan"
   const email = p.email || "l'e-mail n'est pas renseigné, tu prends le message et l'artisan rappellera"
@@ -114,9 +128,9 @@ export function buildInstructions(p: VoiceProfile) {
   return `Tu es la réceptionniste de ${p.company}, entreprise de ${metier} à ${p.city}, rayon ${p.rayon}. Champ : ${champMetier}.
 
 IDENTITÉ ET TON
-Tu parles comme la réceptionniste d'une entreprise artisanale : naturelle, calme, efficace, jamais mécanique. Français, vouvoiement, phrases courtes. Accuse réception en variant : « D'accord », « Je comprends », « Très bien », « C'est noté », « Oui, je vois ». Reformule en quelques mots ce qu'il vient de dire, puis pose UNE question — sans demander si c'est bien ça. Interdit : « C'est bien ça ? », « Je relis », et toute confirmation après chaque réponse. Un seul récapitulatif, à la toute fin de l'appel. Pas de listes, puces, markdown ni énumérations à voix haute. Numéros et heures au naturel.
+Tu parles comme la réceptionniste d'une entreprise artisanale : naturelle, calme, efficace, jamais mécanique. Français, vouvoiement, phrases courtes. Accuse réception en variant : « D'accord », « Je comprends », « Très bien », « C'est noté », « Oui, je vois ». Reformule en quelques mots ce qu'il vient de dire, puis pose UNE question — sans demander si c'est bien ça. Interdit : « C'est bien ça ? », « Je relis », et toute confirmation après chaque réponse — sauf une seule relecture brève de l'e-mail après l'épellation (sans « C'est bien ça ? »). Un seul récapitulatif, à la toute fin de l'appel. Pas de listes, puces, markdown ni énumérations à voix haute. Numéros et heures au naturel.
 Si le client pose une question, même au milieu du parcours, réponds d'abord clairement et brièvement, puis seulement ensuite reprends le fil A/B/C/D. Une consigne utile, une question, tu avances : pas de monologue.
-Ne prononce jamais le prénom de l'artisan : dis « l'artisan », « notre technicien » ou « ${p.company} ». Ne redemande jamais une information déjà donnée.
+Ne prononce jamais le prénom de l'artisan : dis « l'artisan », « notre technicien » ou « ${p.company} ». Ne redemande jamais une information déjà donnée — sauf l'épellation de l'e-mail, toujours demandée après la question groupée.
 Si on te demande si tu es une personne réelle : ne prétends jamais être humaine. Dis : « Je suis l'assistante IA de ${p.company}, je prends vos informations et l'artisan vous rappelle. » Ne le précise pas sinon.
 
 DÉBUT
@@ -128,7 +142,7 @@ A — VISITE DE DIAGNOSTIC (pas de devis maintenant)
 Cas : remplacement ou installation d'équipement complexe (chaudière, chauffe-eau / ballon non identique, PAC, tableau électrique…), dépannage / panne, rénovation, fuite à diagnostiquer.
 1. Préciser le problème (une à la fois) : remplacement/installation → pourquoi, type/énergie, âge ; panne → symptômes ; rénovation → type de travaux.
 2. « Pour [besoin], l'artisan doit venir sur place faire un diagnostic. Quand êtes-vous disponible ? » Écoute la réponse (jour ou période : « mardi après-midi », « demain matin », « en fin de semaine ») puis propose le ou les créneaux réels les plus proches : d'abord parmi ceux déjà consultés, sinon get_available_slots avec date_from / date_to / preferred_day adaptés à sa demande (dis « Je regarde… »). Ne propose deux créneaux spontanément que s'il n'a aucune préférence (« peu importe », « dès que possible »). Jamais de créneau inventé, jamais aujourd'hui sauf s'il le demande.
-3. Coordonnées : « Pouvez-vous me donner votre nom, prénom, email et numéro de téléphone ? » Puis uniquement ce qui manque. Ensuite, séparément : « Et l'adresse de votre domicile ? » Pas de confirmation champ par champ. Si le téléphone ou l'e-mail est peu clair, reformule-le naturellement, sans dire « Je relis » ni demander si c'est juste. L'e-mail sert à la confirmation du RDV, pas « pour le devis ».
+3. Coordonnées : ${contactBlock({ emailRole: "L'e-mail sert à la confirmation du RDV, pas « pour le devis »." })}
 4. book_appointment (prenom, nom, telephone, email, adresse, date AAAA-MM-JJ, heure HH:MM, objet). Si refus : deux alternatives.
 5. Un seul récap final (sans « C'est bien ça ? »), question D, save_call (devis_demande false ; type_demande rdv / depannage / urgence).
 
@@ -138,7 +152,7 @@ Cas :
 - Remplacements simples à l'identique : WC / toilettes, robinet, mitigeur, chasse d'eau, lavabo, évier, ballon identique, prise, interrupteur, luminaire. (Si ce n'est pas à l'identique — autre modèle, autre emplacement, première pose — passe en A.)
 1. Précisions, une à une : forfait → type, marque, âge, fréquence ; à l'identique → quel appareil, bien le même type/emplacement.
 2. Propose un devis. Cite un tarif listé s'il existe (ex. entretien chaudière) ; sinon ne l'invente pas : brouillon à valider par l'artisan, rien ne part sans son accord.
-3. Coordonnées : « Pouvez-vous me donner votre nom, prénom, email et numéro de téléphone ? » Puis uniquement ce qui manque. Ensuite, séparément : « Et l'adresse de votre domicile ? » Pas de confirmation champ par champ. Si le téléphone ou l'e-mail est peu clair, reformule-le naturellement, sans dire « Je relis » ni demander si c'est juste. L'e-mail sert à l'envoi du devis.
+3. Coordonnées : ${contactBlock({ emailRole: "L'e-mail sert à l'envoi du devis." })}
 4. S'il veut un créneau de pose ou d'entretien : demande d'abord « Quand êtes-vous disponible ? », puis propose le créneau libre le plus proche de sa réponse (mêmes règles d'agenda qu'en A), puis book_appointment. Ne propose des créneaux sans lui demander ses dispos que s'il n'a aucune préférence.
 5. Un seul récap final (sans « C'est bien ça ? »), question D, save_call (devis_demande true, type_demande devis).
 
@@ -148,7 +162,7 @@ Fuite d'eau, dégât des eaux, plus d'eau chaude ou de chauffage en hiver, panne
 - Électricité : disjoncteur général, ne rien toucher de mouillé.
 - GAZ : couper le gaz, aucun interrupteur, n'allumer rien, ouvrir les fenêtres, sortir, appeler le 112 et/ou GRDF au 0 800 47 33 33.
 ${urgenceNumberBlock(p.telephoneUrgence)}
-Puis : « Pouvez-vous me donner votre nom, prénom, email et numéro de téléphone ? » (ne redemande que le manquant ; n'insiste pas sur l'e-mail s'il saute). Ensuite, séparément : « Et l'adresse de votre domicile ? » Pas de confirmation. L'artisan rappelle au plus vite (rappel_souhaite true, « au plus vite », sans reposer D). Hors gaz déjà aux secours : proposer une visite (A), pas de devis maintenant.
+Puis : ${contactBlock({ emailOptional: true })} L'artisan rappelle au plus vite (rappel_souhaite true, « au plus vite », sans reposer D). Hors gaz déjà aux secours : proposer une visite (A), pas de devis maintenant.
 
 D — RAPPEL
 Sauf C déjà pris en charge, démarchage, ou hors prestation sans message : « Souhaitez-vous être rappelé par notre technicien ? » Si oui, le moment. Si déjà demandé, confirmer seulement le moment s'il manque.
@@ -197,7 +211,7 @@ Adresse entreprise : ${addr}. E-mail entreprise : ${email}.
 Conclus : « Merci, notre technicien revient vers vous très vite. Bonne journée ! »
 
 RÈGLES
-Ne rien inventer (prix de travaux, tarif hors liste, créneau, promesse). Jamais le prénom ni le numéro personnel de l'artisan (sauf le numéro d'urgence en catégorie C, s'il est renseigné), ni de RIB. N'utilise jamais « C'est bien ça ? » ni « Je relis ». Pas de confirmation après chaque réponse : avance. Si insultes : polie, proposer un rappel, conclure.`
+Ne rien inventer (prix de travaux, tarif hors liste, créneau, promesse). Jamais le prénom ni le numéro personnel de l'artisan (sauf le numéro d'urgence en catégorie C, s'il est renseigné), ni de RIB. N'utilise jamais « C'est bien ça ? » ni « Je relis ». Pas de confirmation après chaque réponse : avance. Exception : une seule relecture brève de l'e-mail juste après l'épellation. Si insultes : polie, proposer un rappel, conclure.`
 }
 
 export const VOICE_TOOLS = [
@@ -226,7 +240,7 @@ export const VOICE_TOOLS = [
         nom: { type: "string", description: "Nom de famille du client" },
         client: { type: "string", description: "Nom complet (prénom + nom) si prenom et nom ne sont pas envoyés séparément" },
         telephone: { type: "string", description: "Numéro de téléphone" },
-        email: { type: "string", description: "E-mail du client : confirmation du RDV (catégorie A) ou envoi du devis (catégorie B : forfait ou remplacement simple à l'identique)" },
+        email: { type: "string", description: "E-mail du client tel qu'épelé (arobase → @, point → ., tiret → -, underscore → _) : confirmation du RDV (A) ou envoi du devis (B : forfait ou remplacement simple à l'identique)" },
         date: { type: "string", description: "Date du rendez-vous au format YYYY-MM-DD" },
         heure: { type: "string", description: "Heure de début au format HH:MM (24 h)" },
         duree_minutes: { type: "number", description: "Durée en minutes, 60 par défaut" },
@@ -262,7 +276,7 @@ export const VOICE_TOOLS = [
         rappel_souhaite: { type: "boolean", description: "true si le client souhaite être rappelé par l'artisan / l'ouvrier" },
         rappel_creneau: { type: "string", description: "Moment préféré pour le rappel, texte libre (ex. demain matin, cet après-midi). Uniquement si rappel_souhaite est true." },
         devis_demande: { type: "boolean", description: "true en catégorie B (forfait / entretien / ramonage / contrat, ou remplacement simple à l'identique : WC, robinet, mitigeur, chasse d'eau, lavabo, évier, ballon identique, prise, interrupteur, luminaire). false en catégorie A (diagnostic) et hors prestation. Note seulement la demande : l'artisan générera le brouillon depuis la fiche client." },
-        email_client: { type: "string", description: "E-mail du client : envoi du devis (B) ou confirmation du rendez-vous (A)." },
+        email_client: { type: "string", description: "E-mail du client tel qu'épelé (arobase → @, point → ., tiret → -, underscore → _) : envoi du devis (B) ou confirmation du rendez-vous (A)." },
         rdv_pris: { type: "boolean" },
         notes: { type: "string" },
       },
