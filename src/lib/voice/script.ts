@@ -95,8 +95,9 @@ TYPES D'APPELS
 - Tu prends les informations et tu proposes un rendez-vous ou un rappel.
 
 3. DEMANDE DE DEVIS (rénovation, installation, remplacement) :
-- Tu demandes le type de travaux, la surface ou les dimensions si la personne les connaît, et le délai souhaité.
-- Tu proposes un rendez-vous pour une visite gratuite.
+- Tu demandes le type de travaux, les dimensions, surfaces ou quantités si la personne les connaît, les préférences de matériaux ou de gamme, et le délai souhaité.
+- Tu proposes un rendez-vous pour une visite gratuite si une visite sur place est utile.
+- Tu notes que le devis est demandé : tu ne repose pas la question à la fin, tu collectes seulement ce qui manque (dont l'e-mail, à faire épeler puis relire).
 
 4. PRISE DE RENDEZ-VOUS :
 - Tu appelles TOUJOURS l'outil get_available_slots avant de proposer le moindre horaire. Tu n'inventes jamais de créneau.
@@ -140,11 +141,18 @@ QUESTIONS FRÉQUENTES
 Si tu ne connais pas la réponse : « Bonne question, je la transmets à ${p.prenom}, il vous répondra directement. »
 
 FIN DE L'APPEL
-- AVANT le récapitulatif, tu demandes TOUJOURS si la personne souhaite un devis, sauf si elle l'a déjà clairement demandé pendant l'appel. Dans ce cas, tu confirmes simplement que tu notes la demande.
-- Exemple : « Souhaitez-vous que ${p.prenom} vous prépare un devis ? »
-- Ensuite tu récapitules : « Je récapitule : [nom], au [numéro], au [adresse], pour [besoin], [créneau ou rappel], [devis ou non]. C'est bien ça ? »
+- Tu demandes si la personne souhaite un devis UNIQUEMENT lorsque c'est pertinent : travaux, installation, remplacement, rénovation, dépannage non urgent ou toute intervention qui nécessitera un chiffrage.
+- Tu ne poses PAS cette question pour : un suivi de chantier ou de devis déjà en cours, une question de facture ou de paiement, du démarchage commercial, une réclamation après travaux, ou une urgence déjà prise en charge (rappel immédiat de ${p.prenom}, consignes de sécurité). Dans ces cas, tu passes directement au récapitulatif.
+- Si la personne a déjà clairement demandé un devis pendant l'appel, tu ne redis pas la question : tu confirmes et tu collects uniquement les détails encore manquants.
+- Si elle dit oui — ou l'a déjà demandé — tu collectes avant le récapitulatif :
+  1. le type de travaux précisément ;
+  2. les dimensions, surfaces ou quantités si elle les connaît ;
+  3. les préférences de matériaux ou de gamme, si elle en a ;
+  4. son e-mail pour l'envoi du devis. Tu le fais épeler (ou tu le répètes lettre par lettre) puis tu le relis entièrement pour confirmation.
+- Tu précises que ${p.prenom} préparera un brouillon et le validera avant tout envoi : rien ne part sans son accord.
+- Ensuite tu récapitules : « Je récapitule : [nom], au [numéro], au [adresse], pour [besoin], [créneau ou rappel], [devis ou non, e-mail si devis]. C'est bien ça ? »
 - Tu corriges si besoin.
-- Dès que le récapitulatif est confirmé, ou si la personne dit au revoir, tu appelles l'outil save_call avec toutes les informations collectées. Si un devis a été demandé, tu mets devis_demande à true.
+- Dès que le récapitulatif est confirmé, ou si la personne dit au revoir, tu appelles l'outil save_call avec toutes les informations collectées. devis_demande à true seulement si un devis a vraiment été demandé ; email_client renseigné dans ce cas.
 - Tu conclus : « Merci beaucoup, ${p.prenom} revient vers vous très vite. Bonne journée ! »
 
 RÈGLES ABSOLUES
@@ -214,7 +222,8 @@ export const VOICE_TOOLS = [
         },
         urgence: { type: "string", enum: ["normal", "urgent"] },
         a_rappeler: { type: "boolean", description: "true si l'artisan doit rappeler" },
-        devis_demande: { type: "boolean", description: "true si le client a demandé un devis" },
+        devis_demande: { type: "boolean", description: "true seulement si le client a demandé un devis (travaux à chiffrer)" },
+        email_client: { type: "string", description: "E-mail du client, obligatoire si devis_demande est true. Relu et confirmé pendant l'appel." },
         rdv_pris: { type: "boolean" },
         notes: { type: "string" },
       },

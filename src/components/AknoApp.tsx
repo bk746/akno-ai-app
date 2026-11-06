@@ -8,13 +8,14 @@ import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from
 import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
+import { sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
 import Login from "./Login"
 import { LockScreen, LockSetup } from "./Lock"
 import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
 import type { Session } from "@supabase/supabase-js"
-import type { Client, St, Devis, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
+import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 type K = "rec" | "ag" | "rel" | "dev"
@@ -37,6 +38,7 @@ const dlabel = (iso: string) => `${DAYS[(dd(iso).getDay() + 6) % 7]} ${dd(iso).g
 const short = (n: string) => /^(M\.|Mme|Chantier)/.test(n) ? n : n.split(" ").length > 1 ? `${n[0]}. ${n.split(" ").slice(1).join(" ")}` : n
 const ttc = (ht: number, tv: number) => Math.round(ht * (1 + tv / 100))
 const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"] }
+const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
 type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw"; data?: any } | null
@@ -110,7 +112,8 @@ const Chev = () => <ChevronRight size={IS} strokeWidth={SW} className="text-whit
 
 function Side() {
   const { page, go, s } = useC()
-  const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}{on && <span className="ml-auto h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></motion.button> }
+  const nDev = s.devis.filter(toValidate).length
+  const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}<span className="ml-auto flex items-center gap-2">{id === "dev" && nDev > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}{on && <span className="h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></span></motion.button> }
   return <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/[.07] px-4 py-6">
     <div className="flex h-12 items-center px-3"><img src="/logo.png" alt="Akno" className="h-9" /></div>
     <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}</nav>
@@ -175,14 +178,15 @@ const NAV_C: Record<P, string> = { rec: A.rec.c, ag: A.ag.c, rel: "#fff", dev: A
 const NAV_L: Record<P, string> = { rec: "Réception", ag: "Agenda", rel: "Relance", dev: "Devis", set: "Réglages" }
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
 function TabBar() {
-  const { page, go } = useC()
+  const { page, go, s } = useC()
+  const nDev = s.devis.filter(toValidate).length
   const ids: P[] = ["rec", "ag", "rel", "dev", "set"]
   return <nav aria-label="Navigation principale" className="pointer-events-none fixed inset-x-4 z-30 flex justify-center" style={{ bottom: "max(calc(var(--sab) - 10px), 12px)" }}>
     <div className="pointer-events-auto flex h-[72px] w-full items-center gap-0 rounded-full border border-white/[.10] bg-[#161618]/80 p-[6px] shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]">
       {ids.map(id => { const on = id === page; return <motion.button key={id} onClick={() => go(id)} aria-label={NAV_L[id]} aria-current={on ? "page" : undefined} whileTap={{ scale: .94 }}
         className={`relative flex h-full flex-1 flex-col items-center justify-center gap-[5px] rounded-full transition-colors ${on ? "text-white" : "text-white/60"}`}>
         {on && <motion.span layoutId="tab-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/[.10]" />}
-        <span className="relative">{id === "set" ? <Me size={24} on={on} /> : id === "rec" ? <span className="flex h-6 w-6 items-center justify-center"><img src="/logo.png" alt="" className={`h-[18px] w-auto transition-opacity ${on ? "opacity-100" : "opacity-60"}`} /></span> : <NI d={NAV_I[id]} size={24} />}</span>
+        <span className="relative">{id === "set" ? <Me size={24} on={on} /> : id === "rec" ? <span className="flex h-6 w-6 items-center justify-center"><img src="/logo.png" alt="" className={`h-[18px] w-auto transition-opacity ${on ? "opacity-100" : "opacity-60"}`} /></span> : <NI d={NAV_I[id]} size={24} />}{id === "dev" && nDev > 0 && <span className="absolute -right-2.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}</span>
         <span className="relative whitespace-nowrap text-[11px] font-semibold leading-none tracking-[-0.005em]">{NAV_L[id]}</span>
       </motion.button> })}
     </div></nav>
@@ -465,18 +469,18 @@ function Dev() {
   const inM = (d: Devis, k: number) => { if (!d.at) return k === 5; const a = new Date(d.at), [y, mo] = mk(k); return a.getFullYear() === y && a.getMonth() === mo }
   const m = Array.from({ length: 6 }, (_, k) => val.filter(d => inM(d, k)).reduce((a, d) => a + d.amount, 0)), cur = m[5], tot = m.reduce((a, b) => a + b, 0), mL = Array.from({ length: 6 }, (_, k) => MO[mk(k)[1]])
   const pend = [...s.devis].sort((a, b) => b.num - a.num).find(d => d.status === "brouillon")
-  const sendD = (d?: Devis) => { if (!d) return; const snap = s; set(x => ({ ...x, devis: x.devis.map(y => y.id === d.id ? { ...y, status: "env" } : y) })); toast(`Devis ${d.num} envoyé à ${d.client}`, () => set(() => snap)) }
-  const send = () => sendD(pend)
+  const openD = (d?: Devis) => { if (d) modal({ kind: "devisPrev", data: d }) }
+  const send = () => openD(pend)
   const queued = (d: Devis) => s.rels.some(r => r.status === "prog" && r.type.includes(String(d.num)))
   const relance = (d: Devis) => { const snap = s; set(x => ({ ...x, rels: [{ id: uid(), client: d.client, type: `Relance devis N° ${d.num}`, canal: "SMS", status: "prog", date: "Demain 9:00" }, ...x.rels] })); toast(`Relance prévue demain 9:00 · ${d.client}`, () => set(() => snap)) }
-  const FRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${eur(d.amount)}`} r={<div className="flex items-center gap-3"><Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>{d.status === "brouillon" ? <TBtn I={Send} label={`Envoyer le devis ${d.num}`} c={c} onClick={() => sendD(d)} /> : queued(d) ? <TBtn I={Check} label="Relance déjà prévue" dis /> : <TBtn I={Repeat2} label={`Relancer ${d.client}`} c={c} onClick={() => relance(d)} />}</div>} />
+  const FRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${eur(d.amount)}`} r={<div className="flex items-center gap-3"><Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>{d.status === "brouillon" ? <TBtn I={Send} label={`Envoyer le devis ${d.num}`} c={c} onClick={() => openD(d)} /> : queued(d) ? <TBtn I={Check} label="Relance déjà prévue" dis /> : <TBtn I={Repeat2} label={`Relancer ${d.client}`} c={c} onClick={() => relance(d)} />}</div>} />
   const exp = () => { const csv = ["N°;Client;Objet;Statut;Montant HT", ...s.devis.map(d => [d.num, d.client, d.objet, ST[d.status][0], d.amount].join(";"))].join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new window.Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = "devis-akno.csv"; a.click(); toast("Export CSV téléchargé") }
   const DRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />
-  const todo = ds.filter(d => d.status === "brouillon" || d.status === "att" || d.status === "env")
-  const aval = ds.filter(d => d.status === "aval"), { desk } = useC()
-  /* Pop-up « nouveau devis IA » : une fois par visite de la page, tant qu'un devis reste à valider */
-  useEffect(() => { const first = [...s.devis].sort((a, b) => b.num - a.num).find(d => d.status === "aval"); if (!first) return; const t = setTimeout(() => modal({ kind: "aiPop", data: first }), 450); return () => clearTimeout(t) }, [])
-  const VRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Regarder le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Circ><Blob c={c} s={20} /></Circ>} t={<span className="flex items-center gap-2"><span className="truncate">{d.client}</span></span>} s={`N° ${d.num} · généré par Akno`} r={eur(ttc(d.amount, s.settings.tva))} rs={<Chip c={c}>À valider</Chip>} />
+  const todo = ds.filter(d => (d.status === "brouillon" && !d.ai) || d.status === "att" || d.status === "env")
+  const aval = ds.filter(toValidate), { desk } = useC()
+  /* Pop-up « nouveau devis IA » : une fois par visite de la page, tant qu'un brouillon reste à valider */
+  useEffect(() => { const first = [...s.devis].sort((a, b) => b.num - a.num).find(toValidate); if (!first) return; const t = setTimeout(() => modal({ kind: "aiPop", data: first }), 450); return () => clearTimeout(t) }, [])
+  const VRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Regarder le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Circ><Blob c={c} s={20} /></Circ>} t={<span className="flex items-center gap-2"><span className="truncate">{d.client}</span></span>} s={`N° ${d.num} · brouillon généré par Akno`} r={eur(d.amount)} rs={<Chip c={c}>Brouillon — à valider</Chip>} />
   const avalS = aval.length > 0 && <Section t={<span className="flex items-center gap-2">À valider<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{aval.length}</span></span>} aside="Devis générés par l'IA"><List>{aval.map(VRow)}</List></Section>
   return <Shell k="dev" fig={<Num n={cur} u="€" money />} sub={`validés ce mois · ${val.length} devis sur ${sent.length} envoyés`} actions={[
     { I: Plus, l: "Nouveau", on: () => modal({ kind: "devis" }) }, { I: Send, l: "Envoyer", on: send, dis: !pend || pend.status !== "brouillon" },
@@ -608,12 +612,78 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
     {ev && <><H>Rendez-vous</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{ev.topic}</div><Chip c={past ? GREY : A.ag.c}>{past ? "Passé" : "À venir"}</Chip></div><div className={`mt-1 ${tx.cap}`}>{fmtD(ev.date)} · {hh(ev.start)} – {hh(ev.start + ev.dur)}</div>{(ev.notes || ev.addr) && <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{[ev.notes, ev.addr].filter(Boolean).join(" · ")}</p>}</div></>}
     {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div><p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{(call.recording || (call.dur && call.dur !== "0:00")) && <div className="mt-3"><CallInline call={call} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
     {(devis.length > 0 || evs.length > 0) && <><H>Devis et rendez-vous</H><div className="overflow-hidden rounded-[20px] bg-white/[.04]">
-      {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisEdit", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
+      {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
       {evs.map((e, i) => <Row key={e.id} first={!devis.length && i === 0} label={`RDV ${e.topic}`} onClick={() => modal({ kind: "ev", data: e })} lead={<Ic I={CalendarDays} />} t={e.topic} s={`${fmtD(e.date)} · ${hh(e.start)} – ${hh(e.start + e.dur)}`} r={<Chev />} />)}</div></>}
     {hist.length > 0 && <><H>Historique</H><div className="relative pl-2">{hist.map((h, i) => <div key={i} className="relative flex gap-3 pb-4 last:pb-0">{i < hist.length - 1 && <span className="absolute left-[15px] top-8 bottom-0 w-px bg-white/[.08]" />}<span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><h.I size={14} strokeWidth={SW} /></span><div className="min-w-0 pt-1"><div className="truncate text-[14px]">{h.t}</div><div className={tx.cap}>{h.w}</div></div></div>)}</div></>}
   </Sheet>
 }
 const CallInline = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); return <Player p={p} c={A.rec.c} onMic={onMic} /> }
+function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => void }) {
+  const { s, set, toast } = useC()
+  const dv = s.devis.find(x => x.id === initial.id) || initial
+  const tv = s.settings.tva
+  const cl = findC(dv.client)
+  const draft = dv.status === "aval" || dv.status === "brouillon"
+  const [email, setEmail] = useState(dv.email || cl?.email || "")
+  const [busy, setBusy] = useState(false)
+  const [mailErr, setMailErr] = useState("")
+  const lines: DevisLine[] = dv.lines?.length ? dv.lines : [{ l: dv.objet, q: 1, pu: dv.amount, u: "u", tv }]
+  const ht = lines.reduce((a, x) => a + Number(x.q) * Number(x.pu), 0)
+  const tax = lines.reduce((a, x) => a + Number(x.q) * Number(x.pu) * (Number(x.tv ?? tv) / 100), 0)
+  const setLines = (next: DevisLine[]) => {
+    const nht = next.reduce((a, x) => a + Number(x.q) * Number(x.pu), 0)
+    const ntax = next.reduce((a, x) => a + Number(x.q) * Number(x.pu) * (Number(x.tv ?? tv) / 100), 0)
+    set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, lines: next, amount: Math.round((nht + ntax) * 100) / 100 } : y) }))
+  }
+  const patch = (i: number, p: Partial<DevisLine>) => setLines(lines.map((x, j) => j === i ? { ...x, ...p } : x))
+  const doc = buildDoc({ ...dv, lines }, cl, tv, TODAY)
+  const download = () => import("../lib/devisPdf").then(x => { x.downloadPdf(doc); toast(`Devis-${dv.num}.pdf téléchargé`) })
+  const send = async () => {
+    const to = email.trim()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) { setMailErr("Indiquez l'e-mail du client pour l'envoi."); return }
+    setBusy(true); setMailErr("")
+    try {
+      const { makePdf } = await import("../lib/devisPdf")
+      const b64 = makePdf(doc).output("datauristring").split(",")[1] || ""
+      const res = await sendDevisEmail({ devisId: String(dv.id), pdfBase64: b64, filename: `Devis-${dv.num}.pdf`, email: to })
+      if (!res.ok) { setMailErr(res.error || "Impossible d'envoyer le devis."); setBusy(false); return }
+      set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: "env", email: to, sentAt: new Date().toISOString() } : y) }))
+      toast(`Devis ${dv.num} envoyé à ${to}`)
+      onClose()
+    } catch { setMailErr("Impossible d'envoyer le devis."); setBusy(false) }
+  }
+  return <Sheet title={`Devis N° ${dv.num}`} sub={draft ? "Brouillon — à valider" : ST[dv.status][0]} c={A.dev.c} onClose={onClose} footer={draft ? <Btn primary c={A.dev.c} className="w-full" disabled={busy} onClick={send}><Send size={16} />{busy ? "Envoi…" : "Valider et envoyer"}</Btn> : <Btn className="w-full" onClick={onClose}>Fermer</Btn>}>
+    {draft && <>
+      <div className="mb-4 rounded-[16px] border border-[#0E8F8F]/35 bg-[#0E8F8F]/10 px-4 py-3 text-[13.5px] text-white/80">Brouillon — à valider. Rien n'est envoyé au client tant que vous n'avez pas cliqué sur « Valider et envoyer ».</div>
+      <div className="mb-4 rounded-[20px] bg-white/[.04] p-4">
+        <div className={tx.cap}>Lignes du devis</div>
+        {lines.map((x, i) => <div key={i} className={`mt-3 space-y-2 ${i ? "border-t border-white/[.08] pt-3" : ""}`}>
+          <input className={inp} value={x.l} placeholder="Désignation" onChange={e => patch(i, { l: e.target.value })} />
+          <div className="grid grid-cols-4 gap-2">
+            <input className={inp} type="number" min={0} step="0.01" value={x.q} aria-label="Quantité" onChange={e => patch(i, { q: Number(e.target.value) })} />
+            <input className={inp} value={x.u || "u"} aria-label="Unité" onChange={e => patch(i, { u: e.target.value })} />
+            <input className={inp} type="number" min={0} step="0.01" value={x.pu} aria-label="Prix unitaire HT" onChange={e => patch(i, { pu: Number(e.target.value) })} />
+            <select className={inp} value={x.tv ?? tv} aria-label="TVA" onChange={e => patch(i, { tv: Number(e.target.value) })}>
+              <option value={5.5}>5,5 %</option><option value={10}>10 %</option><option value={20}>20 %</option>
+            </select>
+          </div>
+          {lines.length > 1 && <button type="button" className="text-[12.5px] text-white/45" onClick={() => setLines(lines.filter((_, j) => j !== i))}>Supprimer la ligne</button>}
+        </div>)}
+        <button type="button" className="mt-3 text-[13px] font-medium text-white/70" onClick={() => setLines([...lines, { l: "", q: 1, pu: 0, u: "u", tv }])}>+ Ajouter une ligne</button>
+        <div className="mt-4 space-y-1 text-[13.5px] text-white/60">
+          <div className="flex justify-between"><span>Total HT</span><span>{eur(Math.round(ht * 100) / 100)}</span></div>
+          <div className="flex justify-between"><span>TVA</span><span>{eur(Math.round(tax * 100) / 100)}</span></div>
+          <div className="flex justify-between font-medium text-white"><span>Total TTC</span><span>{eur(Math.round((ht + tax) * 100) / 100)}</span></div>
+        </div>
+        <div className="mt-4"><F l="E-mail du client"><input className={inp} type="email" value={email} placeholder="kevin.m@example.com" onChange={e => { setEmail(e.target.value); setMailErr("") }} /></F></div>
+      </div>
+    </>}
+    {mailErr && <div className="mb-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{mailErr}</div>}
+    <DevisPaper d={doc} />
+    <div className="mt-3"><Btn className="w-full" onClick={download}><Download size={15} strokeWidth={1.5} />Télécharger PDF</Btn></div>
+    {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
+  </Sheet>
+}
 function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   const { s, set, toast, go, modal, setChat, desk } = useC(), d = m.data || {}
   const clients = [...new Set([...s.calls.map(x => x.name), ...s.devis.map(x => x.client), ...s.rels.map(x => x.client)])]
@@ -648,24 +718,16 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
       <div className="mt-6 grid grid-cols-2 gap-2">{(r.status === "prog" || r.status === "pause") ? <><Btn primary disabled={!on} aria-label={`Envoyer ${r.client}`} onClick={() => { relUpd(r.id, "env", `Relance envoyée à ${r.client} (simulé)`, "À l'instant"); close() }}><Send size={14} strokeWidth={1.5} />Envoyer</Btn><Btn onClick={() => { relUpd(r.id, r.status === "pause" ? "prog" : "pause", r.status === "pause" ? "Relance reprise" : "Relance en pause"); close() }}>{r.status === "pause" ? <><Play size={13} strokeWidth={1.5} />Reprendre</> : <><Pause size={13} strokeWidth={1.5} />Mettre en pause</>}</Btn></> : <Btn className="col-span-2" onClick={() => { relUpd(r.id, "prog", "Relance reprogrammée", "Demain 9:00"); close() }}><RotateCcw size={14} strokeWidth={1.5} />Reprogrammer</Btn>}</div></Sheet> }
   if (m.kind === "devis") return <Sheet title="Nouveau devis" c={A.dev.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><F l={`Montant HT (€) · TVA ${String(s.settings.tva).replace(".", ",")} %`}><input type="number" min={0} className={inp} {...v("amount")} /></F></div>
     {foot("Créer le brouillon", !!f.name.trim() && Number(f.amount) > 0, () => { set(x => ({ ...x, devis: [{ id: uid(), num: Math.max(...x.devis.map(y => y.num), 9087) + 1, client: f.name.trim(), objet: f.topic || "Travaux", amount: Number(f.amount), status: "brouillon", created: Date.now() }, ...x.devis] })); toast("Brouillon de devis créé"); go("dev") }, A.dev.c, "Indiquez le client et un montant")}</Sheet>
-  if (m.kind === "devisList") return <Sheet title="Devis" sub="Septembre" c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <Row key={x.id} first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisEdit", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} />)}</div></Sheet>
-  if (m.kind === "aiPop") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, n = s.devis.filter(x => x.status === "aval").length
-    if (dv.status !== "aval") return null
-    return <Sheet title="Nouveau devis" sub="Agent Devis · à valider" c={A.dev.c} onClose={close}>
+  if (m.kind === "devisList") return <Sheet title="Devis" sub="Septembre" c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <Row key={x.id} first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisPrev", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} />)}</div></Sheet>
+  if (m.kind === "aiPop") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, n = s.devis.filter(toValidate).length
+    if (!toValidate(dv)) return null
+    return <Sheet title="Nouveau devis" sub="Brouillon — à valider" c={A.dev.c} onClose={close}>
       <div className="text-[15px] text-white/60">Nouveau devis pour</div><div className="mt-1 text-[24px] font-medium tracking-[-0.02em]">{dv.client}</div>
       <div className="mt-5 rounded-[20px] bg-white/[.04] p-4"><div className={tx.cap}>Montant</div><div className={`mt-1 text-[40px] ${tx.fig}`}>{eur(ttc(dv.amount, s.settings.tva))}</div><div className={`mt-1 ${tx.cap}`}>TTC · {eur(dv.amount)} HT · {dv.objet}</div></div>
       <div className="mt-4 flex items-center gap-2 text-[13px] text-white/50"><Sparkles size={14} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>
       {n > 1 && <div className={`mt-2 ${tx.cap}`}>+ {n - 1} autre{n > 2 ? "s" : ""} devis à valider</div>}
       <div className="mt-6"><Btn primary c={A.dev.c} className="w-full" onClick={() => modal({ kind: "devisPrev", data: dv })}>Regarder le devis</Btn></div></Sheet> }
-  if (m.kind === "devisPrev") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, tv = s.settings.tva, cl = findC(dv.client)
-    const lines = dv.lines?.length ? dv.lines : [{ l: dv.objet, q: 1, pu: dv.amount }], ht = lines.reduce((a, x) => a + x.q * x.pu, 0), tva = Math.round(ht * tv) / 100
-    const validate = () => { const snap = s; set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: "env" } : y) })); toast(`Devis ${dv.num} validé · envoyé à ${dv.client}`, () => set(() => snap)); close() }
-    const doc = buildDoc(dv, cl, tv, TODAY)
-    return <Sheet title={`Devis N° ${dv.num}`} sub={dv.status === "aval" ? "Généré par Akno · à valider" : ST[dv.status][0]} c={A.dev.c} onClose={close} footer={dv.status === "aval" ? <div className="flex gap-2"><Btn className="flex-1" onClick={() => modal({ kind: "devisEdit", data: dv })}>Modifier</Btn><Btn primary c={A.dev.c} className="flex-[1.6]" onClick={validate}><Check size={16} />Valider</Btn></div> : <Btn className="w-full" onClick={close}>Fermer</Btn>}>
-      <DevisPaper d={doc} />
-      <div className="mt-3"><Btn className="w-full" onClick={() => import("../lib/devisPdf").then(x => { x.downloadPdf(doc); toast(`Devis-${dv.num}.pdf téléchargé`) })}><Download size={15} strokeWidth={1.5} />Télécharger PDF</Btn></div>
-      {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
-    </Sheet> }
+  if (m.kind === "devisPrev") return <DevisPrevSheet initial={d as Devis} onClose={close} />
   if (m.kind === "devisEdit") { const dv = s.devis.find(x => x.id === d.id) || d as Devis; const setS = (st: DevStatus) => { set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: st } : y) })); toast(`Devis ${dv.num} : ${ST[st][0]}`) }
     return <Sheet title={`Devis N° ${dv.num}`} sub={`${dv.client} · ${dv.objet}`} c={A.dev.c} onClose={close}><div className={`text-[40px] ${tx.fig}`}>{eur(dv.amount)}</div><div className="mt-2"><Sub>HT · {eur(Math.round(dv.amount * (1 + s.settings.tva / 100)))} TTC (TVA {String(s.settings.tva).replace(".", ",")} %)</Sub></div>
       <Btn primary c={A.dev.c} className="mt-5 w-full" onClick={() => modal({ kind: "devisPrev", data: dv })}><FileText size={16} strokeWidth={1.6} />Voir le devis</Btn>

@@ -30,7 +30,7 @@ function json(res: Res, status: number, body: unknown) {
 function apiDev(): Plugin {
   const middleware = async (req: Req, res: Res, next: () => void) => {
     const path = req.url?.split("?")[0]
-    if (path !== "/api/voice-token" && path !== "/api/booking") return next()
+    if (path !== "/api/voice-token" && path !== "/api/booking" && path !== "/api/devis") return next()
     if (req.method === "OPTIONS") { res.statusCode = 204; res.end(); return }
     if (req.method !== "POST") { json(res, 405, { error: "Méthode non autorisée." }); return }
     try {
@@ -40,8 +40,14 @@ function apiDev(): Plugin {
         json(res, result.status, result.body)
         return
       }
-      const { handleBooking } = await import("./api/booking")
-      const result = await handleBooking(req.headers.authorization, await readJson(req))
+      if (path === "/api/booking") {
+        const { handleBooking } = await import("./api/booking")
+        const result = await handleBooking(req.headers.authorization, await readJson(req))
+        json(res, result.status, result.body)
+        return
+      }
+      const { handleDevis } = await import("./api/devis")
+      const result = await handleDevis(req.headers.authorization, await readJson(req))
       json(res, result.status, result.body)
     } catch {
       json(res, 500, { error: "Erreur serveur." })

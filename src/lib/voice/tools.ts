@@ -1,4 +1,5 @@
 import { supabase } from "../supabase"
+import { draftDevisFromCall } from "../devisApi"
 import type { VoiceProfile } from "./script"
 
 export type BookArgs = {
@@ -34,6 +35,7 @@ export type SaveArgs = {
   urgence?: string
   a_rappeler?: boolean
   devis_demande?: boolean
+  email_client?: string
   rdv_pris?: boolean
   notes?: string
 }
@@ -127,12 +129,6 @@ function formatTranscript(lines: { role: "user" | "assistant"; text: string }[])
     .join("\n")
 }
 
-async function nextDevisNumero() {
-  const { data } = await supabase.from("devis").select("numero").order("created_at", { ascending: false }).limit(1)
-  const last = parseInt(String(data?.[0]?.numero || "9080").replace(/\D/g, ""), 10)
-  return String((Number.isFinite(last) ? last : 9080) + 1)
-}
-
 export async function saveCall(
   args: SaveArgs,
   extra: { transcript: { role: "user" | "assistant"; text: string }[]; durationSec: number; profile?: VoiceProfile },
@@ -155,6 +151,7 @@ export async function saveCall(
     urgence: urgent ? "urgent" : "normal",
     transcript: formatTranscript(extra.transcript) || null,
     duration: Math.max(0, Math.round(extra.durationSec)),
+    email_client: args.email_client?.trim() || null,
     statut,
     notes: args.notes?.trim() || null,
   }
@@ -162,25 +159,9 @@ export async function saveCall(
   if (error) return { ok: false, error: "Impossible d'enregistrer l'appel." }
 
   let devis_id: string | undefined
-  if (args.devis_demande || args.type_demande === "devis") {
-    const numero = await nextDevisNumero()
-    const objet = args.motif?.trim() || args.besoin_detail?.trim() || "Demande de devis"
-    const adresse = [args.adresse, args.code_postal, args.ville].filter(Boolean).join(", ")
-    const { data: devis, error: dErr } = await supabase.from("devis").insert({
-      artisan_id: user.id,
-      numero,
-      client_nom: row.nom_client,
-      client_email: "",
-      client_telephone: row.telephone_client,
-      client_adresse: adresse || null,
-      objet,
-      lignes: [],
-      total_ht: 0,
-      tva_taux: 20,
-      total_ttc: 0,
-      statut: "brouillon",
-    }).select("id, numero").maybeSingle()
-    if (!dErr && devis) devis_id = devis.id
+  if (data?.id && (args.devis_demande || args.type_demande === "devis")) {
+    const draft = await draftDevisFromCall(data.id)
+    if (draft.ok && draft.devis_id) devis_id = String(draft.devis_id)
   }
 
   return {
@@ -188,7 +169,9 @@ export async function saveCall(
     call_id: data?.id,
     devis_id,
     message: devis_id
-      ? "Appel enregistré et brouillon de devis créé."
-      : "Appel enregistré dans Réception.",
+      ? "Appel enregistré et brouillon de devis créé — à valider avant envoi."
+      : args.devis_demande || args.type_demande === "devis"
+        ? "Appel enregistré. Le brouillon de devis n'a pas pu être généré automatiquement."
+        : "Appel enregistré dans Réception.",
   }
 }

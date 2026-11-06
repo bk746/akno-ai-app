@@ -6,7 +6,8 @@ export type Ev = { id: string; date: string; start: number; dur: number; name: s
 export type RelStatus = "prog" | "pause" | "env" | "rep"
 export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string; at?: string }
 export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref"
-export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: { l: string; q: number; pu: number }[]; at?: string }
+export type DevisLine = { l: string; q: number; pu: number; u?: string; tv?: number }
+export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string }
 export type Msg = { id: string; from: "me" | "ai"; text: string; devisId?: string; action?: string; card?: { num: number; client: string; objet: string; amount: number }; items?: import("./assistant").RItem[]; acts?: import("./assistant").RAct[]; chips?: string[]; done?: string[] }
 export type Settings = { agents: { rec: boolean; ag: boolean; rel: boolean; dev: boolean }; sms: boolean; push: boolean; tva: number; duree: number; name?: string; company?: string; email?: string }
 export type Client = { key: string; name: string; phone: string; email?: string; addr: string; lat: number; lon: number; hist?: { calls: number; last: string; since: string } }
@@ -95,8 +96,19 @@ const toCall = (r: Row): Call => {
 }
 const toEv = (r: Row): Ev => { const a = new Date(r.start), b = r.end ? new Date(r.end) : new Date(a.getTime() + 3600e3); return { id: r.id, date: isoDay(a), start: a.getHours() + a.getMinutes() / 60, dur: Math.max(.25, (b.getTime() - a.getTime()) / 3600e3), name: r.client || "Client", topic: r.title || "", addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1, ai: r.call_id != null, callId: r.call_id != null ? String(r.call_id) : undefined, phone: r.telephone_client || undefined, notes: r.notes || undefined } }
 const evRow = (e: Ev) => { const a = new Date(`${e.date}T00:00:00`); a.setMinutes(Math.round(e.start * 60)); const b = new Date(a.getTime() + e.dur * 3600e3); return { title: e.topic, client: e.name, start: a.toISOString(), end: b.toISOString(), adresse: e.addr ?? null } }
-const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: DEV_ST.includes(r.statut) ? r.statut : "brouillon", amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at })
-const devRow = (d: Devis, tva: number) => { const ttc = d.lines?.length ? d.lines.reduce((t, l) => t + l.q * l.pu, 0) * (1 + tva / 100) : d.amount; return { numero: String(d.num), client_nom: d.client, objet: d.objet, statut: d.status, lignes: d.lines ?? [], total_ttc: Math.round(ttc * 100) / 100, total_ht: Math.round(ttc / (1 + tva / 100) * 100) / 100, tva_taux: tva } }
+const mapStatut = (st: string): DevStatus => st === "envoyé" ? "env" : DEV_ST.includes(st as DevStatus) ? st as DevStatus : "brouillon"
+const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: mapStatut(String(r.statut || "")), amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at, email: r.client_email || undefined, callId: r.call_id != null ? String(r.call_id) : undefined, ai: r.call_id != null, sentAt: r.envoye_le || undefined })
+const devRow = (d: Devis, tva: number) => {
+  const lines = d.lines ?? []
+  const ht = lines.length ? lines.reduce((t, l) => t + Number(l.q) * Number(l.pu), 0) : d.amount / (1 + tva / 100)
+  const tax = lines.length ? lines.reduce((t, l) => t + Number(l.q) * Number(l.pu) * (Number(l.tv ?? tva) / 100), 0) : d.amount - ht
+  return {
+    numero: String(d.num), client_nom: d.client, objet: d.objet, statut: d.status, lignes: lines,
+    total_ttc: Math.round((ht + tax) * 100) / 100, total_ht: Math.round(ht * 100) / 100, tva_taux: tva,
+    ...(d.email != null ? { client_email: d.email } : {}),
+    ...(d.status === "env" ? { envoye_le: d.sentAt || new Date().toISOString() } : {}),
+  }
+}
 
 const empty = (): St => {
   try { for (const k of OLD_KEYS) localStorage.removeItem(k) } catch { }
