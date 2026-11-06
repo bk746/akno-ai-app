@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence, useAnimationControls } from "motion/react"
 import { Delete, ScanFace } from "lucide-react"
 import { BLOB } from "./blobPath"
-import { bioAvailable, checkCode, enableBio, getLock, setCode, unlockBio } from "../lib/lock"
+import { bioAvailable, checkCode, enableBio, getLock, isMissingGestureError, setCode, unlockBio } from "../lib/lock"
 import { supabase } from "../lib/supabase"
 
 const buzz = () => { try { navigator.vibrate?.([30, 40, 30]) } catch { } }
@@ -27,9 +27,19 @@ const nameKey = (uid: string) => `akno-prenom:${uid}`
 export function LockScreen({ uid, onUnlock }: { uid: string; onUnlock: () => void }) {
   const [splash, setSplash] = useState(true), [code, setC] = useState(""), [busy, setBusy] = useState(false), [msg, setMsg] = useState(""), ctl = useAnimationControls()
   const [name, setName] = useState(() => localStorage.getItem(nameKey(uid)) || ""), bio = !!getLock(uid)?.cred
+  const [needsTap, setNeedsTap] = useState(false)
+  const unlocking = useRef(false)
   useEffect(() => { const t = setTimeout(() => setSplash(false), 900); supabase.from("artisans").select("prenom").eq("id", uid).maybeSingle().then(({ data }) => { if (data?.prenom) { setName(data.prenom); localStorage.setItem(nameKey(uid), data.prenom) } }); return () => clearTimeout(t) }, [uid])
-  const face = async () => { try { if (await unlockBio(uid)) onUnlock() } catch { /* iOS peut exiger un geste : le bouton Face ID reste disponible */ } }
-  useEffect(() => { if (!splash && bio) face() }, [splash]) // eslint-disable-line react-hooks/exhaustive-deps
+  const face = async (fromGesture: boolean) => {
+    if (unlocking.current || !getLock(uid)?.cred) return
+    unlocking.current = true
+    const t0 = performance.now()
+    try { if (await unlockBio(uid)) onUnlock() }
+    catch (err) { if (isMissingGestureError(err, t0, fromGesture)) setNeedsTap(true) }
+    finally { unlocking.current = false }
+  }
+  // iOS 16+ autorise parfois get() sans geste : on lance dès l'ouverture, sans attendre le splash ni un bouton.
+  useEffect(() => { if (bio) void face(false) }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
   const key = async (d: string) => {
     if (busy || code.length >= 6) return; const c = code + d; setC(c); setMsg("")
     if (c.length < 6) return
@@ -39,6 +49,7 @@ export function LockScreen({ uid, onUnlock }: { uid: string; onUnlock: () => voi
     if (r === "locked") { await supabase.auth.signOut(); return }
     setMsg("Code incorrect")
   }
+  const tapToUnlock = () => { setNeedsTap(false); void face(true) }
   return <div className="fixed inset-0 z-[100] flex flex-col bg-black text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
     <AnimatePresence mode="wait">{splash
       ? <motion.div key="s" exit={{ opacity: 0 }} transition={{ duration: .25 }} className="flex flex-1 items-center justify-center"><img src="/logo.png" alt="Akno" className="h-16 w-auto" /></motion.div>
@@ -47,9 +58,14 @@ export function LockScreen({ uid, onUnlock }: { uid: string; onUnlock: () => voi
         <h1 className="mt-5 text-[22px] font-semibold tracking-[-0.02em]">Bonjour{name ? `, ${name}` : ""}</h1>
         <div className="mt-8"><Dots n={code.length} ctl={ctl} /></div>
         <div className="mt-3 h-5 text-[14px] text-[#FF5F57]">{msg}</div>
-        <div className="mt-auto"><Pad onKey={key} onDel={() => setC(c => c.slice(0, -1))} left={bio ? <button onClick={face} aria-label="Déverrouiller avec Face ID" className="flex h-[76px] w-[76px] items-center justify-center text-white"><ScanFace size={32} strokeWidth={1.5} /></button> : null} /></div>
+        <div className="mt-auto"><Pad onKey={key} onDel={() => setC(c => c.slice(0, -1))} left={bio ? <button onClick={() => face(true)} aria-label="Déverrouiller avec Face ID" className="flex h-[76px] w-[76px] items-center justify-center text-white"><ScanFace size={32} strokeWidth={1.5} /></button> : null} /></div>
         <button onClick={() => supabase.auth.signOut()} className="mb-6 mt-7 text-[15px] font-medium text-white/60">Code d'accès oublié ?</button>
       </motion.div>}</AnimatePresence>
+    {needsTap && <div role="button" tabIndex={0} aria-label="Touchez pour déverrouiller avec Face ID" onPointerDown={tapToUnlock} className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/55 px-6">
+      <ScanFace size={72} strokeWidth={1.2} />
+      <p className="mt-4 text-center text-[17px] font-medium">Touchez pour déverrouiller</p>
+      <button type="button" className="mt-8 text-[15px] font-medium text-white/60" onPointerDown={e => { e.stopPropagation(); setNeedsTap(false) }}>Utiliser le code</button>
+    </div>}
   </div>
 }
 
