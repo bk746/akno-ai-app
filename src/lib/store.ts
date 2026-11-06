@@ -4,12 +4,13 @@ import { setCO } from "./devisDoc"
 export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; recording?: string; createdAt?: string }
 export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean; callId?: string; phone?: string; notes?: string }
 export type RelStatus = "prog" | "pause" | "env" | "rep"
-export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string; at?: string }
-export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref"
+export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string; at?: string; devisId?: string; appointmentId?: string; scheduledFor?: string; sentAt?: string }
+export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref" | "sans"
 export type DevisLine = { l: string; q: number; pu: number; u?: string; tv?: number }
-export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string }
+export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string; token?: string; remindersOff?: boolean; reply?: string; repliedAt?: string; reminderCount?: number; phone?: string }
 export type Msg = { id: string; from: "me" | "ai"; text: string; devisId?: string; action?: string; card?: { num: number; client: string; objet: string; amount: number }; items?: import("./assistant").RItem[]; acts?: import("./assistant").RAct[]; chips?: string[]; done?: string[] }
-export type Settings = { agents: { rec: boolean; ag: boolean; rel: boolean; dev: boolean }; sms: boolean; push: boolean; tva: number; duree: number; name?: string; company?: string; email?: string }
+export const DEFAULT_REVIEW_URL = "https://g.page/r/CUFA_AEl10CzECE/review"
+export type Settings = { agents: { rec: boolean; ag: boolean; rel: boolean; dev: boolean }; sms: boolean; push: boolean; tva: number; duree: number; name?: string; company?: string; email?: string; reviewUrl?: string }
 export type Client = { key: string; name: string; phone: string; email?: string; addr: string; lat: number; lon: number; hist?: { calls: number; last: string; since: string } }
 export type St = { clients: Client[]; calls: Call[]; events: Ev[]; rels: Rel[]; devis: Devis[]; settings: Settings; chat: Msg[]; lastRel: { client: string; type: string; time: string; canal: string } }
 export const uid = () => Math.random().toString(36).slice(2, 10)
@@ -78,7 +79,7 @@ export const seed = (): St => ({
 })
 const KEY = "akno-local-v9" // seulement les réglages locaux (agents, TVA…) ; tout le reste vient de Supabase
 const OLD_KEYS = ["akno-demo-v7", "akno-local-v8"]
-const DEV_ST: DevStatus[] = ["aval", "brouillon", "att", "env", "val", "ref"]
+const DEV_ST: DevStatus[] = ["aval", "brouillon", "att", "env", "val", "ref", "sans"]
 const isUuid = (x: string) => /^[0-9a-f-]{36}$/i.test(x)
 const pad = (n: number) => String(n).padStart(2, "0")
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -96,17 +97,22 @@ const toCall = (r: Row): Call => {
 }
 const toEv = (r: Row): Ev => { const a = new Date(r.start), b = r.end ? new Date(r.end) : new Date(a.getTime() + 3600e3); return { id: r.id, date: isoDay(a), start: a.getHours() + a.getMinutes() / 60, dur: Math.max(.25, (b.getTime() - a.getTime()) / 3600e3), name: r.client || "Client", topic: r.title || "", addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1, ai: r.call_id != null, callId: r.call_id != null ? String(r.call_id) : undefined, phone: r.telephone_client || undefined, notes: r.notes || undefined } }
 const evRow = (e: Ev) => { const a = new Date(`${e.date}T00:00:00`); a.setMinutes(Math.round(e.start * 60)); const b = new Date(a.getTime() + e.dur * 3600e3); return { title: e.topic, client: e.name, start: a.toISOString(), end: b.toISOString(), adresse: e.addr ?? null } }
-const mapStatut = (st: string): DevStatus => st === "envoyé" ? "env" : DEV_ST.includes(st as DevStatus) ? st as DevStatus : "brouillon"
-const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: mapStatut(String(r.statut || "")), amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at, email: r.client_email || undefined, callId: r.call_id != null ? String(r.call_id) : undefined, ai: r.call_id != null, sentAt: r.envoye_le || undefined })
+const mapStatut = (st: string): DevStatus => {
+  if (st === "envoyé") return "env"
+  if (st === "sans_reponse" || st === "sans réponse" || st === "sans") return "sans"
+  return DEV_ST.includes(st as DevStatus) ? st as DevStatus : "brouillon"
+}
+const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: mapStatut(String(r.statut || "")), amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at, email: r.client_email || undefined, callId: r.call_id != null ? String(r.call_id) : undefined, ai: r.call_id != null, sentAt: r.envoye_le || undefined, token: r.token || undefined, remindersOff: !!r.relances_off, reply: r.reponse_client || undefined, repliedAt: r.repondu_le || undefined, reminderCount: Number(r.relances || 0), phone: r.client_telephone || undefined })
 const devRow = (d: Devis, tva: number) => {
   const lines = d.lines ?? []
   const ht = lines.length ? lines.reduce((t, l) => t + Number(l.q) * Number(l.pu), 0) : d.amount / (1 + tva / 100)
   const tax = lines.length ? lines.reduce((t, l) => t + Number(l.q) * Number(l.pu) * (Number(l.tv ?? tva) / 100), 0) : d.amount - ht
   return {
-    numero: String(d.num), client_nom: d.client, objet: d.objet, statut: d.status, lignes: lines,
+    numero: String(d.num), client_nom: d.client, objet: d.objet, statut: d.status === "sans" ? "sans_reponse" : d.status, lignes: lines,
     total_ttc: Math.round((ht + tax) * 100) / 100, total_ht: Math.round(ht * 100) / 100, tva_taux: tva,
     ...(d.email != null ? { client_email: d.email } : {}),
     ...(d.status === "env" ? { envoye_le: d.sentAt || new Date().toISOString() } : {}),
+    ...(typeof d.remindersOff === "boolean" ? { relances_off: d.remindersOff } : {}),
   }
 }
 
@@ -116,8 +122,8 @@ const empty = (): St => {
   const { name: _n, company: _c, email: _e, ...keep } = loc.settings || {}
   return { clients: [], calls: [], events: [], rels: [], devis: [], chat: [], lastRel: { client: "", type: "", time: "", canal: "" }, settings: { ...d, ...keep } }
 }
-const toRel = (r: Row): Rel => ({ id: r.id, client: r.client || "", type: r.type || "", canal: r.canal || "SMS", status: (["prog", "pause", "env", "rep"].includes(r.statut) ? r.statut : "prog") as RelStatus, date: r.date_label || new Date(r.created_at).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" }), at: r.created_at })
-const relRow = (r: Rel) => ({ client: r.client, type: r.type, canal: r.canal, statut: r.status, date_label: r.date })
+const toRel = (r: Row): Rel => ({ id: r.id, client: r.client || "", type: r.type || "", canal: r.canal || "SMS", status: (["prog", "pause", "env", "rep"].includes(r.statut) ? r.statut : "prog") as RelStatus, date: r.date_label || new Date(r.created_at).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" }), at: r.created_at, devisId: r.devis_id || undefined, appointmentId: r.appointment_id || undefined, scheduledFor: r.scheduled_for || undefined, sentAt: r.sent_at || undefined })
+const relRow = (r: Rel) => ({ client: r.client, type: r.type, canal: r.canal, statut: r.status, date_label: r.date, ...(r.devisId ? { devis_id: r.devisId } : {}), ...(r.appointmentId ? { appointment_id: r.appointmentId } : {}) })
 
 /** Données de l'artisan connecté : appels, rendez-vous, devis et profil viennent de Supabase (RLS = artisan_id = auth.uid()). */
 export function useStore() {
@@ -136,12 +142,12 @@ export function useStore() {
     if (p.data) setCO(p.data)
     if (!p.data && !p.error) await supabase.from("artisans").insert({ id: user.id, email: user.email })
     const dv = d.data || []
-    setRaw(x => ({ ...x, calls: (c.data || []).map(toCall), events: (a.data || []).map(toEv), devis: dv.map((r, i) => toDev(r, i, dv.length)), rels: (rl.data || []).map(toRel), settings: { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email } }))
+    setRaw(x => ({ ...x, calls: (c.data || []).map(toCall), events: (a.data || []).map(toEv), devis: dv.map((r, i) => toDev(r, i, dv.length)), rels: (rl.data || []).map(toRel), settings: { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email, reviewUrl: p.data?.avis_url || x.settings.reviewUrl || DEFAULT_REVIEW_URL } }))
     setLoading(false)
   }, [])
   useEffect(() => {
     load()
-    const ch = supabase.channel("akno-live").on("postgres_changes", { event: "*", schema: "public", table: "calls" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "devis" }, () => load()).subscribe()
+    const ch = supabase.channel("akno-live").on("postgres_changes", { event: "*", schema: "public", table: "calls" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "devis" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "relances" }, () => load()).subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [load])
   const sync = useCallback(async (p: St, n: St) => {
@@ -160,7 +166,12 @@ export function useStore() {
       for (const r of n.rels) { const o = p.rels.find(x => x.id === r.id); if (!o) jobs.push(supabase.from("relances").insert({ ...relRow(r), artisan_id: me })); else if (o !== r && isUuid(r.id)) jobs.push(supabase.from("relances").update(relRow(r)).eq("id", r.id)) }
       for (const o of p.rels) if (isUuid(o.id) && !n.rels.some(x => x.id === o.id)) jobs.push(supabase.from("relances").delete().eq("id", o.id))
     }
-    if (p.settings.name !== n.settings.name || p.settings.company !== n.settings.company) jobs.push(supabase.from("artisans").update({ prenom: n.settings.name ?? null, nom_entreprise: n.settings.company ?? null }).eq("id", me))
+    if (p.settings.name !== n.settings.name || p.settings.company !== n.settings.company || p.settings.reviewUrl !== n.settings.reviewUrl) {
+      jobs.push(supabase.from("artisans").update({
+        ...(p.settings.name !== n.settings.name || p.settings.company !== n.settings.company ? { prenom: n.settings.name ?? null, nom_entreprise: n.settings.company ?? null } : {}),
+        ...(p.settings.reviewUrl !== n.settings.reviewUrl ? { avis_url: n.settings.reviewUrl?.trim() || null } : {}),
+      }).eq("id", me))
+    }
     const res = await Promise.all(jobs) as { error?: unknown }[]
     if (res.some(r => r?.error)) console.error("Supabase sync", res.filter(r => r?.error))
     // recharge si une ligne a été créée (récupère les vrais identifiants)

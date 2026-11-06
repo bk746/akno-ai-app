@@ -109,6 +109,7 @@ export async function bookAppointment(args: BookArgs) {
     title: args.objet?.trim() || "Rendez-vous",
     client: args.client?.trim() || "Client",
     telephone_client: args.telephone?.trim() || null,
+    email_client: args.email?.trim() || null,
     start,
     end,
     adresse: args.adresse?.trim() || null,

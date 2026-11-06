@@ -7,7 +7,7 @@ import { Component, type ReactNode, createContext, useContext, useEffect, useRef
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
 import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace } from "lucide-react"
 import { BLOB } from "./blobPath"
-import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
+import { PHONES, useStore, uid, BASE, addDays, eur, seed, DEFAULT_REVIEW_URL } from "../lib/store"
 import { sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
@@ -37,11 +37,11 @@ const dd = (iso: string) => new Date(iso + "T12:00:00")
 const dlabel = (iso: string) => `${DAYS[(dd(iso).getDay() + 6) % 7]} ${dd(iso).getDate()}`
 const short = (n: string) => /^(M\.|Mme|Chantier)/.test(n) ? n : n.split(" ").length > 1 ? `${n[0]}. ${n.split(" ").slice(1).join(" ")}` : n
 const ttc = (ht: number, tv: number) => Math.round(ht * (1 + tv / 100))
-const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"] }
+const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"], sans: ["Sans réponse", "rgba(255,255,255,.3)"] }
 const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
-type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw"; data?: any } | null
+type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "clientReply"; data?: any } | null
 type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void }
 const C = createContext<Ctx>(null as any)
 const useC = () => useContext(C)
@@ -446,8 +446,9 @@ function RelP() {
   const { s, set, modal, q, toast } = useC(), c = A.rel.c, on = s.settings.agents.rel
   const rels = s.rels.filter(r => match(q, r.client, r.type))
   const prog = s.rels.filter(r => r.status === "prog"), nx = prog[0]
-  const sendR = (r: Rel) => { const snap = s; set(x => ({ ...x, rels: x.rels.map(y => y.id === r.id ? { ...y, status: "env", date: "À l'instant" } : y), lastRel: { client: r.client, type: r.type, time: "À l'instant", canal: r.canal } })); toast(`Relance envoyée à ${r.client}`, () => set(() => snap)) }
-  const QRow = (r: Rel, i: number) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "client", data: { name: r.client } })} lead={<Av n={r.client} />} t={r.client} s={`${r.type} · ${r.canal} · ${r.date}`} r={<div className="flex items-center gap-3">{r.status === "pause" && <Chip c={GREY}>En pause</Chip>}<TBtn I={Send} label={`Envoyer maintenant à ${r.client}`} c={c} onClick={() => sendR(r)} /></div>} />
+  const stopD = (id: string) => { set(x => ({ ...x, devis: x.devis.map(d => d.id === id ? { ...d, remindersOff: true } : d), rels: x.rels.map(y => y.devisId === id && y.status === "prog" ? { ...y, status: "pause" } : y) })); toast("Relances de ce devis arrêtées") }
+  const sendR = (r: Rel) => { if (r.devisId && r.canal === "E-mail") { toast(`Cette relance partira automatiquement${r.date ? ` (${r.date})` : ""}.`); return } const snap = s; set(x => ({ ...x, rels: x.rels.map(y => y.id === r.id ? { ...y, status: "env", date: "À l'instant" } : y), lastRel: { client: r.client, type: r.type, time: "À l'instant", canal: r.canal } })); toast(`Relance envoyée à ${r.client}`, () => set(() => snap)) }
+  const QRow = (r: Rel, i: number) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Av n={r.client} />} t={r.client} s={`${r.type} · ${r.canal} · ${r.date}`} r={<div className="flex items-center gap-3">{r.status === "pause" && <Chip c={GREY}>{r.devisId ? "Arrêtées" : "En pause"}</Chip>}{r.devisId && r.status === "prog" ? <TBtn I={Pause} label={`Arrêter les relances pour ${r.client}`} c={c} onClick={() => stopD(r.devisId!)} /> : !r.devisId ? <TBtn I={Send} label={`Envoyer maintenant à ${r.client}`} c={c} onClick={() => sendR(r)} /> : null}</div>} />
   const RRow = (r: Rel, i: number) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "client", data: { name: r.client } })} lead={<Ic I={canalI[r.canal] || Send} />} t={r.client} s={`${r.type} · ${r.canal}`} r={<span className={tx.cap}>{r.date}</span>} rs={<Chip c={RS[r.status][1]}>{RS[r.status][0]}</Chip>} />
   const tg = () => { set(x => ({ ...x, settings: { ...x.settings, agents: { ...x.settings.agents, rel: !on } } })); toast(`Relance ${on ? "en pause" : "activé"}`) }
   return <Shell k="rel" fig={<Num n={prog.length} />} sub={nx ? `relances à venir · prochaine ${nx.date.toLowerCase()}` : "relances à venir"} actions={[
@@ -478,14 +479,26 @@ function Dev() {
   const DRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />
   const todo = ds.filter(d => (d.status === "brouillon" && !d.ai) || d.status === "att" || d.status === "env")
   const aval = ds.filter(toValidate), { desk } = useC()
-  /* Pop-up « nouveau devis IA » : une fois par visite de la page, tant qu'un brouillon reste à valider */
-  useEffect(() => { const first = [...s.devis].sort((a, b) => b.num - a.num).find(toValidate); if (!first) return; const t = setTimeout(() => modal({ kind: "aiPop", data: first }), 450); return () => clearTimeout(t) }, [])
+  /* Pop-up : brouillon IA à valider, sinon dernière réponse client (accepté / refusé) */
+  useEffect(() => {
+    const first = [...s.devis].sort((a, b) => b.num - a.num).find(toValidate)
+    if (first) { const t = setTimeout(() => modal({ kind: "aiPop", data: first }), 450); return () => clearTimeout(t) }
+    const reply = [...s.devis].filter(d => d.repliedAt && (d.status === "val" || d.status === "ref")).sort((a, b) => (b.repliedAt || "").localeCompare(a.repliedAt || ""))[0]
+    if (!reply) return
+    try { if (sessionStorage.getItem("akno-seen-" + reply.id)) return } catch { }
+    const t = setTimeout(() => modal({ kind: "clientReply", data: reply }), 450); return () => clearTimeout(t)
+  }, [])
   const VRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Regarder le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Circ><Blob c={c} s={20} /></Circ>} t={<span className="flex items-center gap-2"><span className="truncate">{d.client}</span></span>} s={`N° ${d.num} · brouillon généré par Akno`} r={eur(d.amount)} rs={<Chip c={c}>Brouillon — à valider</Chip>} />
+  const replies = ds.filter(d => d.reply || d.status === "sans" || ((d.status === "val" || d.status === "ref") && !!d.repliedAt))
+  const replyL = (d: Devis) => d.status === "val" && d.repliedAt ? "Accepté" : d.status === "ref" && d.repliedAt ? "Refusé" : d.status === "sans" ? "Sans réponse" : d.reply ? "Réponse client" : ST[d.status][0]
+  const ReplyRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={d.reply || `N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={d.status === "val" ? GREEN : d.status === "ref" ? RED : c}>{replyL(d)}</Chip>} />
   const avalS = aval.length > 0 && <Section t={<span className="flex items-center gap-2">À valider<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{aval.length}</span></span>} aside="Devis générés par l'IA"><List>{aval.map(VRow)}</List></Section>
+  const replyS = replies.length > 0 && <Section t={<span className="flex items-center gap-2">Réponses clients<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{replies.length}</span></span>} aside="Acceptation, refus ou message"><List>{replies.map(ReplyRow)}</List></Section>
   return <Shell k="dev" fig={<Num n={cur} u="€" money />} sub={`validés ce mois · ${val.length} devis sur ${sent.length} envoyés`} actions={[
     { I: Plus, l: "Nouveau", on: () => modal({ kind: "devis" }) }, { I: Send, l: "Envoyer", on: send, dis: !pend || pend.status !== "brouillon" },
     { I: Repeat2, l: "Relancer", on: () => modal({ kind: "rel", data: { name: (s.devis.find(d => d.status === "env") || pend)?.client || "" } }) }, { I: ArrowUp, l: "Exporter", on: exp }]}>
     {avalS && (desk ? <div className="col-span-2">{avalS}</div> : avalS)}
+    {replyS && (desk ? <div className="col-span-2">{replyS}</div> : replyS)}
     <Col><Section t="À suivre" aside={todo.length ? `${todo.length} devis` : undefined}><List I={Check} empty="Aucun devis en attente.">{todo.map(FRow)}</List></Section>
       <Section t="Montant validé" aside="6 derniers mois"><Chart c={c} label="Total" value={eur(tot)} v={m} l={mL} sel={5} /></Section></Col>
     <Col><Section t="Tous les devis" more={() => modal({ kind: "devisList" })}><List>{ds.map(DRow)}</List></Section></Col>
@@ -515,7 +528,8 @@ function SetP() {
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
-      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section></Col>
+      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section>
+      <Section t="Avis clients"><List><S first I={Sparkles} l="Lien d'avis Google" v={(st.reviewUrl || DEFAULT_REVIEW_URL).replace(/^https?:\/\//, "").slice(0, 28)} onClick={() => modal({ kind: "reviewUrl" })} /></List></Section></Col>
   </Shell>
 }
 
@@ -652,7 +666,19 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
       onClose()
     } catch { setMailErr("Impossible d'envoyer le devis."); setBusy(false) }
   }
+  const when = (iso?: string) => iso ? new Date(iso).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : ""
+  const stopRem = () => { set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, remindersOff: true } : y), rels: x.rels.map(r => r.devisId === dv.id && r.status === "prog" ? { ...r, status: "pause" } : r) })); toast("Relances de ce devis arrêtées") }
   return <Sheet title={`Devis N° ${dv.num}`} sub={draft ? "Brouillon — à valider" : ST[dv.status][0]} c={A.dev.c} onClose={onClose} footer={draft ? <Btn primary c={A.dev.c} className="w-full" disabled={busy} onClick={send}><Send size={16} />{busy ? "Envoi…" : "Valider et envoyer"}</Btn> : <Btn className="w-full" onClick={onClose}>Fermer</Btn>}>
+    {!draft && (dv.status === "val" || dv.status === "ref" || dv.status === "sans" || dv.reply) && <div className="mb-4 rounded-[16px] bg-white/[.04] px-4 py-3 text-[13.5px] text-white/80">
+      {dv.status === "val" && dv.repliedAt && <div>Accepté par le client le {when(dv.repliedAt)}.</div>}
+      {dv.status === "ref" && dv.repliedAt && <div>Refusé par le client le {when(dv.repliedAt)}.</div>}
+      {dv.status === "sans" && <div>Sans réponse après deux relances automatiques.</div>}
+      {dv.reply && <div className={`${dv.repliedAt || dv.status === "sans" ? "mt-2" : ""} text-white/70`}>« {dv.reply} »</div>}
+    </div>}
+    {dv.status === "env" && <div className="mb-4 flex items-center justify-between gap-3 rounded-[16px] bg-white/[.04] px-4 py-3 text-[13.5px] text-white/75">
+      <span>{dv.remindersOff ? "Relances automatiques arrêtées." : "Relances automatiques prévues à J+3 et J+7."}</span>
+      {!dv.remindersOff && <button type="button" className="shrink-0 text-[13px] font-medium text-white" onClick={stopRem}>Arrêter</button>}
+    </div>}
     {draft && <>
       <div className="mb-4 rounded-[16px] border border-[#0E8F8F]/35 bg-[#0E8F8F]/10 px-4 py-3 text-[13.5px] text-white/80">Brouillon — à valider. Rien n'est envoyé au client tant que vous n'avez pas cliqué sur « Valider et envoyer ».</div>
       <div className="mb-4 rounded-[20px] bg-white/[.04] p-4">
@@ -681,7 +707,17 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     {mailErr && <div className="mb-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{mailErr}</div>}
     <DevisPaper d={doc} />
     <div className="mt-3"><Btn className="w-full" onClick={download}><Download size={15} strokeWidth={1.5} />Télécharger PDF</Btn></div>
+    {dv.token && !draft && <div className="mt-2"><Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${location.origin}/accept/${dv.token}`); toast("Lien d'acceptation copié") }}>Copier le lien client</Btn></div>}
     {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
+  </Sheet>
+}
+function ReviewUrlSheet({ close }: { close: () => void }) {
+  const { s, set, toast } = useC()
+  const [url, setUrl] = useState(s.settings.reviewUrl || DEFAULT_REVIEW_URL)
+  return <Sheet title="Lien d'avis Google" sub="Envoyé le lendemain d'un rendez-vous" c={A.rel.c} onClose={close}>
+    <F l="URL de la page d'avis"><input className={inp} value={url} onChange={e => setUrl(e.target.value)} placeholder={DEFAULT_REVIEW_URL} /></F>
+    <p className={`mt-3 ${tx.cap}`}>Un seul e-mail par rendez-vous, uniquement si le client a un e-mail. Laissez vide pour utiliser le lien par défaut.</p>
+    <Btn primary className="mt-6 w-full" onClick={() => { set(x => ({ ...x, settings: { ...x.settings, reviewUrl: url.trim() || DEFAULT_REVIEW_URL } })); toast("Lien d'avis enregistré"); close() }}>Enregistrer</Btn>
   </Sheet>
 }
 function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
@@ -713,9 +749,18 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     const done = (x: Call) => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) }
     return <Sheet title="À rappeler" sub={`${todo.length} client${todo.length > 1 ? "s" : ""} · ${todo.filter(x => x.urgent).length} urgent${todo.filter(x => x.urgent).length > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}>{todo.length ? <div className="-mx-5 bg-black/20">{todo.map((x, i) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</span>} s={`${x.tag || x.topic} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => done(x)} /></div>} />)}</div> : <div className={`py-8 text-center ${tx.cap}`}>Personne à rappeler. Tout est à jour.</div>}</Sheet> }
   if (m.kind === "relList") return <Sheet title="Relances" sub={`${s.rels.filter(r => r.status === "prog").length} à venir`} c={A.rel.c} onClose={close}><div className="-mx-5 bg-black/20">{s.rels.map((r, i) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Ic I={canalI[r.canal] || Send} />} t={r.client} s={`${r.type} · ${r.date}`} r={<Chip c={RS[r.status][1]}>{RS[r.status][0]}</Chip>} />)}</div></Sheet>
+  if (m.kind === "reviewUrl") return <ReviewUrlSheet close={close} />
+  if (m.kind === "clientReply") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, ok = dv.status === "val"
+    try { sessionStorage.setItem("akno-seen-" + dv.id, "1") } catch { }
+    return <Sheet title={ok ? "Devis accepté" : "Devis refusé"} sub={dv.repliedAt ? new Date(dv.repliedAt).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "Réponse du client"} c={A.dev.c} onClose={close}>
+      <div className="text-[15px] text-white/60">{dv.client} a {ok ? "accepté" : "refusé"} le devis n° {dv.num}{dv.objet ? ` · ${dv.objet}` : ""}.</div>
+      {dv.reply && <div className="mt-4 rounded-[16px] bg-white/[.04] p-4 text-[14px] text-white/75">« {dv.reply} »</div>}
+      <div className="mt-6"><Btn primary c={A.dev.c} className="w-full" onClick={() => modal({ kind: "devisPrev", data: dv })}>Voir le devis</Btn></div>
+    </Sheet> }
   if (m.kind === "relView") { const r = s.rels.find(y => y.id === d.id) || d as Rel, on = s.settings.agents.rel
-    return <Sheet title={r.client} sub={`${r.type} · ${r.canal}`} c={A.rel.c} onClose={close}><div className="space-y-2"><Sub dot={RS[r.status][1]}>{RS[r.status][0]} · {r.date}</Sub>{!on && <Sub>Agent Relance en pause : envoi manuel désactivé</Sub>}</div>
-      <div className="mt-6 grid grid-cols-2 gap-2">{(r.status === "prog" || r.status === "pause") ? <><Btn primary disabled={!on} aria-label={`Envoyer ${r.client}`} onClick={() => { relUpd(r.id, "env", `Relance envoyée à ${r.client} (simulé)`, "À l'instant"); close() }}><Send size={14} strokeWidth={1.5} />Envoyer</Btn><Btn onClick={() => { relUpd(r.id, r.status === "pause" ? "prog" : "pause", r.status === "pause" ? "Relance reprise" : "Relance en pause"); close() }}>{r.status === "pause" ? <><Play size={13} strokeWidth={1.5} />Reprendre</> : <><Pause size={13} strokeWidth={1.5} />Mettre en pause</>}</Btn></> : <Btn className="col-span-2" onClick={() => { relUpd(r.id, "prog", "Relance reprogrammée", "Demain 9:00"); close() }}><RotateCcw size={14} strokeWidth={1.5} />Reprogrammer</Btn>}</div></Sheet> }
+    const stopAll = () => { if (!r.devisId) return; set(x => ({ ...x, devis: x.devis.map(dv => dv.id === r.devisId ? { ...dv, remindersOff: true } : dv), rels: x.rels.map(y => y.devisId === r.devisId && y.status === "prog" ? { ...y, status: "pause" } : y) })); toast("Relances de ce devis arrêtées"); close() }
+    return <Sheet title={r.client} sub={`${r.type} · ${r.canal}`} c={A.rel.c} onClose={close}><div className="space-y-2"><Sub dot={RS[r.status][1]}>{RS[r.status][0]} · {r.date}</Sub>{!on && <Sub>Agent Relance en pause : envoi manuel désactivé</Sub>}{r.devisId && <Sub>Relance automatique liée au devis</Sub>}</div>
+      <div className="mt-6 grid grid-cols-2 gap-2">{r.devisId && (r.status === "prog" || r.status === "pause") ? <Btn className="col-span-2" onClick={stopAll} disabled={!!s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause"}>{s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause" ? "Relances arrêtées" : "Arrêter les relances de ce devis"}</Btn> : (r.status === "prog" || r.status === "pause") ? <><Btn primary disabled={!on} aria-label={`Envoyer ${r.client}`} onClick={() => { relUpd(r.id, "env", `Relance envoyée à ${r.client} (simulé)`, "À l'instant"); close() }}><Send size={14} strokeWidth={1.5} />Envoyer</Btn><Btn onClick={() => { relUpd(r.id, r.status === "pause" ? "prog" : "pause", r.status === "pause" ? "Relance reprise" : "Relance en pause"); close() }}>{r.status === "pause" ? <><Play size={13} strokeWidth={1.5} />Reprendre</> : <><Pause size={13} strokeWidth={1.5} />Mettre en pause</>}</Btn></> : <Btn className="col-span-2" onClick={() => { relUpd(r.id, "prog", "Relance reprogrammée", "Demain 9:00"); close() }}><RotateCcw size={14} strokeWidth={1.5} />Reprogrammer</Btn>}</div></Sheet> }
   if (m.kind === "devis") return <Sheet title="Nouveau devis" c={A.dev.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><F l={`Montant HT (€) · TVA ${String(s.settings.tva).replace(".", ",")} %`}><input type="number" min={0} className={inp} {...v("amount")} /></F></div>
     {foot("Créer le brouillon", !!f.name.trim() && Number(f.amount) > 0, () => { set(x => ({ ...x, devis: [{ id: uid(), num: Math.max(...x.devis.map(y => y.num), 9087) + 1, client: f.name.trim(), objet: f.topic || "Travaux", amount: Number(f.amount), status: "brouillon", created: Date.now() }, ...x.devis] })); toast("Brouillon de devis créé"); go("dev") }, A.dev.c, "Indiquez le client et un montant")}</Sheet>
   if (m.kind === "devisList") return <Sheet title="Devis" sub="Septembre" c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <Row key={x.id} first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisPrev", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} />)}</div></Sheet>

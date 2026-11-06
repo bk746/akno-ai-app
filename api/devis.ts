@@ -1,12 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import { devisAcceptUrl, devisEmailHtml, env, looksLikeEmail, replyToFor, scheduleDevisReminders, sendResend } from "./mail"
 
 type Json = Record<string, unknown>
 type Line = { l: string; q: number; u: string; pu: number; tv: number }
 type ApiResult = { status: number; body: Json }
 
-const env = (name: string) => (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]
 const CHAT_MODEL = () => env("XAI_CHAT_MODEL") || "grok-4-latest"
-const RESEND_FROM = () => (env("RESEND_FROM") || "Akno <onboarding@resend.dev>").trim()
 
 function round2(n: number) {
   return Math.round(n * 100) / 100
@@ -189,14 +188,10 @@ async function handleDraft(supabase: SupabaseClient, userId: string, body: Json)
   }
 }
 
-function looksLikeEmail(s: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)
-}
-
 async function handleSend(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
   const devisId = String(body.devis_id || "").trim()
   if (!devisId) return { status: 400, body: { error: "devis_id manquant." } }
-  const { data: devis, error } = await supabase.from("devis").select("id, numero, client_nom, client_email, objet, statut").eq("id", devisId).maybeSingle()
+  const { data: devis, error } = await supabase.from("devis").select("id, numero, client_nom, client_email, objet, statut, token").eq("id", devisId).maybeSingle()
   if (error || !devis) return { status: 404, body: { error: "Devis introuvable." } }
   if (devis.statut === "env" || devis.statut === "envoyé") {
     return { status: 409, body: { error: "Ce devis a déjà été envoyé." } }
@@ -225,29 +220,17 @@ async function handleSend(supabase: SupabaseClient, userId: string, body: Json):
 
   const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, prenom, entreprise_email, email").eq("id", userId).maybeSingle()
   const company = artisan?.entreprise_nom || artisan?.nom_entreprise || "votre artisan"
-  const reply = artisan?.entreprise_email || artisan?.email || undefined
-  const subject = `Devis n° ${devis.numero} — ${company}`
-  const html = `<p>Bonjour${devis.client_nom ? ` ${escapeHtml(devis.client_nom)}` : ""},</p>
-<p>Veuillez trouver ci-joint le devis n° ${escapeHtml(String(devis.numero))}${devis.objet ? ` concernant « ${escapeHtml(devis.objet)} »` : ""}.</p>
-<p>Vous pouvez nous répondre à cet e-mail pour toute question ou pour donner votre accord.</p>
-<p>Cordialement,<br/>${escapeHtml(company)}</p>`
-
-  const payload: Json = {
-    from: RESEND_FROM(),
-    to: [email],
-    subject,
-    html,
+  const token = String(devis.token || "")
+  const acceptUrl = token ? devisAcceptUrl(token) : ""
+  const mailed = await sendResend({
+    to: email,
+    subject: `Devis n° ${devis.numero} — ${company}`,
+    html: devisEmailHtml({ client: devis.client_nom, numero: String(devis.numero), objet: devis.objet || undefined, company, acceptUrl }),
+    replyTo: replyToFor(token, artisan?.entreprise_email || artisan?.email || undefined),
     attachments: [{ filename, content: pdf }],
-  }
-  if (reply && looksLikeEmail(reply)) payload.reply_to = reply
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
   })
-  if (!res.ok) {
-    return { status: 502, body: { error: "L'e-mail n'a pas pu être envoyé. Téléchargez le PDF et envoyez-le vous-même.", download: true } }
+  if (!mailed.ok) {
+    return { status: mailed.missingKey ? 503 : 502, body: { error: mailed.missingKey ? "L'envoi d'e-mail n'est pas configuré (RESEND_API_KEY manquante). Téléchargez le PDF et envoyez-le vous-même." : "L'e-mail n'a pas pu être envoyé. Téléchargez le PDF et envoyez-le vous-même.", download: true } }
   }
 
   const sentAt = new Date().toISOString()
@@ -257,11 +240,8 @@ async function handleSend(supabase: SupabaseClient, userId: string, body: Json):
     client_email: email,
   }).eq("id", devisId)
   if (uErr) return { status: 500, body: { error: "E-mail envoyé, mais le statut n'a pas pu être mis à jour." } }
+  try { await scheduleDevisReminders(supabase, { artisanId: userId, devisId, client: devis.client_nom, envoyeLe: sentAt }) } catch { /* le devis est déjà parti */ }
   return { status: 200, body: { ok: true, sent_at: sentAt, email } }
-}
-
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] || ch))
 }
 
 export async function handleDevis(authorization?: string, body?: unknown): Promise<ApiResult> {
