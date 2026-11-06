@@ -3,6 +3,8 @@ import { draftDevisFromCall } from "../devisApi"
 import type { VoiceProfile } from "./script"
 
 export type BookArgs = {
+  prenom?: string
+  nom?: string
   client?: string
   telephone?: string
   email?: string
@@ -107,8 +109,16 @@ export async function getAvailableSlots(args: SlotsArgs) {
   return { ok: false, error: body.error || "Impossible de lire les créneaux.", slots: body.slots || [] }
 }
 
+function bookingClientName(args: BookArgs) {
+  const prenom = args.prenom?.trim() || ""
+  const nom = args.nom?.trim() || ""
+  const composed = [prenom, nom].filter(Boolean).join(" ")
+  return composed || args.client?.trim() || "Client"
+}
+
 export async function bookAppointment(args: BookArgs) {
-  const booked = await bookingApi("book", args) as {
+  const client = bookingClientName(args)
+  const booked = await bookingApi("book", { ...args, client }) as {
     ok?: boolean; error?: string; alternatives?: unknown; confirmation?: string
     start?: string; end?: string; cal_uid?: string; label?: string
   }
@@ -123,7 +133,7 @@ export async function bookAppointment(args: BookArgs) {
   const row = {
     artisan_id: user.id,
     title: args.objet?.trim() || "Rendez-vous",
-    client: args.client?.trim() || "Client",
+    client,
     telephone_client: args.telephone?.trim() || null,
     email_client: args.email?.trim() || null,
     start,
@@ -148,9 +158,16 @@ function formatTranscript(lines: { role: "user" | "assistant"; text: string }[])
     .join("\n")
 }
 
+function needsOnSiteDiagnostic(blob: string) {
+  return /(chaudi[eè]re|chauffe-eau|ballon|cumulus|pompe à chaleur|climatisation|tableau [eé]lectrique|\bvmc\b|remplacement|installation|changement|changer\b|diagnostic|diagnostique|visite (sur place|de diagnostic)|venir sur place|vienne sur place|passer (voir|sur place)|sur place faire)/i.test(blob)
+}
+
 export function inferDevisRequest(args: Partial<SaveArgs>, transcript: { role: string; text: string }[] = []) {
-  if (args.devis_demande || args.type_demande === "devis") return true
   const blob = [args.resume, args.motif, args.besoin_detail, args.notes, args.type_demande, ...transcript.map(l => l.text)].filter(Boolean).join("\n").toLowerCase()
+  // Pas de brouillon de devis avant la visite de diagnostic (ex. changement de chaudière).
+  if (needsOnSiteDiagnostic(blob)) return false
+  if (args.devis_demande === false) return false
+  if (args.devis_demande || args.type_demande === "devis") return true
   if (/devis demandé/.test(blob)) return true
   if (/\bdevis\b/.test(blob) && /(oui|d['’]accord|\bok\b|envoyer|envoi|par (e-?mail|mail)|je (veux|voudrais|souhait)|faire un devis|un devis s['’]il|besoin d['’]un devis)/.test(blob)) return true
   return false
