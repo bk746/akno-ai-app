@@ -1,7 +1,8 @@
 import { supabase } from "../supabase"
 import { uploadCallRecording } from "../recordings"
-import { buildSessionConfig, mergeProfile, welcomeLine, VOICE_ID, type VoiceProfile } from "./script"
-import { bookAppointment, getAvailableSlots, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
+import { draftDevisFromCall } from "../devisApi"
+import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, VOICE_ID, type VoiceProfile } from "./script"
+import { bookAppointment, getAvailableSlots, inferDevisRequest, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
 
 export type VoiceStatus = "idle" | "connecting" | "live" | "speaking" | "listening" | "thinking" | "ending" | "error"
 export type TranscriptLine = { role: "user" | "assistant"; text: string }
@@ -142,8 +143,16 @@ async function connectMic(ctx: AudioContext) {
   }
 }
 
+function isIosClient() {
+  if (typeof navigator === "undefined") return false
+  const ua = navigator.userAgent || ""
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+}
+
 function pickRecorderMime() {
-  const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"]
+  const types = isIosClient()
+    ? ["audio/mp4", "audio/mp4;codecs=mp4a.40.2", "audio/aac", "audio/webm;codecs=opus", "audio/webm"]
+    : ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"]
   for (const t of types) {
     if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t
   }
@@ -152,8 +161,17 @@ function pickRecorderMime() {
 
 function startMixerRecorder(ctx: AudioContext, micSource: MediaStreamAudioSourceNode, agentOut: AudioNode) {
   const mix = ctx.createMediaStreamDestination()
-  try { micSource.connect(mix) } catch { /* */ }
-  try { agentOut.connect(mix) } catch { /* */ }
+  const recBus = ctx.createGain()
+  recBus.gain.value = 1
+  try { micSource.connect(recBus) } catch { /* */ }
+  try { agentOut.connect(recBus) } catch { /* */ }
+  recBus.connect(mix)
+  const keepAlive = new Audio()
+  keepAlive.muted = true
+  keepAlive.setAttribute("playsinline", "")
+  keepAlive.autoplay = true
+  try { keepAlive.srcObject = mix.stream } catch { /* */ }
+  void keepAlive.play().catch(() => { /* Safari keep-alive */ })
   const chunks: Blob[] = []
   let rec: MediaRecorder | null = null
   try {
@@ -167,12 +185,16 @@ function startMixerRecorder(ctx: AudioContext, micSource: MediaStreamAudioSource
   return {
     stop(): Promise<Blob | null> {
       return new Promise(resolve => {
+        const finish = (blob: Blob | null) => {
+          try { keepAlive.pause(); keepAlive.srcObject = null } catch { /* */ }
+          resolve(blob)
+        }
         if (!rec || rec.state === "inactive") {
-          resolve(chunks.length ? new Blob(chunks, { type: rec?.mimeType || "audio/webm" }) : null)
+          finish(chunks.length ? new Blob(chunks, { type: rec?.mimeType || (isIosClient() ? "audio/mp4" : "audio/webm") }) : null)
           return
         }
-        rec.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: rec?.mimeType || "audio/webm" }) : null)
-        try { rec.stop() } catch { resolve(null) }
+        rec.onstop = () => finish(chunks.length ? new Blob(chunks, { type: rec?.mimeType || (isIosClient() ? "audio/mp4" : "audio/webm") }) : null)
+        try { rec.stop() } catch { finish(null) }
       })
     },
   }
@@ -205,6 +227,7 @@ export async function startVoiceSession(opts: {
   let assistantBuf = ""
   let saved = false
   let savedCallId: string | number | undefined
+  let savedDevisId: string | undefined
   let lastSaveMessage = ""
   let ready = false
   let closed = false
@@ -227,10 +250,12 @@ export async function startVoiceSession(opts: {
     tools: session.tools,
     audio: {
       input: { format: { type: "audio/pcm", rate: sampleRate }, transcription: { language_hint: "fr" } },
-      output: { format: { type: "audio/pcm", rate: sampleRate } },
+      output: { format: { type: "audio/pcm", rate: sampleRate }, speed: 1.2 },
     },
   }
+  const slotsPromise = getAvailableSlots({})
   let usedSimple = false
+  let greeted = false
 
   const push = (role: TranscriptLine["role"], text: string, replaceSame = false) => {
     const t = text.trim()
@@ -281,7 +306,9 @@ export async function startVoiceSession(opts: {
         if (result && typeof result === "object" && (result as { ok?: boolean }).ok) {
           saved = true
           savedCallId = (result as { call_id?: string | number }).call_id
+          if ((result as { devis_id?: string }).devis_id) savedDevisId = String((result as { devis_id?: string }).devis_id)
           lastSaveMessage = (result as { message?: string }).message || "Appel enregistré dans Réception."
+          try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
         }
       }
     } catch {
@@ -307,6 +334,8 @@ export async function startVoiceSession(opts: {
     if (type === "session.updated") {
       ready = true
       mic.setHandler(flushMic)
+      if (greeted) return
+      greeted = true
       send({
         type: "conversation.item.create",
         item: {
@@ -316,6 +345,13 @@ export async function startVoiceSession(opts: {
           content: [{ type: "output_text", text: welcomeLine(profile) }],
         },
       })
+      void slotsPromise.then(body => {
+        if (closed) return
+        const slots = Array.isArray((body as { slots?: unknown }).slots) ? (body as { slots: { label?: string; date?: string; heure?: string }[] }).slots : []
+        const hint = formatSlotsHint(slots)
+        if (!hint) return
+        send({ type: "session.update", session: { instructions: buildSessionConfig(profile, sampleRate).instructions + hint } })
+      }).catch(() => { /* agenda préchargé optionnel */ })
       opts.onStatus("speaking")
       return
     }
@@ -425,23 +461,37 @@ export async function startVoiceSession(opts: {
       const summary = lines.length
         ? lines.map(l => l.text).slice(-6).join(" ").slice(0, 600)
         : "Appel test de la réceptionniste, sans informations client collectées."
-      const result = await saveCall({
+      const fallbackArgs = {
         nom_client: "Appel test",
         resume: summary,
-        type_demande: "autre",
-        urgence: "normal",
+        type_demande: "autre" as const,
+        urgence: "normal" as const,
         a_rappeler: false,
-        devis_demande: false,
-      }, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
+        devis_demande: inferDevisRequest({ resume: summary, type_demande: "autre" }, lines),
+      }
+      const result = await saveCall(fallbackArgs, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
       if (result.ok) {
         saved = true
         savedCallId = result.call_id
+        if (result.devis_id) savedDevisId = String(result.devis_id)
         lastSaveMessage = result.message || "Appel enregistré dans Réception."
       }
     }
-    if (blob && savedCallId != null) {
+    if (saved && savedCallId != null && !savedDevisId && inferDevisRequest({ resume: lines.map(l => l.text).join(" ") }, lines)) {
+      const draft = await draftDevisFromCall(savedCallId)
+      if (draft.ok && draft.devis_id) {
+        savedDevisId = String(draft.devis_id)
+        lastSaveMessage = "Appel enregistré et brouillon de devis créé — à valider avant envoi."
+      } else if (draft.error) {
+        lastSaveMessage = lastSaveMessage && !lastSaveMessage.includes("devis")
+          ? `${lastSaveMessage} ${draft.error}`
+          : (draft.error || lastSaveMessage)
+      }
+    }
+    if (blob && blob.size > 64 && savedCallId != null) {
       await uploadCallRecording(savedCallId, blob)
     }
+    try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
     opts.onStatus("idle")
     return lastSaveMessage
   }

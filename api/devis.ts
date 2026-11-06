@@ -111,31 +111,42 @@ async function draftFromXai(input: {
     input.notes ? `Notes : ${input.notes}` : "",
     input.transcript ? `Transcription :\n${input.transcript.slice(0, 8000)}` : "",
   ].filter(Boolean)
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: CHAT_MODEL(),
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: DRAFT_SYSTEM },
-        { role: "user", content: parts.join("\n") || "Prépare un brouillon de devis à partir des informations disponibles." },
-      ],
-      response_format: { type: "json_object" },
-    }),
-  })
-  if (!res.ok) {
-    return { error: "Impossible de générer le brouillon de devis pour le moment.", status: 502 as const }
+  const models = [CHAT_MODEL(), "grok-4-fast-non-reasoning", "grok-4-latest", "grok-4"].filter((m, i, a) => m && a.indexOf(m) === i)
+  let lastError = "Impossible de générer le brouillon de devis pour le moment."
+  for (const model of models) {
+    const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        messages: [
+          { role: "system", content: DRAFT_SYSTEM },
+          { role: "user", content: parts.join("\n") || "Prépare un brouillon de devis à partir des informations disponibles." },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    })
+    if (!res.ok) {
+      lastError = res.status === 404
+        ? "Le modèle IA configuré est indisponible pour générer le devis."
+        : "Impossible de générer le brouillon de devis pour le moment."
+      continue
+    }
+    const data = await res.json() as { choices?: { message?: { content?: string } }[] }
+    const content = data.choices?.[0]?.message?.content || ""
+    try {
+      const parsed = parseModelJson(content)
+      if (!parsed.lines.length) {
+        lastError = "Le brouillon généré ne contient aucune ligne exploitable."
+        continue
+      }
+      return { objet: parsed.objet, lines: parsed.lines }
+    } catch {
+      lastError = "Réponse du modèle illisible."
+    }
   }
-  const data = await res.json() as { choices?: { message?: { content?: string } }[] }
-  const content = data.choices?.[0]?.message?.content || ""
-  try {
-    const parsed = parseModelJson(content)
-    if (!parsed.lines.length) return { error: "Le brouillon généré ne contient aucune ligne exploitable.", status: 502 as const }
-    return { objet: parsed.objet, lines: parsed.lines }
-  } catch {
-    return { error: "Réponse du modèle illisible.", status: 502 as const }
-  }
+  return { error: lastError, status: 502 as const }
 }
 
 async function handleDraft(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {

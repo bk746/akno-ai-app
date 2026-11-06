@@ -146,6 +146,14 @@ function formatTranscript(lines: { role: "user" | "assistant"; text: string }[])
     .join("\n")
 }
 
+export function inferDevisRequest(args: Partial<SaveArgs>, transcript: { role: string; text: string }[] = []) {
+  if (args.devis_demande || args.type_demande === "devis") return true
+  const blob = [args.resume, args.motif, args.besoin_detail, args.notes, args.type_demande, ...transcript.map(l => l.text)].filter(Boolean).join("\n").toLowerCase()
+  if (/devis demandé/.test(blob)) return true
+  if (/\bdevis\b/.test(blob) && /(oui|d['’]accord|\bok\b|envoyer|envoi|par (e-?mail|mail)|je (veux|voudrais|souhait)|faire un devis|un devis s['’]il|besoin d['’]un devis)/.test(blob)) return true
+  return false
+}
+
 export async function saveCall(
   args: SaveArgs,
   extra: { transcript: { role: "user" | "assistant"; text: string }[]; durationSec: number; profile?: VoiceProfile },
@@ -172,14 +180,20 @@ export async function saveCall(
     statut,
     notes: args.notes?.trim() || null,
   }
+  const wantDevis = inferDevisRequest(args, extra.transcript)
+  if (wantDevis && row.type_demande === "autre") row.type_demande = "devis"
   const { data, error } = await supabase.from("calls").insert(row).select("id").maybeSingle()
   if (error) return { ok: false, error: "Impossible d'enregistrer l'appel." }
   notifySelf({ type: "call", client: row.nom_client, motif: row.motif, call_id: data?.id })
+  try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
 
   let devis_id: string | undefined
-  if (data?.id && (args.devis_demande || args.type_demande === "devis")) {
+  let draftError: string | undefined
+  if (data?.id && wantDevis) {
     const draft = await draftDevisFromCall(data.id)
     if (draft.ok && draft.devis_id) devis_id = String(draft.devis_id)
+    else draftError = draft.error || "Le brouillon de devis n'a pas pu être généré."
+    try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
   }
 
   return {
@@ -188,8 +202,8 @@ export async function saveCall(
     devis_id,
     message: devis_id
       ? "Appel enregistré et brouillon de devis créé — à valider avant envoi."
-      : args.devis_demande || args.type_demande === "devis"
-        ? "Appel enregistré. Le brouillon de devis n'a pas pu être généré automatiquement."
+      : wantDevis
+        ? `Appel enregistré. ${draftError || "Le brouillon de devis n'a pas pu être généré automatiquement."}`
         : "Appel enregistré dans Réception.",
   }
 }

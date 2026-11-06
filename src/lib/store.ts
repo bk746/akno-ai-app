@@ -142,13 +142,40 @@ export function useStore() {
     if (p.data) setCO(p.data)
     if (!p.data && !p.error) await supabase.from("artisans").insert({ id: user.id, email: user.email })
     const dv = d.data || []
-    setRaw(x => ({ ...x, calls: (c.data || []).map(toCall), events: (a.data || []).map(toEv), devis: dv.map((r, i) => toDev(r, i, dv.length)), rels: (rl.data || []).map(toRel), settings: { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email, reviewUrl: p.data?.avis_url || x.settings.reviewUrl || DEFAULT_REVIEW_URL } }))
+    const nextCalls = (c.data || []).map(toCall)
+    const nextEvents = (a.data || []).map(toEv)
+    const nextDevis = dv.map((r, i) => toDev(r, i, dv.length))
+    const nextRels = (rl.data || []).map(toRel)
+    setRaw(x => {
+      const settings = { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email, reviewUrl: p.data?.avis_url || x.settings.reviewUrl || DEFAULT_REVIEW_URL }
+      if (
+        JSON.stringify(x.calls) === JSON.stringify(nextCalls)
+        && JSON.stringify(x.events) === JSON.stringify(nextEvents)
+        && JSON.stringify(x.devis) === JSON.stringify(nextDevis)
+        && JSON.stringify(x.rels) === JSON.stringify(nextRels)
+        && x.settings.name === settings.name && x.settings.company === settings.company && x.settings.email === settings.email && x.settings.reviewUrl === settings.reviewUrl
+      ) return x
+      return { ...x, calls: nextCalls, events: nextEvents, devis: nextDevis, rels: nextRels, settings }
+    })
     setLoading(false)
   }, [])
   useEffect(() => {
     load()
     const ch = supabase.channel("akno-live").on("postgres_changes", { event: "*", schema: "public", table: "calls" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "devis" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "relances" }, () => load()).subscribe()
-    return () => { supabase.removeChannel(ch) }
+    let timer: ReturnType<typeof setInterval> | undefined
+    const start = () => { if (!timer) timer = setInterval(() => { if (!document.hidden) load() }, 2000) }
+    const stop = () => { if (timer) { clearInterval(timer); timer = undefined } }
+    const vis = () => { if (document.hidden) stop(); else { load(); start() } }
+    const onRefresh = () => load()
+    document.addEventListener("visibilitychange", vis)
+    addEventListener("akno-refresh", onRefresh)
+    start()
+    return () => {
+      supabase.removeChannel(ch)
+      stop()
+      document.removeEventListener("visibilitychange", vis)
+      removeEventListener("akno-refresh", onRefresh)
+    }
   }, [load])
   const sync = useCallback(async (p: St, n: St) => {
     const me = uidRef.current; if (!me) return

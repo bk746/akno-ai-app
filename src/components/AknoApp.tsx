@@ -214,7 +214,9 @@ function usePlayer(total: number, recording?: string) {
     if (!src) { audioRef.current = null; return }
     const a = new Audio(src)
     a.preload = "metadata"
-    a.playbackRate = rate
+    a.muted = false
+    a.volume = 1
+    a.setAttribute("playsinline", "")
     audioRef.current = a
     const onTime = () => setPos(a.currentTime)
     const onMeta = () => { if (Number.isFinite(a.duration) && a.duration > 0) setDur(a.duration) }
@@ -234,9 +236,8 @@ function usePlayer(total: number, recording?: string) {
   useEffect(() => { if (audioRef.current) audioRef.current.playbackRate = rate }, [rate])
   useEffect(() => {
     if (src || !play) return
-    const t = setInterval(() => setPos(p => { const n = p + .1 * rate; if (n >= dur) { setPlay(false); return dur } return n }), 100)
-    return () => clearInterval(t)
-  }, [play, dur, src, rate])
+    setPlay(false)
+  }, [play, src])
   const seek = (t: number) => { const n = Math.max(0, Math.min(dur, t)); setPos(n); if (audioRef.current) audioRef.current.currentTime = n }
   const toggle = () => {
     const a = audioRef.current
@@ -332,11 +333,11 @@ function Rec() {
     </div>
     <Col><Section t="À rappeler" aside={todoS.length ? `${todoS.length} client${todoS.length > 1 ? "s" : ""}` : undefined}><List I={Check} empty="Personne à rappeler. Tout est à jour.">{todoS.map(TRow)}</List></Section>
       {cur && <Section t="Dernier débrief" more={() => open(cur)}><Card className="overflow-hidden"><Row first label={cur.topic} onClick={() => open(cur)} lead={<Av n={cur.name} />} t={cur.topic} s={cur.short || cur.name} r={<span className={tx.cap}>{cur.at || cur.time}</span>} />
-      <div className="px-4 pb-4 pt-1"><Player p={pl} c={c} onMic={() => setChat(true)} /></div></Card></Section>}</Col>
+      {cur.recording && <div className="px-4 pb-4 pt-1"><Player p={pl} c={c} onMic={() => setChat(true)} /></div>}</Card></Section>}</Col>
     <Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section>
 </Col>
   </Shell>
-  {voiceOn && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email }} onDone={msg => { setVoiceOn(false); if (msg) toast(msg) }} />}
+  {voiceOn && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email }} onDone={msg => { setVoiceOn(false); try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ } if (msg) toast(msg) }} />}
   </>
 }
 
@@ -582,7 +583,7 @@ function Sheet({ title, sub, onClose, children, c, footer }: any) {
 }
 const Sub = ({ children, dot }: any) => dot ? <Chip c={dot}>{children}</Chip> : <div className={tx.cap}>{children}</div>
 const LRow = ({ children, onClick, first }: any) => <div onClick={onClick} className={`flex min-h-[48px] items-center gap-3 text-[14px] ${onClick ? "cursor-pointer" : ""} ${first ? "" : "border-t border-white/[.05]"}`}>{children}</div>
-const CallPlayer = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); return <Card className="mb-5 p-4"><Player p={p} c={A.rec.c} onMic={onMic} compact /></Card> }
+const CallPlayer = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); if (!call.recording) return null; return <Card className="mb-5 p-4"><Player p={p} c={A.rec.c} onMic={onMic} compact /></Card> }
 /* Ligne « à écouter » : un seul enregistrement joue à la fois */
 function ListenRow({ x, first, cur, setCur, acts }: { x: Call; first?: boolean; cur: string | null; setCur: (id: string | null) => void; acts?: boolean }) {
   const p = usePlayer(secs(x.dur), x.recording), { modal, set, toast } = useC()
@@ -590,7 +591,7 @@ function ListenRow({ x, first, cur, setCur, acts }: { x: Call; first?: boolean; 
   const pp = { ...p, toggle: () => { if (!p.play) setCur(x.id); p.toggle() } }
   return <div className={`px-5 py-3.5 ${first ? "" : "border-t border-white/[.05]"}`}>
     <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}</div></div>{acts ? <div className="flex shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => { if (x.callback) { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) } }} /></div> : <span className={`shrink-0 ${tx.cap}`}>{x.day ? "hier " : ""}{x.time}</span>}</div>
-    {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? "Hier " : ""}{x.time}</div>}{x.recording || (x.dur && x.dur !== "0:00") ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
+    {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? "Hier " : ""}{x.time}</div>}{x.recording ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
 }
 function CallsList({ todo, rest }: { todo: Call[]; rest: Call[] }) {
   const [cur, setCur] = useState<string | null>(null)
@@ -599,7 +600,7 @@ function CallsList({ todo, rest }: { todo: Call[]; rest: Call[] }) {
 }
 function ListenList() {
   const { s } = useC(), [cur, setCur] = useState<string | null>(null)
-  const list = s.calls.filter(x => x.dur && x.dur !== "0:00")
+  const list = s.calls.filter(x => x.recording)
   if (!list.length) return <div className={`py-8 text-center ${tx.cap}`}>Aucun enregistrement à écouter.</div>
   return <div className="-mx-5 bg-black/20">{list.map((x, i) => <ListenRow key={x.id} x={x} first={i === 0} cur={cur} setCur={setCur} />)}</div>
 }
@@ -645,14 +646,14 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
     <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{cl?.email && <KV I={Mail} l="E-mail" v={cl.email} href={`mailto:${cl.email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
     {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative</span></div>}
     {ev && <><H>Rendez-vous</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{ev.topic}</div><Chip c={past ? GREY : A.ag.c}>{past ? "Passé" : "À venir"}</Chip></div><div className={`mt-1 ${tx.cap}`}>{fmtD(ev.date)} · {hh(ev.start)} – {hh(ev.start + ev.dur)}</div>{(ev.notes || ev.addr) && <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{[ev.notes, ev.addr].filter(Boolean).join(" · ")}</p>}</div></>}
-    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div><p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{(call.recording || (call.dur && call.dur !== "0:00")) && <div className="mt-3"><CallInline call={call} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
+    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div><p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{call.recording && <div className="mt-3"><CallInline call={call} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
     {(devis.length > 0 || evs.length > 0) && <><H>Devis et rendez-vous</H><div className="overflow-hidden rounded-[20px] bg-white/[.04]">
       {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
       {evs.map((e, i) => <Row key={e.id} first={!devis.length && i === 0} label={`RDV ${e.topic}`} onClick={() => modal({ kind: "ev", data: e })} lead={<Ic I={CalendarDays} />} t={e.topic} s={`${fmtD(e.date)} · ${hh(e.start)} – ${hh(e.start + e.dur)}`} r={<Chev />} />)}</div></>}
     {hist.length > 0 && <><H>Historique</H><div className="relative pl-2">{hist.map((h, i) => <div key={i} className="relative flex gap-3 pb-4 last:pb-0">{i < hist.length - 1 && <span className="absolute left-[15px] top-8 bottom-0 w-px bg-white/[.08]" />}<span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><h.I size={14} strokeWidth={SW} /></span><div className="min-w-0 pt-1"><div className="truncate text-[14px]">{h.t}</div><div className={tx.cap}>{h.w}</div></div></div>)}</div></>}
   </Sheet>
 }
-const CallInline = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); return <Player p={p} c={A.rec.c} onMic={onMic} /> }
+const CallInline = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); if (!call.recording) return null; return <Player p={p} c={A.rec.c} onMic={onMic} /> }
 function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => void }) {
   const { s, set, toast } = useC()
   const dv = s.devis.find(x => x.id === initial.id) || initial
@@ -763,7 +764,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>SMS</option><option>Appel</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
-  if (m.kind === "listen") { const n = s.calls.filter(x => x.dur && x.dur !== "0:00").length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
+  if (m.kind === "listen") { const n = s.calls.filter(x => x.recording).length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
   if (m.kind === "calls") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent)), rest = s.calls.filter(x => !x.callback)
     return <Sheet title="Appels" sub={`${todo.length} à rappeler · ${s.calls.length} appels au total`} c={A.rec.c} onClose={close}><CallsList todo={todo} rest={rest} /></Sheet> }
   if (m.kind === "callbacks") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent))

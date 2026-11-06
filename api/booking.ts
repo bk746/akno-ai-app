@@ -94,9 +94,11 @@ function parsePreferredDay(raw?: string): { from?: string; to?: string; weekday?
 
 function resolveRange(input: SlotsInput) {
   const pref = parsePreferredDay(input.preferred_day)
-  let from = input.date_from || pref.from || todayParis()
-  let to = input.date_to || pref.to || addDaysYmd(from, 13)
-  if (from < todayParis()) from = todayParis()
+  const today = todayParis()
+  const tomorrow = addDaysYmd(today, 1)
+  let from = input.date_from || pref.from || tomorrow
+  let to = input.date_to || pref.to || addDaysYmd(from, 4)
+  if (from < today) from = today
   if (to < from) to = from
   return { from, to, weekday: pref.weekday }
 }
@@ -152,6 +154,8 @@ function collectEventTypes(data: unknown): CalEventType[] {
 }
 
 let cachedEventType: { id: number; lengthInMinutes?: number } | null = null
+const SLOTS_CACHE_MS = 30_000
+const slotsCache = new Map<string, { at: number; value: { ok: boolean; timezone: string; slots: BookingSlot[]; error?: string } }>()
 
 async function resolveEventType() {
   if (cachedEventType) return cachedEventType
@@ -196,11 +200,16 @@ function flattenSlots(data: unknown): BookingSlot[] {
   return out
 }
 
-async function providerGetSlots(input: SlotsInput): Promise<{ ok: boolean; timezone: string; slots: BookingSlot[]; error?: string }> {
+async function providerGetSlots(input: SlotsInput, opts?: { fresh?: boolean }): Promise<{ ok: boolean; timezone: string; slots: BookingSlot[]; error?: string }> {
   const eventType = await resolveEventType()
   const eventTypeId = eventType.id
   const range = resolveRange(input)
   const duration = Math.max(15, Number(input.duree_minutes) || eventType.lengthInMinutes || 60)
+  const cacheKey = `${eventTypeId}|${range.from}|${range.to}|${range.weekday ?? ""}|${duration}`
+  if (!opts?.fresh) {
+    const hit = slotsCache.get(cacheKey)
+    if (hit && Date.now() - hit.at < SLOTS_CACHE_MS) return hit.value
+  }
   const q = new URLSearchParams({
     eventTypeId: String(eventTypeId),
     start: range.from,
@@ -212,11 +221,15 @@ async function providerGetSlots(input: SlotsInput): Promise<{ ok: boolean; timez
   const { r, payload } = await calFetch(`/v2/slots?${q}`, "2024-09-04")
   if (!r.ok) {
     const msg = String((payload as { error?: { message?: string }; message?: string }).error?.message || payload.message || "Impossible de lire les créneaux Cal.com.")
-    return { ok: false, timezone: TZ, slots: [], error: msg }
+    const value = { ok: false, timezone: TZ, slots: [] as BookingSlot[], error: msg }
+    slotsCache.set(cacheKey, { at: Date.now(), value })
+    return value
   }
   let slots = flattenSlots(payload.data)
   if (range.weekday != null) slots = slots.filter(s => parisParts(new Date(s.start)).weekday && new Date(s.start).toLocaleString("en-US", { timeZone: TZ, weekday: "short" }) === ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][range.weekday!])
-  return { ok: true, timezone: TZ, slots: slots.slice(0, 16) }
+  const value = { ok: true, timezone: TZ, slots: slots.slice(0, 16) }
+  slotsCache.set(cacheKey, { at: Date.now(), value })
+  return value
 }
 
 function parseBookStart(input: BookInput) {
@@ -242,7 +255,7 @@ async function providerBook(input: BookInput) {
   }
   const eventType = await resolveEventType()
   const duration = Math.max(15, Number(input.duree_minutes) || eventType.lengthInMinutes || 60)
-  const daySlots = await providerGetSlots({ date_from: input.date, date_to: input.date, duree_minutes: duration })
+  const daySlots = await providerGetSlots({ date_from: input.date, date_to: input.date, duree_minutes: duration }, { fresh: true })
   const match = daySlots.slots.find(s => Math.abs(new Date(s.start).getTime() - parsed.start.getTime()) < 60_000)
   if (!match) {
     const wider = daySlots.slots.length ? daySlots : await providerGetSlots({ date_from: input.date || todayParis(), date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration })
@@ -300,6 +313,7 @@ async function providerBook(input: BookInput) {
   } | undefined
   const start = data?.start || match.start
   const end = data?.end || match.end || new Date(new Date(start).getTime() + duration * 60_000).toISOString()
+  slotsCache.clear()
   return {
     ok: true,
     confirmation: `Rendez-vous confirmé ${formatParisLabel(start)} pour ${attendee.name}.`,
