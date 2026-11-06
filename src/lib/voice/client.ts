@@ -20,6 +20,14 @@ const SUPPORTED = new Set([8000, 16000, 22050, 24000, 32000, 44100, 48000])
 const PREFERRED_RATE = 24000
 const BARGE_MS = 600
 const LOOKAHEAD = 0.08
+const PREFETCH_MS = 2500
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise(resolve => {
+    const t = setTimeout(() => resolve(fallback), ms)
+    promise.then(v => { clearTimeout(t); resolve(v) }, () => { clearTimeout(t); resolve(fallback) })
+  })
+}
 
 function nearestRate(n: number) {
   if (SUPPORTED.has(n)) return n
@@ -90,10 +98,12 @@ class PcmPlayer {
     this.sources = []
     this.next = 0
   }
-  waitIdle() {
+  waitIdle(maxMs = PREFETCH_MS) {
+    if (this.ctx.state === "suspended") void this.ctx.resume()
+    const start = Date.now()
     return new Promise<void>(resolve => {
       const tick = () => {
-        if (this.buffered <= 0.02) resolve()
+        if (this.buffered <= 0.02 || Date.now() - start >= maxMs) resolve()
         else setTimeout(tick, 40)
       }
       tick()
@@ -267,16 +277,17 @@ export async function startVoiceSession(opts: {
   let greetingActive = false
   let greetWatchdog: ReturnType<typeof setTimeout> | null = null
 
-  let prefetched = Array.isArray(opts.slots) ? opts.slots.filter(s => s && (s.label || (s.date && s.heure))) : []
-  if (!prefetched.length) {
+  const slotsPromise = (async (): Promise<SlotHint[]> => {
+    const existing = Array.isArray(opts.slots) ? opts.slots.filter(slot => slot && (slot.label || (slot.date && slot.heure))) : []
+    if (existing.length) return existing
     try {
-      const body = await getAvailableSlots({})
+      const body = await withTimeout(getAvailableSlots({}), PREFETCH_MS, { slots: [] as SlotHint[] })
       const raw = (body as { slots?: unknown }).slots
-      prefetched = Array.isArray(raw) ? raw as SlotHint[] : []
-    } catch { /* agenda préchargé optionnel */ }
-  }
-  const slotsHint = formatSlotsHint(prefetched)
-  logVoice("out", "slots.prefetch", { n: prefetched.length, hint: slotsHint ? "yes" : "no" })
+      return Array.isArray(raw) ? raw as SlotHint[] : []
+    } catch {
+      return []
+    }
+  })()
 
   const ctx = new AudioContext({ sampleRate: PREFERRED_RATE })
   if (ctx.state === "suspended") await ctx.resume()
@@ -284,6 +295,9 @@ export async function startVoiceSession(opts: {
   const player = new PcmPlayer(ctx)
   const mic = await connectMic(ctx)
   const recorder = startMixerRecorder(ctx, mic.source, player.output)
+  const prefetched = await slotsPromise
+  const slotsHint = formatSlotsHint(prefetched)
+  logVoice("out", "slots.prefetch", { n: prefetched.length, hint: slotsHint ? "yes" : "no" })
   const session = buildSessionConfig(profile, sampleRate, slotsHint)
   const simpleSession = {
     voice: VOICE_ID,
@@ -369,9 +383,9 @@ export async function startVoiceSession(opts: {
     if (!greetingActive || closed) return
     if (greetWatchdog) { clearTimeout(greetWatchdog); greetWatchdog = null }
     logVoice("in", "greeting.drain", reason)
-    await player.waitIdle()
-    await new Promise<void>(r => setTimeout(r, 280))
-    await player.waitIdle()
+    await player.waitIdle(PREFETCH_MS)
+    await new Promise<void>(r => setTimeout(r, 200))
+    await player.waitIdle(800)
     if (closed || !greetingActive) return
     greetingActive = false
     logVoice("in", "greeting.unlocked", reason)
@@ -434,6 +448,9 @@ export async function startVoiceSession(opts: {
 
     if (type === "session.updated") {
       ready = true
+      // Brancher le micro tout de suite : flushMic reste muet tant que greetingActive.
+      // Ainsi un response.done manquant n'empêche plus jamais d'appeler.
+      mic.setHandler(flushMic)
       if (greeted) return
       greeted = true
       greetingActive = true
@@ -449,7 +466,7 @@ export async function startVoiceSession(opts: {
       })
       opts.onStatus("speaking")
       if (greetWatchdog) clearTimeout(greetWatchdog)
-      greetWatchdog = setTimeout(() => { void finishGreeting("watchdog") }, 20000)
+      greetWatchdog = setTimeout(() => { void finishGreeting("watchdog") }, 8000)
       return
     }
     if (type === "input_audio_buffer.speech_started") {

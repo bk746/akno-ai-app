@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
-import { devisAcceptUrl, devisEmailHtml, env, looksLikeEmail, replyToFor, scheduleDevisReminders, sendResend } from "./mail"
-import { notifyArtisan } from "./push"
+import { devisAcceptUrl, devisEmailHtml, env, looksLikeEmail, replyToFor, scheduleDevisReminders, sendResend } from "./_lib/mail.js"
+import { notifyArtisan } from "./_lib/push.js"
 
 type Json = Record<string, unknown>
 type Line = { l: string; q: number; u: string; pu: number; tv: number }

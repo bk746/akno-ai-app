@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
-import { env } from "./mail"
-import { notifyArtisan, type PushPayload } from "./push"
+import { env } from "./_lib/mail.js"
+import { notifyArtisan, type PushPayload } from "./_lib/push.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }

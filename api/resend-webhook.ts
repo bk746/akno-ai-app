@@ -1,5 +1,5 @@
-import { adminClient, env, stopDevisReminders } from "./mail"
-import { notifyArtisan } from "./push"
+import { adminClient, env, stopDevisReminders } from "./_lib/mail.js"
+import { notifyArtisan } from "./_lib/push.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }

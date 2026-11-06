@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import * as webPushNs from "web-push"
-import { adminClient, env } from "./mail"
+import { adminClient, env } from "./mail.js"
 
 type WebPush = {
   setVapidDetails: (subject: string, publicKey: string, privateKey: string) => void

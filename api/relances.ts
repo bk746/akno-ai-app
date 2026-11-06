@@ -3,7 +3,7 @@ import {
   addDaysYmd, adminClient, appUrl, DEFAULT_REVIEW_URL, devisAcceptUrl, env,
   parisDayStart, parisYmd, reminderEmailHtml, replyToFor, reviewEmailHtml,
   samePhone, sendResend, stopDevisReminders,
-} from "./mail"
+} from "./_lib/mail.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
