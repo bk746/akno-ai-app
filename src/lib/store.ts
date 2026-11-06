@@ -11,7 +11,7 @@ export type DevisLine = { l: string; q: number; pu: number; u?: string; tv?: num
 export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string; token?: string; remindersOff?: boolean; reply?: string; repliedAt?: string; reminderCount?: number; phone?: string }
 export type Msg = { id: string; from: "me" | "ai"; text: string; devisId?: string; action?: string; card?: { num: number; client: string; objet: string; amount: number }; items?: import("./assistant").RItem[]; acts?: import("./assistant").RAct[]; chips?: string[]; done?: string[] }
 export const DEFAULT_REVIEW_URL = "https://g.page/r/CUFA_AEl10CzECE/review"
-export type Settings = { agents: { rec: boolean; ag: boolean; rel: boolean; dev: boolean }; sms: boolean; push: boolean; tva: number; duree: number; name?: string; company?: string; email?: string; reviewUrl?: string; tarifs?: Tarifs }
+export type Settings = { agents: { rec: boolean; ag: boolean; rel: boolean; dev: boolean }; sms: boolean; push: boolean; tva: number; duree: number; name?: string; company?: string; email?: string; reviewUrl?: string; urgencePhone?: string; tarifs?: Tarifs }
 export type Client = { key: string; name: string; phone: string; email?: string; addr: string; lat: number; lon: number; hist?: { calls: number; last: string; since: string } }
 export type St = { clients: Client[]; calls: Call[]; events: Ev[]; rels: Rel[]; devis: Devis[]; settings: Settings; chat: Msg[]; lastRel: { client: string; type: string; time: string; canal: string } }
 export const uid = () => Math.random().toString(36).slice(2, 10)
@@ -150,13 +150,13 @@ export function useStore() {
     const nextDevis = dv.map((r, i) => toDev(r, i, dv.length))
     const nextRels = (rl.data || []).map(toRel)
     setRaw(x => {
-      const settings = { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email, reviewUrl: p.data?.avis_url || x.settings.reviewUrl || DEFAULT_REVIEW_URL, tarifs: mergeTarifs(p.data?.tarifs ?? x.settings.tarifs) }
+      const settings = { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email, reviewUrl: p.data?.avis_url || x.settings.reviewUrl || DEFAULT_REVIEW_URL, urgencePhone: typeof p.data?.telephone_urgence === "string" ? p.data.telephone_urgence : x.settings.urgencePhone, tarifs: mergeTarifs(p.data?.tarifs ?? x.settings.tarifs) }
       if (
         JSON.stringify(x.calls) === JSON.stringify(nextCalls)
         && JSON.stringify(x.events) === JSON.stringify(nextEvents)
         && JSON.stringify(x.devis) === JSON.stringify(nextDevis)
         && JSON.stringify(x.rels) === JSON.stringify(nextRels)
-        && x.settings.name === settings.name && x.settings.company === settings.company && x.settings.email === settings.email && x.settings.reviewUrl === settings.reviewUrl
+        && x.settings.name === settings.name && x.settings.company === settings.company && x.settings.email === settings.email && x.settings.reviewUrl === settings.reviewUrl && x.settings.urgencePhone === settings.urgencePhone
         && tarifsEqual(x.settings.tarifs, settings.tarifs)
       ) return x
       return { ...x, calls: nextCalls, events: nextEvents, devis: nextDevis, rels: nextRels, settings }
@@ -197,10 +197,11 @@ export function useStore() {
       for (const r of n.rels) { const o = p.rels.find(x => x.id === r.id); if (!o) jobs.push(supabase.from("relances").insert({ ...relRow(r), artisan_id: me })); else if (o !== r && isUuid(r.id)) jobs.push(supabase.from("relances").update(relRow(r)).eq("id", r.id)) }
       for (const o of p.rels) if (isUuid(o.id) && !n.rels.some(x => x.id === o.id)) jobs.push(supabase.from("relances").delete().eq("id", o.id))
     }
-    if (p.settings.name !== n.settings.name || p.settings.company !== n.settings.company || p.settings.reviewUrl !== n.settings.reviewUrl || !tarifsEqual(p.settings.tarifs, n.settings.tarifs)) {
+    if (p.settings.name !== n.settings.name || p.settings.company !== n.settings.company || p.settings.reviewUrl !== n.settings.reviewUrl || p.settings.urgencePhone !== n.settings.urgencePhone || !tarifsEqual(p.settings.tarifs, n.settings.tarifs)) {
       jobs.push(supabase.from("artisans").update({
         ...(p.settings.name !== n.settings.name || p.settings.company !== n.settings.company ? { prenom: n.settings.name ?? null, nom_entreprise: n.settings.company ?? null } : {}),
         ...(p.settings.reviewUrl !== n.settings.reviewUrl ? { avis_url: n.settings.reviewUrl?.trim() || null } : {}),
+        ...(p.settings.urgencePhone !== n.settings.urgencePhone ? { telephone_urgence: n.settings.urgencePhone?.trim() || null } : {}),
         ...(!tarifsEqual(p.settings.tarifs, n.settings.tarifs) ? { tarifs: mergeTarifs(n.settings.tarifs) } : {}),
       }).eq("id", me))
     }

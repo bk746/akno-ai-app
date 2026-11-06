@@ -1,4 +1,5 @@
 import { formatTarifsForPrompt, mergeTarifs, type Tarifs } from "../tarifs"
+import { formatPhonePairs, hasEmergencyPhone } from "../phone"
 
 export type VoiceProfile = {
   prenom: string
@@ -10,6 +11,7 @@ export type VoiceProfile = {
   metier: string
   rayon: string
   tarifs?: Tarifs
+  telephoneUrgence?: string
 }
 
 const PLACEHOLDER_COMPANY = /^l['\u2019]entreprise$/i
@@ -33,6 +35,7 @@ export const emptyProfile = (): VoiceProfile => ({
   metier: "bâtiment",
   rayon: "30 km",
   tarifs: mergeTarifs(),
+  telephoneUrgence: "",
 })
 
 export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfile {
@@ -50,6 +53,7 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
     metier: pick(partial.metier, base.metier),
     rayon: tarifs.zoneKm != null ? `${tarifs.zoneKm} km` : pick(partial.rayon, base.rayon),
     tarifs,
+    telephoneUrgence: pick(partial.telephoneUrgence),
   }
 }
 
@@ -83,6 +87,18 @@ export function formatSlotsHint(slots: SlotHint[]) {
 CRÉNEAUX DÉJÀ CONSULTÉS (à partir de demain, heure de Paris) :
 ${lines.join("\n")}
 Demande d'abord « Quand êtes-vous disponible ? » et attends sa réponse (jour, matin / après-midi, fin de semaine…). Propose ensuite le ou les créneaux de cette liste qui correspondent le mieux, les plus proches de sa demande. N'appelle get_available_slots que si la période demandée n'est pas couverte ici, ou si cette liste est vide ; dis alors « Je regarde… ». Ne propose des créneaux sans avoir demandé sa préférence que s'il dit qu'il n'en a pas (« peu importe », « dès que possible »). N'appelle book_appointment qu'une fois le créneau choisi et le prénom, le nom, le téléphone, l'e-mail et l'adresse collectés.`
+}
+
+function urgenceNumberBlock(raw?: string) {
+  const spoken = formatPhonePairs(raw)
+  if (!hasEmergencyPhone(raw) || !spoken) {
+    return `NUMÉRO D'URGENCE : aucun n'est renseigné. En catégorie C, ne donne aucun numéro personnel. Après les consignes de sécurité, prends nom, prénom, téléphone et adresse ; l'artisan rappelle au plus vite.`
+  }
+  return `NUMÉRO D'URGENCE (uniquement en catégorie C, jamais pour un appel non urgent) : ${spoken}.
+Après les consignes de sécurité, dis exactement : « Un numéro d'urgence est disponible, vous pouvez le noter ? »
+ATTENDS la réponse du client avant de le dicter.
+S'il accepte, dicte-le lentement par paires : ${spoken}. Propose ensuite de le répéter.
+S'il refuse, ne le donne pas : prends ses coordonnées et l'artisan rappelle au plus vite.`
 }
 
 export function buildInstructions(p: VoiceProfile) {
@@ -126,6 +142,7 @@ Fuite d'eau, dégât des eaux, plus d'eau chaude ou de chauffage en hiver, panne
 - Eau : couper l'arrivée d'eau générale.
 - Électricité : disjoncteur général, ne rien toucher de mouillé.
 - GAZ : couper le gaz, aucun interrupteur, n'allumer rien, ouvrir les fenêtres, sortir, appeler le 112 et/ou GRDF au 0 800 47 33 33.
+${urgenceNumberBlock(p.telephoneUrgence)}
 Puis nom, prénom, téléphone, adresse ; l'artisan rappelle au plus vite (rappel_souhaite true, « au plus vite », sans reposer D). Hors gaz déjà aux secours : proposer une visite (A), pas de devis maintenant.
 
 D — RAPPEL
@@ -153,7 +170,7 @@ Adresse entreprise : ${addr}. E-mail entreprise : ${email}.
 Conclus : « Merci, notre technicien revient vers vous très vite. Bonne journée ! »
 
 RÈGLES
-Ne rien inventer (prix de travaux, tarif hors liste, créneau, promesse). Jamais le prénom ni le numéro personnel de l'artisan, ni de RIB. Si insultes : polie, proposer un rappel, conclure.`
+Ne rien inventer (prix de travaux, tarif hors liste, créneau, promesse). Jamais le prénom ni le numéro personnel de l'artisan (sauf le numéro d'urgence en catégorie C, s'il est renseigné), ni de RIB. Si insultes : polie, proposer un rappel, conclure.`
 }
 
 export const VOICE_TOOLS = [

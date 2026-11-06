@@ -69,18 +69,17 @@ async function me() {
   return user
 }
 
-function notifySelf(payload: Record<string, unknown>) {
-  void (async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) return
-      await fetch("/api/notify", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-    } catch { /* ignore */ }
-  })()
+async function notifySelf(payload: Record<string, unknown>) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return
+    await fetch("/api/notify", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    })
+  } catch { /* ignore */ }
 }
 
 async function bookingApi(action: "slots" | "book", payload: object) {
@@ -143,7 +142,7 @@ export async function bookAppointment(args: BookArgs) {
   }
   const { data, error } = await supabase.from("appointments").insert(row).select("id").maybeSingle()
   const when = [args.date, args.heure].filter(Boolean).join(" à ") || booked.label || "Nouveau rendez-vous"
-  notifySelf({ type: "appointment", client: row.client, when, appointment_id: data?.id })
+  await notifySelf({ type: "appointment", client: row.client, when, appointment_id: data?.id })
   if (error) {
     return { ok: true, appointment_id: null, confirmation: booked.confirmation || "Rendez-vous confirmé dans l'agenda.", warning: "Enregistré dans Cal.com, mais pas encore visible dans l'Agenda." }
   }
@@ -227,7 +226,17 @@ export async function saveCall(
   if (wantDevis && (row.type_demande === "autre" || !row.type_demande)) row.type_demande = "devis"
   const { data, error } = await supabase.from("calls").insert(row).select("id").maybeSingle()
   if (error) return { ok: false, error: "Impossible d'enregistrer l'appel." }
-  notifySelf({ type: "call", client: row.nom_client, motif: row.motif, call_id: data?.id, rappel_souhaite: rappelSouhaite, rappel_creneau: rappelCreneau })
+  await notifySelf({
+    type: "call",
+    client: row.nom_client,
+    motif: row.motif,
+    resume,
+    besoin_detail: row.besoin_detail,
+    call_id: data?.id,
+    rappel_souhaite: rappelSouhaite,
+    rappel_creneau: rappelCreneau,
+    urgent,
+  })
   try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
 
   return {

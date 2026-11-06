@@ -119,7 +119,7 @@ export async function handleResendWebhook(raw: string, headers: Headers): Promis
   await sb.from("devis").update({ reponse_client: text.slice(0, 4000), repondu_le: now }).eq("id", devis.id)
   await stopDevisReminders(sb, devis.id, { markResponded: true })
   if (devis.artisan_id) {
-    notifyArtisan(devis.artisan_id, {
+    await notifyArtisan(devis.artisan_id, {
       title: "Réponse client",
       body: `${devis.numero || "Devis"} · ${devis.client_nom || "Client"}`,
       url: "/devis",

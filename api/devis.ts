@@ -214,7 +214,7 @@ async function handleDraft(supabase: SupabaseClient, userId: string, body: Json)
   }
   const { data: inserted, error: iErr } = await supabase.from("devis").insert(row).select("id, numero").maybeSingle()
   if (iErr || !inserted) return { status: 500, body: { error: "Impossible d'enregistrer le brouillon de devis." } }
-  notifyArtisan(userId, {
+  await notifyArtisan(userId, {
     title: "Devis à valider",
     body: `${inserted.numero} · ${call.nom_client || "Client"}`,
     url: "/devis",

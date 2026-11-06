@@ -36,16 +36,18 @@ export async function artisanBadgeCount(sb: SupabaseClient, artisanId: string) {
   return (aval.count || 0) + (drafts.count || 0) + (calls.count || 0) + (replies.count || 0)
 }
 
-export async function sendPushToArtisan(artisanId: string, payload: PushPayload, extraBadge = 0) {
+export type PushSendResult = { ok: boolean; sent: number; skipped?: boolean; error?: string }
+
+export async function sendPushToArtisan(artisanId: string, payload: PushPayload, extraBadge = 0): Promise<PushSendResult> {
   const keys = vapid()
-  if (!keys) return { ok: false, skipped: true }
+  if (!keys) return { ok: false, sent: 0, skipped: true, error: "Clés VAPID manquantes sur le serveur (VITE_VAPID_PUBLIC_KEY et VAPID_PRIVATE_KEY)." }
   let sb: SupabaseClient
   try { sb = adminClient() }
-  catch { return { ok: false, skipped: true } }
+  catch { return { ok: false, sent: 0, skipped: true, error: "Configuration Supabase service (SUPABASE_SERVICE_ROLE_KEY) manquante." } }
 
   const { data } = await sb.from("push_subscriptions").select("id, endpoint, p256dh, auth, keys").or(`artisan_id.eq.${artisanId},user_id.eq.${artisanId}`)
   const subs = data || []
-  if (!subs.length) return { ok: true, sent: 0 }
+  if (!subs.length) return { ok: false, sent: 0, error: "Aucun appareil inscrit aux notifications. Activez-les dans Réglages (sur iPhone : depuis l'app ajoutée à l'écran d'accueil)." }
 
   let badge = payload.badge
   if (badge == null) {
@@ -63,11 +65,15 @@ export async function sendPushToArtisan(artisanId: string, payload: PushPayload,
   })
 
   let sent = 0
+  let lastError = ""
   for (const row of subs) {
     const rec = row as { id: string; endpoint?: string; p256dh?: string; auth?: string; keys?: { p256dh?: string; auth?: string } }
     const p256dh = rec.p256dh || rec.keys?.p256dh || ""
     const auth = rec.auth || rec.keys?.auth || ""
-    if (!rec.endpoint || !p256dh || !auth) continue
+    if (!rec.endpoint || !p256dh || !auth) {
+      lastError = "Abonnement incomplet (clés manquantes). Désactivez puis réactivez les notifications."
+      continue
+    }
     try {
       await webpush.sendNotification({ endpoint: rec.endpoint, keys: { p256dh, auth } }, body)
       sent++
@@ -75,12 +81,18 @@ export async function sendPushToArtisan(artisanId: string, payload: PushPayload,
       const status = (e as { statusCode?: number }).statusCode
       if (status === 404 || status === 410) {
         await sb.from("push_subscriptions").delete().eq("endpoint", rec.endpoint)
+        lastError = "Abonnement expiré. Réactivez les notifications dans Réglages."
+      } else if (status === 401 || status === 403) {
+        lastError = "Envoi refusé (clés VAPID ou abonnement invalide). Vérifiez que VITE_VAPID_PUBLIC_KEY et VAPID_PRIVATE_KEY forment bien la même paire."
+      } else {
+        lastError = `Échec d'envoi${status ? ` (${status})` : ""}.`
       }
     }
   }
+  if (!sent) return { ok: false, sent: 0, error: lastError || "La notification n'a pas pu être envoyée." }
   return { ok: true, sent }
 }
 
 export function notifyArtisan(artisanId: string, payload: PushPayload, extraBadge = 0) {
-  void sendPushToArtisan(artisanId, payload, extraBadge).catch(() => { /* never block the caller */ })
+  return sendPushToArtisan(artisanId, payload, extraBadge)
 }

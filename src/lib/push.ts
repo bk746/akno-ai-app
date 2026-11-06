@@ -118,3 +118,23 @@ export async function ensurePush() {
     await persistSubscription(sub)
   } catch { /* ignore */ }
 }
+
+export async function sendTestNotification(): Promise<{ ok: boolean; sent?: number; error?: string }> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) return { ok: false, error: "Non authentifié." }
+  try {
+    const res = await fetch("/api/notify", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "test" }),
+    })
+    const payload = await res.json().catch(() => ({})) as { ok?: boolean; sent?: number; error?: string }
+    if (!res.ok || payload.ok === false) {
+      return { ok: false, sent: payload.sent, error: payload.error || `Échec du test (HTTP ${res.status}).` }
+    }
+    return { ok: true, sent: payload.sent }
+  } catch {
+    return { ok: false, error: "Impossible de joindre le serveur de notifications." }
+  }
+}

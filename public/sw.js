@@ -25,12 +25,19 @@ self.addEventListener("push", event => {
     data: { url, tag },
   }
   event.waitUntil((async () => {
+    // iOS exige un showNotification dans le handler push, même si l'app est au premier plan.
     const tasks = [self.registration.showNotification(title, opts)]
     try {
       if (Number.isFinite(badge) && badge >= 0 && self.navigator && self.navigator.setAppBadge) {
         tasks.push(badge > 0 ? self.navigator.setAppBadge(badge) : self.navigator.clearAppBadge())
       }
     } catch { /* badge API optionnelle */ }
+    try {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
+      for (const client of windows) {
+        try { client.postMessage({ type: "akno-push", title, body: opts.body, url, tag }) } catch { /* ignore */ }
+      }
+    } catch { /* clients optionnels */ }
     await Promise.all(tasks)
   })())
 })

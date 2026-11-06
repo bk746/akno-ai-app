@@ -9,10 +9,11 @@ import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, 
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed, DEFAULT_REVIEW_URL } from "../lib/store"
 import { mergeTarifs, tarifsSummary } from "../lib/tarifs"
+import { digitsFr, formatPhonePairs } from "../lib/phone"
 import { draftDevisFromCall, sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
-import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, registerPushWorker, updateAppBadge } from "../lib/push"
+import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, registerPushWorker, sendTestNotification, updateAppBadge } from "../lib/push"
 import Login from "./Login"
 import { LockScreen, LockSetup } from "./Lock"
 import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
@@ -43,7 +44,7 @@ const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"
 const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
-type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "clientReply"; data?: any } | null
+type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "urgencePhone" | "clientReply"; data?: any } | null
 type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void }
 const C = createContext<Ctx>(null as any)
 const useC = () => useContext(C)
@@ -338,7 +339,7 @@ function Rec() {
     <Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section>
 </Col>
   </Shell>
-  {voiceOn && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email, tarifs: s.settings.tarifs }} onDone={msg => { setVoiceOn(false); try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ } if (msg) toast(msg) }} />}
+  {voiceOn && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email, tarifs: s.settings.tarifs, telephoneUrgence: s.settings.urgencePhone }} onDone={msg => { setVoiceOn(false); try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ } if (msg) toast(msg) }} />}
   </>
 }
 
@@ -513,6 +514,8 @@ function SetP() {
   const { s, set, desk, toast, modal } = useC(), st = s.settings
   const uidL: string = (window as any).__aknoUid || "", lk = hasLock(uidL), [bio, setBio] = useState(() => !!getLock(uidL)?.cred), [canBio, setCanBio] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
+  const [testBusy, setTestBusy] = useState(false)
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
   useEffect(() => { bioAvailable().then(setCanBio) }, [])
   const bioTg = async () => { if (!lk) { toast("Créez d'abord un code d'accès"); return } if (bio) { disableBio(uidL); setBio(false); toast("Face ID désactivé") } else { try { await enableBio(uidL, (window as any).__aknoEmail || ""); setBio(true); toast("Face ID activé") } catch { toast("Face ID non activé") } } }
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
@@ -532,8 +535,17 @@ function SetP() {
     setPushBusy(true)
     const res = await enablePush()
     setPushBusy(false)
-    if (res.ok) { up(x => ({ ...x, push: true })); toast("Notifications activées") }
+    if (res.ok) { up(x => ({ ...x, push: true })); toast("Notifications activées"); setTestMsg(null) }
     else toast(res.error || "Notifications non activées")
+  }
+  const testNotif = async () => {
+    if (testBusy) return
+    setTestBusy(true); setTestMsg(null)
+    const res = await sendTestNotification()
+    setTestBusy(false)
+    setTestMsg(res.ok
+      ? { ok: true, text: "Notification de test envoyée. Vous devriez la voir ici et dans le centre de notifications." }
+      : { ok: false, text: res.error || "Le test a échoué." })
   }
   const demo = () => toast("Démo : réglage non modifiable")
   const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
@@ -547,9 +559,9 @@ function SetP() {
   return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u="/ 4" />} sub="agents actifs · offre Pro" actions={[
     { I: Phone, l: "Numéro", on: demo }, { I: Clock, l: "Horaires", on: demo }, { I: LifeBuoy, l: "Aide", on: demo }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
-      <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari</p>}</Section>
+      <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
-    <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
+    <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section>
@@ -822,6 +834,24 @@ function TarifsSheet({ close }: { close: () => void }) {
     <Btn primary className="mt-6 w-full" onClick={save}>Enregistrer</Btn>
   </Sheet>
 }
+function UrgencePhoneSheet({ close }: { close: () => void }) {
+  const { s, set, toast } = useC()
+  const [v, setV] = useState(formatPhonePairs(s.settings.urgencePhone) || "")
+  const [err, setErr] = useState("")
+  const save = () => {
+    const d = digitsFr(v)
+    if (v.trim() && d.length < 10) { setErr("Indiquez un numéro français à 10 chiffres, ou laissez vide."); return }
+    set(x => ({ ...x, settings: { ...x.settings, urgencePhone: d || undefined } }))
+    toast(d ? "Numéro d'urgence enregistré" : "Numéro d'urgence retiré")
+    close()
+  }
+  return <Sheet title="Numéro d'urgence" sub="Dicté uniquement en cas d'urgence" c={A.rec.c} onClose={close}>
+    <F l="Numéro"><input className={inp} inputMode="tel" value={v} onChange={e => { setV(e.target.value); setErr("") }} placeholder="07 81 99 07 61" /></F>
+    {err && <p className="mt-2 text-[13px] text-[#FF9B96]">{err}</p>}
+    <p className={`mt-3 ${tx.cap}`}>En urgence, la réceptionniste demande d'abord si le client peut noter le numéro, attend la réponse, puis le dicte lentement par paires. Laissez vide pour ne pas le communiquer : elle prendra alors un rappel urgent.</p>
+    <Btn primary className="mt-6 w-full" onClick={save}>Enregistrer</Btn>
+  </Sheet>
+}
 function ReviewUrlSheet({ close }: { close: () => void }) {
   const { s, set, toast } = useC()
   const [url, setUrl] = useState(s.settings.reviewUrl || DEFAULT_REVIEW_URL)
@@ -861,6 +891,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     return <Sheet title="À rappeler" sub={`${todo.length} client${todo.length > 1 ? "s" : ""} · ${todo.filter(x => x.urgent).length} urgent${todo.filter(x => x.urgent).length > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}>{todo.length ? <div className="-mx-5 bg-black/20">{todo.map((x, i) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}<Chip c={AMBER}>À rappeler</Chip></span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => done(x)} /></div>} />)}</div> : <div className={`py-8 text-center ${tx.cap}`}>Personne à rappeler. Tout est à jour.</div>}</Sheet> }
   if (m.kind === "relList") return <Sheet title="Relances" sub={`${s.rels.filter(r => r.status === "prog").length} à venir`} c={A.rel.c} onClose={close}><div className="-mx-5 bg-black/20">{s.rels.map((r, i) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Ic I={canalI[r.canal] || Send} />} t={r.client} s={`${r.type} · ${r.date}`} r={<Chip c={RS[r.status][1]}>{RS[r.status][0]}</Chip>} />)}</div></Sheet>
   if (m.kind === "reviewUrl") return <ReviewUrlSheet close={close} />
+  if (m.kind === "urgencePhone") return <UrgencePhoneSheet close={close} />
   if (m.kind === "tarifs") return <TarifsSheet close={close} />
   if (m.kind === "clientReply") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, ok = dv.status === "val"
     try { sessionStorage.setItem("akno-seen-" + dv.id, "1"); updateAppBadge(attentionCount(s)) } catch { }
@@ -969,8 +1000,10 @@ function AknoApp() {
   const page: P = SLUG[(pathname || "").split("/")[1] || ""] || "rec"
   const [m, setM] = useState<Modal>(null), [chat, setChatS] = useState(() => new URLSearchParams(location.search).has("chat"))
   const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void } | null>(null), [q, setQ] = useState("")
+  const [pushNote, setPushNote] = useState<{ title: string; body: string; url: string; k: number } | null>(null)
   useEffect(() => { document.title = `Akno · ${page === "set" ? "Paramètres" : A[page].tab}` }, [page])
   useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo ? 5000 : 2600); return () => clearTimeout(t) }, [toastT])
+  useEffect(() => { if (!pushNote) return; const t = setTimeout(() => setPushNote(null), 10000); return () => clearTimeout(t) }, [pushNote])
   useEffect(() => { void registerPushWorker() }, [])
   useEffect(() => { if (s.settings.push) void ensurePush() }, [s.settings.push])
   useEffect(() => {
@@ -983,7 +1016,11 @@ function AknoApp() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return
     const onMsg = (e: MessageEvent) => {
-      const data = e.data as { type?: string; url?: string } | null
+      const data = e.data as { type?: string; url?: string; title?: string; body?: string } | null
+      if (data?.type === "akno-push") {
+        setPushNote({ title: data.title || "Akno", body: data.body || "", url: data.url || "/reception", k: Date.now() })
+        return
+      }
       if (!data || data.type !== "akno-nav") return
       const raw = String(data.url || "/reception")
       let slug = "reception"
@@ -1004,6 +1041,7 @@ function AknoApp() {
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
       : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
+    <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
 }

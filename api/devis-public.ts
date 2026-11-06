@@ -59,7 +59,7 @@ export async function handleDevisPublic(method?: string, url?: string, body?: un
   const { error: uErr } = await sb.from("devis").update({ statut, repondu_le: now }).eq("id", devis.id)
   if (uErr) return { status: 500, body: { error: "Impossible d'enregistrer votre réponse." } }
   await stopDevisReminders(sb, devis.id, { markResponded: true })
-  notifyArtisan(devis.artisan_id, {
+  await notifyArtisan(devis.artisan_id, {
     title: action === "accept" ? "Devis accepté" : "Devis refusé",
     body: `${devis.numero} · ${devis.client_nom || "Client"}`,
     url: "/devis",

@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
 import { env } from "./_lib/mail.js"
-import { notifyArtisan, type PushPayload } from "./_lib/push.js"
+import { sendPushToArtisan, type PushPayload } from "./_lib/push.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
@@ -19,17 +19,36 @@ async function authed(authorization?: string): Promise<{ userId: string } | { st
   return { userId: user.id }
 }
 
+function shortDebrief(body: Json) {
+  const raw = [body.resume, body.besoin_detail, body.motif, body.body]
+    .map(v => typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "")
+    .find(Boolean) || ""
+  if (raw.length <= 120) return raw
+  const cut = raw.slice(0, 117)
+  const sp = cut.lastIndexOf(" ")
+  return `${(sp > 80 ? cut.slice(0, sp) : cut).trim()}…`
+}
+
 function payloadFrom(body: Json): PushPayload | null {
   const type = String(body.type || "")
+  if (type === "test") {
+    return {
+      title: "Test de notification",
+      body: "Si vous voyez ceci, les notifications Akno fonctionnent.",
+      url: "/parametres",
+      tag: "akno-test",
+    }
+  }
   if (type === "call") {
-    const client = String(body.client || "Client")
-    const motif = String(body.motif || "Nouvel appel")
+    const client = String(body.client || "Client").trim() || "Client"
+    const urgent = body.urgent === true || body.urgence === "urgent" || body.type_demande === "urgence"
     const rappel = body.rappel_souhaite === true
     const creneau = String(body.rappel_creneau || "").trim()
+    const debrief = shortDebrief(body) || "Nouvel appel"
     const extra = rappel ? (creneau ? `À rappeler (${creneau})` : "À rappeler") : ""
     return {
-      title: rappel ? "Nouvel appel · À rappeler" : "Nouvel appel",
-      body: extra ? `${client} · ${motif} · ${extra}` : `${client} · ${motif}`,
+      title: urgent ? `URGENT · ${client}` : `Nouvel appel · ${client}`,
+      body: extra ? `${debrief} · ${extra}` : debrief,
       url: "/reception",
       tag: `call-${body.call_id || Date.now()}`,
     }
@@ -48,8 +67,12 @@ export async function handleNotify(authorization?: string, body?: unknown): Prom
   const input = (body && typeof body === "object" ? body : {}) as Json
   const payload = payloadFrom(input)
   if (!payload) return { status: 400, body: { error: "Type de notification inconnu." } }
-  notifyArtisan(session.userId, payload)
-  return { status: 200, body: { ok: true } }
+  const result = await sendPushToArtisan(session.userId, payload)
+  if (result.skipped) return { status: 503, body: { ok: false, error: result.error || "Notifications non configurées." } }
+  return {
+    status: result.ok ? 200 : 502,
+    body: { ok: result.ok, sent: result.sent, error: result.error },
+  }
 }
 
 type Res = { status: (n: number) => Res; json: (b: unknown) => void; setHeader: (k: string, v: string) => void; end: () => void }
