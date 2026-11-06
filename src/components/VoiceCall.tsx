@@ -4,6 +4,8 @@ import { PhoneOff, X } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { fetchVoiceToken, startVoiceSession, type TranscriptLine, type VoiceStatus } from "../lib/voice/client"
 import { mergeProfile, type VoiceProfile } from "../lib/voice/script"
+import { formatVoiceTimings, isVoiceDebugEnabled, subscribeVoiceDebugFlag, subscribeVoiceTimings } from "../lib/voice/timing"
+import { primeCallWakeLock } from "../lib/voice/wakeLock"
 
 const C = "#E6E6E6"
 
@@ -32,10 +34,20 @@ export default function VoiceCall({
 }) {
   const [status, setStatus] = useState<VoiceStatus>("connecting")
   const [error, setError] = useState("")
+  const [notice, setNotice] = useState("")
   const [lines, setLines] = useState<TranscriptLine[]>([])
   const [sec, setSec] = useState(0)
+  const [debugOn, setDebugOn] = useState(isVoiceDebugEnabled)
+  const [debugLog, setDebugLog] = useState(() => formatVoiceTimings())
   const stopRef = useRef<null | ((save?: boolean) => Promise<string | undefined>)>(null)
   const hanging = useRef(false)
+
+  useEffect(() => {
+    primeCallWakeLock()
+    const offFlag = subscribeVoiceDebugFlag(() => setDebugOn(isVoiceDebugEnabled()))
+    const offLog = subscribeVoiceTimings(() => setDebugLog(formatVoiceTimings()))
+    return () => { offFlag(); offLog() }
+  }, [])
 
   useEffect(() => {
     const t = setInterval(() => setSec(x => x + 1), 1000)
@@ -55,7 +67,7 @@ export default function VoiceCall({
           slots: token.slots,
           onStatus: s => { if (alive) setStatus(s) },
           onTranscript: xs => { if (alive) setLines(xs) },
-          onNotice: msg => { if (alive) setError(msg) },
+          onNotice: msg => { if (alive) setNotice(msg) },
         })
         if (!alive) { await session.stop(false); return }
         stopRef.current = session.stop
@@ -96,6 +108,9 @@ export default function VoiceCall({
           <X size={20} strokeWidth={1.75} />
         </button>
       </div>
+      {debugOn && (
+        <pre className="relative z-30 mx-4 mb-1 max-h-[26vh] overflow-auto rounded-[12px] bg-black/75 p-2 font-mono text-[10px] leading-[1.35] text-[#8CE99A] backdrop-blur-sm" style={{ marginTop: 4 }}>{debugLog || "En attente des mesures…"}</pre>
+      )}
       <div className="pointer-events-none relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <motion.div
           animate={{ scale: pulse, y: status === "speaking" || status === "listening" ? [0, -4, 0] : 0 }}
@@ -112,7 +127,10 @@ export default function VoiceCall({
         <div className="mt-8 text-center">
           <div className="text-[13px] font-medium uppercase tracking-[.12em] text-white/40">Réceptionniste</div>
           <div className="mt-2 text-[28px] font-semibold tracking-[-0.03em]">{mmss(sec)}</div>
-          <div className="mt-2 text-[15px] text-white/55">{error && status === "error" ? error : STATUS[status]}</div>
+          <div className="mt-2 text-[15px] text-white/55">{status === "error" ? (error || notice || STATUS.error) : STATUS[status]}</div>
+          {notice && status !== "error" && (
+            <p className="mx-auto mt-3 max-w-[340px] text-[13px] leading-5 text-white/55">{notice}</p>
+          )}
         </div>
         {last.length > 0 && (
           <div className="mt-8 w-full max-w-[420px] space-y-2">
@@ -124,8 +142,8 @@ export default function VoiceCall({
             ))}
           </div>
         )}
-        {status === "error" && error && (
-          <p className="mt-6 max-w-[360px] text-center text-[14px] text-white/60">{error}</p>
+        {status === "error" && (error || notice) && (
+          <p className="mt-6 max-w-[360px] text-center text-[14px] text-white/60">{error || notice}</p>
         )}
       </div>
       <div className="relative z-20 flex shrink-0 flex-col items-center gap-3 px-6 pb-4 pointer-events-auto" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>

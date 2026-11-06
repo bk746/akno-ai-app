@@ -43,6 +43,73 @@ export type SaveArgs = {
   notes?: string
 }
 
+
+const CAL_TIMEOUT_MS = 2500
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise(resolve => {
+    const t = setTimeout(() => resolve(fallback), ms)
+    promise.then(v => { clearTimeout(t); resolve(v) }, () => { clearTimeout(t); resolve(fallback) })
+  })
+}
+
+const DAYS_FR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+
+function pad2(n: number) { return String(n).padStart(2, "0") }
+
+function addDaysYmd(ymd: string, n: number) {
+  const [y, m, d] = ymd.split("-").map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d + n))
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`
+}
+
+function todayLocalYmd() {
+  const n = new Date()
+  return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`
+}
+
+export type SlotHintLike = { date?: string; heure?: string; label?: string }
+
+export function parseSlotDay(raw?: string): { from?: string; to?: string; weekday?: number } {
+  const v = (raw || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  if (!v) return {}
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return { from: v, to: v }
+  const today = todayLocalYmd()
+  if (v === "aujourdhui" || v === "aujourd'hui") return { from: today, to: today }
+  if (v === "demain") { const t = addDaysYmd(today, 1); return { from: t, to: t } }
+  const idx = DAYS_FR.findIndex(d => d.normalize("NFD").replace(/[\u0300-\u036f]/g, "") === v)
+  if (idx >= 0) return { weekday: idx }
+  return {}
+}
+
+/** Return cached slots when they already cover the asked window — no Cal.com round-trip. */
+export function filterPrefetchedSlots(slots: SlotHintLike[], args: SlotsArgs): { hit: boolean; slots: SlotHintLike[] } {
+  if (!slots.length) return { hit: false, slots: [] }
+  const dates = slots.map(s => s.date).filter((d): d is string => !!d).sort()
+  const min = dates[0], max = dates[dates.length - 1]
+  const pref = parseSlotDay(args.preferred_day)
+  const from = args.date_from || pref.from
+  const to = args.date_to || pref.to
+  if (!from && !to && pref.weekday == null) return { hit: true, slots }
+  if (from && max && from > max) return { hit: false, slots: [] }
+  if (to && min && to < min) return { hit: false, slots: [] }
+  let filtered = slots.slice()
+  if (from) filtered = filtered.filter(s => !s.date || s.date >= from)
+  if (to) filtered = filtered.filter(s => !s.date || s.date <= to)
+  if (pref.weekday != null) {
+    const inSpan = dates.some(d => new Date(d + "T12:00:00").getDay() === pref.weekday)
+    if (!inSpan) return { hit: false, slots: [] }
+    filtered = filtered.filter(s => !!s.date && new Date(s.date + "T12:00:00").getDay() === pref.weekday)
+  }
+  return { hit: true, slots: filtered }
+}
+
+export function mergeSlotHints<T extends SlotHintLike>(a: T[], b: T[]): T[] {
+  const map = new Map<string, T>()
+  for (const s of [...a, ...b]) map.set(`${s.date || ""}|${s.heure || ""}|${s.label || ""}`, s)
+  return [...map.values()]
+}
+
 const pad = (n: number) => String(n).padStart(2, "0")
 
 function parseSlot(date?: string, heure?: string) {
@@ -102,7 +169,11 @@ async function bookingApi(action: "slots" | "book", payload: object) {
 }
 
 export async function getAvailableSlots(args: SlotsArgs) {
-  const body = await bookingApi("slots", args)
+  const body = await withTimeout(
+    bookingApi("slots", args),
+    CAL_TIMEOUT_MS,
+    { ok: false, error: "L'agenda met trop de temps à répondre.", slots: [] as unknown[] },
+  )
   if (body.ok === true) return body
   return { ok: false, error: body.error || "Impossible de lire les créneaux.", slots: body.slots || [] }
 }

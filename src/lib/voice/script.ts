@@ -89,7 +89,7 @@ export function formatSlotsHint(slots: SlotHint[]) {
 
 CRÉNEAUX DÉJÀ CONSULTÉS (à partir de demain, heure de Paris) :
 ${lines.join("\n")}
-Demande d'abord « Quand êtes-vous disponible ? » et attends sa réponse (jour, matin / après-midi, fin de semaine…). Propose ensuite le ou les créneaux de cette liste qui correspondent le mieux, les plus proches de sa demande. N'appelle get_available_slots que si la période demandée n'est pas couverte ici, ou si cette liste est vide ; dis alors « Je regarde… ». Ne propose des créneaux sans avoir demandé sa préférence que s'il dit qu'il n'en a pas (« peu importe », « dès que possible »). N'appelle book_appointment qu'une fois le créneau choisi et le prénom, le nom, le téléphone, l'e-mail et l'adresse collectés.`
+Demande d'abord « Quand êtes-vous disponible ? » et attends sa réponse (jour, matin / après-midi, fin de semaine…). Propose ensuite le ou les créneaux de cette liste qui correspondent le mieux, les plus proches de sa demande. N'appelle get_available_slots que si la période demandée n'est pas couverte ici, ou si cette liste est vide. N'annonce pas « Je regarde… » : le système le dit si l'agenda est lent. Ne propose des créneaux sans avoir demandé sa préférence que s'il dit qu'il n'en a pas (« peu importe », « dès que possible »). N'appelle book_appointment qu'une fois le créneau choisi et le prénom, le nom, le téléphone, l'e-mail et l'adresse collectés.`
 }
 
 function urgenceNumberBlock(raw?: string) {
@@ -141,7 +141,7 @@ TABLEAU DE DÉCISION
 A — VISITE DE DIAGNOSTIC (pas de devis maintenant)
 Cas : remplacement ou installation d'équipement complexe (chaudière, chauffe-eau / ballon non identique, PAC, tableau électrique…), dépannage / panne, rénovation, fuite à diagnostiquer.
 1. Préciser le problème (une à la fois) : remplacement/installation → pourquoi, type/énergie, âge ; panne → symptômes ; rénovation → type de travaux.
-2. « Pour [besoin], l'artisan doit venir sur place faire un diagnostic. Quand êtes-vous disponible ? » Écoute la réponse (jour ou période : « mardi après-midi », « demain matin », « en fin de semaine ») puis propose le ou les créneaux réels les plus proches : d'abord parmi ceux déjà consultés, sinon get_available_slots avec date_from / date_to / preferred_day adaptés à sa demande (dis « Je regarde… »). Ne propose deux créneaux spontanément que s'il n'a aucune préférence (« peu importe », « dès que possible »). Jamais de créneau inventé, jamais aujourd'hui sauf s'il le demande.
+2. « Pour [besoin], l'artisan doit venir sur place faire un diagnostic. Quand êtes-vous disponible ? » Écoute la réponse (jour ou période : « mardi après-midi », « demain matin », « en fin de semaine ») puis propose le ou les créneaux réels les plus proches : d'abord parmi ceux déjà consultés, sinon get_available_slots avec date_from / date_to / preferred_day adaptés à sa demande (sans dire « Je regarde… » toi-même). Ne propose deux créneaux spontanément que s'il n'a aucune préférence (« peu importe », « dès que possible »). Jamais de créneau inventé, jamais aujourd'hui sauf s'il le demande.
 3. Coordonnées : ${contactBlock({ emailRole: "L'e-mail sert à la confirmation du RDV, pas « pour le devis »." })}
 4. book_appointment (prenom, nom, telephone, email, adresse, date AAAA-MM-JJ, heure HH:MM, objet). Si refus : deux alternatives.
 5. Un seul récap final (sans « C'est bien ça ? »), question D, save_call (devis_demande false ; type_demande rdv / depannage / urgence).
@@ -218,7 +218,7 @@ export const VOICE_TOOLS = [
   {
     type: "function",
     name: "get_available_slots",
-    description: "Consulte l'agenda réel et renvoie les créneaux libres (lundi–vendredi, 8 h–18 h, heure de Paris). À appeler après que le client a indiqué une période, si aucun créneau préchargé ne correspond, ou si la liste préchargée est vide. Passe date_from, date_to ou preferred_day d'après sa réponse. Dis « Je regarde… » juste avant l'appel.",
+    description: "Consulte l'agenda réel et renvoie les créneaux libres (lundi–vendredi, 8 h–18 h, heure de Paris). À appeler après que le client a indiqué une période, si aucun créneau préchargé ne correspond, ou si la liste préchargée est vide. Passe date_from, date_to ou preferred_day d'après sa réponse. N'annonce pas « Je regarde… » : le système le dit si l'appel réseau est lent.",
     parameters: {
       type: "object",
       properties: {

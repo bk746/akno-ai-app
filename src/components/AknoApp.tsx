@@ -1,5 +1,7 @@
 import DevisPaper from "./DevisPaper"
 import VoiceCall from "./VoiceCall"
+import { formatVoiceTimings, isVoiceDebugEnabled, setVoiceDebugEnabled, subscribeVoiceTimings } from "../lib/voice/timing"
+import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
 import { buildDoc } from "../lib/devisDoc"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -328,7 +330,7 @@ function Rec() {
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Sparkles, l: "Assistant", on: () => setChat(true) }]}>
     <div className="col-span-2">
-      <button type="button" onClick={() => setVoiceOn(true)} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium transition active:scale-[.98]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 12px 32px -12px ${c}99` }}>
+      <button type="button" onClick={() => { primeCallWakeLock(); setVoiceOn(true) }} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium transition active:scale-[.98]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 12px 32px -12px ${c}99` }}>
         <Phone size={18} strokeWidth={1.75} />
         Appeler ma réceptionniste
       </button>
@@ -516,7 +518,10 @@ function SetP() {
   const [pushBusy, setPushBusy] = useState(false)
   const [testBusy, setTestBusy] = useState(false)
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [voiceDbg, setVoiceDbg] = useState(isVoiceDebugEnabled)
+  const [voiceLog, setVoiceLog] = useState(() => formatVoiceTimings())
   useEffect(() => { bioAvailable().then(setCanBio) }, [])
+  useEffect(() => subscribeVoiceTimings(() => setVoiceLog(formatVoiceTimings())), [])
   const bioTg = async () => { if (!lk) { toast("Créez d'abord un code d'accès"); return } if (bio) { disableBio(uidL); setBio(false); toast("Face ID désactivé") } else { try { await enableBio(uidL, (window as any).__aknoEmail || ""); setBio(true); toast("Face ID activé") } catch { toast("Face ID non activé") } } }
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
   const iosHint = isIos() && !isStandalone()
@@ -562,6 +567,7 @@ function SetP() {
       <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
+      <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section>
@@ -1065,7 +1071,7 @@ function AknoRootInner() {
   // Démarrage à froid avec une session déjà ouverte : verrouiller
   useEffect(() => { supabase.auth.getSession().then(({ data }) => { if (data.session && hasLock(data.session.user.id)) setLocked(true) }) }, [])
   // Retour d'arrière-plan après plus de 30 s : verrouiller
-  useEffect(() => { let hid = 0; const f = () => { if (document.hidden) hid = Date.now(); else if (hid && Date.now() - hid > 30000 && uid && hasLock(uid)) setLocked(true) }; document.addEventListener("visibilitychange", f); return () => document.removeEventListener("visibilitychange", f) }, [uid])
+  useEffect(() => { let hid = 0; const f = () => { if (document.hidden) hid = Date.now(); else if (hid && Date.now() - hid > 30000 && uid && hasLock(uid) && !isVoiceCallActive()) setLocked(true) }; document.addEventListener("visibilitychange", f); return () => document.removeEventListener("visibilitychange", f) }, [uid])
   // Proposer la création du code une seule fois après connexion
   useEffect(() => { if (uid && !hasLock(uid) && !localStorage.getItem(`akno-lock-asked:${uid}`)) setSetup(true); if (!uid) setLocked(false) }, [uid])
   useEffect(() => { const f = () => setSetup(true); addEventListener("akno-lock-setup", f); return () => removeEventListener("akno-lock-setup", f) }, [])

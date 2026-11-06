@@ -1,7 +1,9 @@
 import { supabase } from "../supabase"
 import { uploadCallRecording } from "../recordings"
 import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, VOICE_ID, TURN_DETECTION, type SlotHint, type VoiceProfile } from "./script"
-import { bookAppointment, getAvailableSlots, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
+import { bookAppointment, filterPrefetchedSlots, getAvailableSlots, mergeSlotHints, saveCall, type BookArgs, type SaveArgs, type SlotsArgs } from "./tools"
+import { beginVoiceTimingSession, logVoiceTiming } from "./timing"
+import { startCallWakeLock } from "./wakeLock"
 
 export type VoiceStatus = "idle" | "connecting" | "live" | "speaking" | "listening" | "thinking" | "ending" | "error"
 export type TranscriptLine = { role: "user" | "assistant"; text: string }
@@ -318,6 +320,9 @@ export async function startVoiceSession(opts: {
 }) {
   const profile = mergeProfile(opts.profile)
   const startedAt = Date.now()
+  beginVoiceTimingSession()
+  const wake = startCallWakeLock()
+  logVoiceTiming("note", "session.start", { extra: wake.mode() })
   const evRing: { ms: number; dir: "in" | "out"; type: string; extra?: string }[] = []
   const logVoice = (dir: "in" | "out", type: string, extra?: unknown) => {
     const rec = {
@@ -374,6 +379,7 @@ export async function startVoiceSession(opts: {
   const mic = await connectMic(ctx)
   const recorder = startMixerRecorder(ctx, mic.source, player.output)
   const prefetched = await slotsPromise
+  let slotCache: SlotHint[] = prefetched.slice()
   const slotsHint = formatSlotsHint(prefetched)
   logVoice("out", "slots.prefetch", { n: prefetched.length, hint: slotsHint ? "yes" : "no" })
   const session = buildSessionConfig(profile, sampleRate, slotsHint)
@@ -402,7 +408,10 @@ export async function startVoiceSession(opts: {
     opts.onTranscript([...lines])
   }
 
-  const ws = new WebSocket(WS_URL, [`xai-client-secret.${opts.token}`])
+  let ws = new WebSocket(WS_URL, [`xai-client-secret.${opts.token}`])
+  let resumeAfterLock = false
+  let reconnecting = false
+  let hiddenAt: number | null = null
 
   const send = (obj: unknown) => {
     if (ws.readyState !== WebSocket.OPEN) return
@@ -544,17 +553,53 @@ export async function startVoiceSession(opts: {
     }, delayMs)
   }
 
+  const speakFiller = (text: string) => {
+    send({
+      type: "conversation.item.create",
+      item: {
+        type: "force_message",
+        role: "assistant",
+        interruptible: false,
+        content: [{ type: "output_text", text }],
+      },
+    })
+  }
+
+  const armFiller = (text: string) => {
+    const t = setTimeout(() => {
+      if (closed) return
+      speakFiller(text)
+    }, 700)
+    return () => clearTimeout(t)
+  }
+
   const handleTool = async (event: { name?: string; call_id?: string; arguments?: string }) => {
     pendingTools++
     opts.onStatus("thinking")
     let result: unknown = { ok: false, error: "Outil inconnu." }
+    const t0 = Date.now()
+    let source = "—"
+    let cancelFiller: (() => void) | null = null
     try {
       const args = event.arguments ? JSON.parse(event.arguments) : {}
       if (event.name === "get_available_slots") {
-        result = await getAvailableSlots(args as SlotsArgs)
+        const local = filterPrefetchedSlots(slotCache, args as SlotsArgs)
+        if (local.hit) {
+          source = "cache"
+          result = { ok: true, slots: local.slots, source: "prefetch" }
+        } else {
+          source = "network"
+          cancelFiller = armFiller("Je regarde…")
+          result = await getAvailableSlots(args as SlotsArgs)
+          const extra = (result as { slots?: SlotHint[] }).slots
+          if (Array.isArray(extra) && extra.length) slotCache = mergeSlotHints(slotCache, extra)
+        }
       } else if (event.name === "book_appointment") {
+        source = "network"
+        cancelFiller = armFiller("Un instant…")
         result = await bookAppointment(args as BookArgs)
       } else if (event.name === "save_call") {
+        source = "save"
         result = await saveCall(args as SaveArgs, {
           transcript: lines,
           durationSec: (Date.now() - startedAt) / 1000,
@@ -569,14 +614,21 @@ export async function startVoiceSession(opts: {
       }
     } catch {
       result = { ok: false, error: "Erreur pendant l'enregistrement." }
+    } finally {
+      cancelFiller?.()
     }
+    const toolMs = Date.now() - t0
+    logVoice("out", "tool.done", { name: event.name, ms: toolMs, source })
+    logVoiceTiming("tool", event.name || "tool", { ms: toolMs, extra: source })
     send({
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: event.call_id, output: JSON.stringify(result) },
     })
     pendingTools = Math.max(0, pendingTools - 1)
     if (pendingTools === 0) {
+      const idle0 = Date.now()
       await player.waitIdle()
+      logVoiceTiming("idle", "waitIdle before response.create", { ms: Date.now() - idle0 })
       if (!closed) send({ type: "response.create" })
     }
   }
@@ -600,6 +652,22 @@ export async function startVoiceSession(opts: {
       // Brancher le micro tout de suite : flushMic reste muet tant que greetingActive.
       // Ainsi un response.done manquant n'empêche plus jamais d'appeler.
       mic.setHandler(flushMic)
+      if (resumeAfterLock) {
+        resumeAfterLock = false
+        greetingActive = false
+        send({
+          type: "conversation.item.create",
+          item: {
+            type: "force_message",
+            role: "assistant",
+            interruptible: false,
+            content: [{ type: "output_text", text: "Je vous entends à nouveau." }],
+          },
+        })
+        opts.onNotice?.("Je vous réécoute. L'appel continue.")
+        opts.onStatus("speaking")
+        return
+      }
       if (greeted) return
       greeted = true
       greetingActive = true
@@ -666,6 +734,7 @@ export async function startVoiceSession(opts: {
           speechStoppedAt = null
           console.info("[akno-voice] speech_stopped -> first audio", `${ms}ms`, `lookahead ${lookaheadMs}ms`)
           logVoice("in", "turn.ttfa", { ms, lookaheadMs })
+          logVoiceTiming("ttfa", "speech_stopped→first audio", { ms, extra: `lookahead ${lookaheadMs}ms` })
         }
         player.enqueue(decoder.push(delta), OUTPUT_RATE)
         opts.onStatus("speaking")
@@ -700,6 +769,80 @@ export async function startVoiceSession(opts: {
     }
   }
 
+  const bindSocket = (socket: WebSocket) => {
+    socket.onmessage = onMessage
+    socket.onclose = () => {
+      ready = false
+      logVoice("in", "ws.close")
+      logVoiceTiming("ws", "close", { extra: document.hidden ? "hidden" : "visible" })
+      if (closed || reconnecting) return
+      if (document.hidden) return
+      void resumeSession("ws-close")
+    }
+  }
+
+  const resumeSession = async (reason: string) => {
+    if (closed || reconnecting) return
+    reconnecting = true
+    resumeAfterLock = true
+    opts.onStatus("connecting")
+    opts.onNotice?.("Reconnexion… iOS a suspendu l'appel pendant le verrouillage.")
+    logVoiceTiming("note", "reconnect.start", { extra: reason })
+    try {
+      const token = await fetchVoiceToken()
+      try { ws.onclose = null; ws.onmessage = null; ws.close() } catch { /* */ }
+      ws = new WebSocket(WS_URL, [`xai-client-secret.${token.value}`])
+      bindSocket(ws)
+      const recap = lines.slice(-20).map(l => `${l.role === "user" ? "Client" : "Akno"}: ${l.text}`).join("\n")
+      const resumeCfg = {
+        ...session,
+        instructions: session.instructions + `\n\nREPRISE D'APPEL : la connexion a été coupée car le téléphone s'est verrouillé (iOS suspend l'audio et le WebSocket des PWA ; ce n'est pas contournable sur le web). Historique récent :\n${recap || "(aucun)"}\nNe répète pas l'accueil. Continue l'échange après avoir indiqué que tu l'entends à nouveau.`,
+      }
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("La reconnexion vocale a expiré.")), 15000)
+        ws.onopen = () => {
+          clearTimeout(t)
+          send({ type: "session.update", session: resumeCfg })
+          resolve()
+        }
+        ws.onerror = () => {
+          clearTimeout(t)
+          reject(new Error("Impossible de joindre la réceptionniste."))
+        }
+      })
+      if (ctx.state === "suspended") await ctx.resume().catch(() => { /* */ })
+      logVoiceTiming("note", "reconnect.ok", { extra: reason })
+    } catch {
+      logVoiceTiming("note", "reconnect.fail", { extra: reason })
+      opts.onStatus("error")
+      opts.onNotice?.("L'appel s'est arrêté : quand l'iPhone se verrouille, iOS coupe le micro et le son des apps web. Gardez l'écran allumé pendant l'appel.")
+    } finally {
+      reconnecting = false
+    }
+  }
+
+  const onVisibility = () => {
+    if (closed) return
+    if (document.hidden) {
+      hiddenAt = Date.now()
+      logVoice("in", "visibility.hidden")
+      logVoiceTiming("vis", "hidden")
+      return
+    }
+    const hiddenMs = hiddenAt ? Date.now() - hiddenAt : 0
+    hiddenAt = null
+    logVoice("in", "visibility.visible", { hiddenMs })
+    logVoiceTiming("vis", "visible", { ms: hiddenMs })
+    void wake.reacquire()
+    if (ctx.state === "suspended") void ctx.resume().catch(() => { /* */ })
+    if (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING) {
+      void resumeSession("visibility")
+    } else if (hiddenMs > 1200) {
+      opts.onNotice?.("Écran déverrouillé — l'appel continue.")
+    }
+  }
+  document.addEventListener("visibilitychange", onVisibility)
+
   const opened = new Promise<void>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("La connexion vocale a expiré.")), 15000)
     ws.onopen = () => {
@@ -713,13 +856,14 @@ export async function startVoiceSession(opts: {
     }
   })
 
-  ws.onmessage = onMessage
-  ws.onclose = () => { ready = false }
+  bindSocket(ws)
 
   try {
     await opened
     opts.onStatus("live")
   } catch (e) {
+    document.removeEventListener("visibilitychange", onVisibility)
+    wake.release()
     mic.stop()
     player.stop()
     void recorder.stop()
@@ -735,6 +879,8 @@ export async function startVoiceSession(opts: {
     if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
     if (greetWatchdog) { clearTimeout(greetWatchdog); greetWatchdog = null }
     greetingActive = false
+    document.removeEventListener("visibilitychange", onVisibility)
+    wake.release()
     opts.onStatus("ending")
     mic.setHandler(null)
     player.stop()
