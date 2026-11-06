@@ -158,14 +158,35 @@ function formatTranscript(lines: { role: "user" | "assistant"; text: string }[])
     .join("\n")
 }
 
-function needsOnSiteDiagnostic(blob: string) {
-  return /(chaudi[eè]re|chauffe-eau|ballon|cumulus|pompe à chaleur|climatisation|tableau [eé]lectrique|\bvmc\b|remplacement|installation|changement|changer\b|diagnostic|diagnostique|visite (sur place|de diagnostic)|venir sur place|vienne sur place|passer (voir|sur place)|sur place faire)/i.test(blob)
+function isForfaitService(blob: string) {
+  return /(contrat d['’]entretien|contrat d['’]abonnement|contrat de suivi|abonnement( de suivi)?|suivi de chaudi[eè]re|entretien annuel|entretien( annuel)?( de)? (la |l['’])?(chaudi[eè]re|pac|pompe à chaleur|clim)|\bramonage\b|contrat (pac|clim|pompe à chaleur|climatisation)|visite de conformit[eé])/i.test(blob)
+}
+
+const LIKE_FOR_LIKE_ITEM = /(toilettes?|\bwc\b|w\.?-?c|cuvette|robinets?|mitigeurs?|chasse d['’]eau|lavabos?|vasques?|éviers?|eviers?|prises?( électriques?)?|interrupteurs?|luminaires?|appliques?|\bspots?\b)/i
+const LIKE_FOR_LIKE_BALLON = /(ballon|cumulus|chauffe-eau).{0,28}(identique|pareil|m[eê]me (modèle|modele|taille|type|emplacement))|(identique|pareil|m[eê]me (modèle|modele|taille|type|emplacement)).{0,28}(ballon|cumulus|chauffe-eau)|ballon identique|cumulus identique/i
+const LIKE_FOR_LIKE_SWAP = /(remplacement|remplacer|changer\b|changement|à l['’]identique|a l['’]identique|identique|pareil|nouveau|nouvelle|\bdevis\b)/i
+
+function isLikeForLikeReplacement(blob: string) {
+  if (/(chaudi[eè]re|pompe à chaleur|\bpac\b|tableau [eé]lectrique|r[eé]novation)/i.test(blob)) return false
+  if (LIKE_FOR_LIKE_BALLON.test(blob)) return true
+  return LIKE_FOR_LIKE_ITEM.test(blob) && LIKE_FOR_LIKE_SWAP.test(blob)
+}
+
+function isDiagnosticJob(blob: string) {
+  return /(remplacement|installation|r[eé]novation|d[eé]pannage|\ben panne\b|\bpanne\b|changer\b|changement|remplacer|installer|\bfuite\b|plus d['’]eau chaude|diagnostic sur place|visite de diagnostic|venir sur place|vienne sur place|sur place faire)/i.test(blob)
 }
 
 export function inferDevisRequest(args: Partial<SaveArgs>, transcript: { role: string; text: string }[] = []) {
   const blob = [args.resume, args.motif, args.besoin_detail, args.notes, args.type_demande, ...transcript.map(l => l.text)].filter(Boolean).join("\n").toLowerCase()
-  // Pas de brouillon de devis avant la visite de diagnostic (ex. changement de chaudière).
-  if (needsOnSiteDiagnostic(blob)) return false
+  const forfait = isForfaitService(blob)
+  const likeForLike = isLikeForLikeReplacement(blob)
+  const diagnostic = isDiagnosticJob(blob)
+  // Catégorie B : forfait, ou remplacement simple à l'identique (WC, robinet, ballon identique…).
+  if (likeForLike) return true
+  // Catégorie A : travaux / panne / rénovation / diagnostic — pas de brouillon maintenant.
+  if (diagnostic) return false
+  // Catégorie B forfait, même si « chaudière » apparaît.
+  if (forfait) return true
   if (args.devis_demande === false) return false
   if (args.devis_demande || args.type_demande === "devis") return true
   if (/devis demandé/.test(blob)) return true

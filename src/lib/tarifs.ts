@@ -85,7 +85,7 @@ export function formatTarifsForPrompt(raw?: Partial<Tarifs> | null): string {
     `- Zone d'intervention : ${t.zoneKm ?? DEFAULT_TARIFS.zoneKm} km (${hint(t.zoneKm != null)}).`,
     t.entretienChaudiere != null
       ? `- Entretien chaudière (forfait) : ${euro(t.entretienChaudiere)} (tarif de l'artisan).`
-      : "- Entretien chaudière : pas de forfait communiqué — propose une visite de diagnostic puis un devis, sans inventer un prix.",
+      : "- Entretien chaudière : pas de forfait communiqué — ne l'invente pas ; pour un entretien ou un contrat (catégorie B), propose un devis à valider par l'artisan, sans visite de diagnostic.",
     "Tu peux citer ces frais fixes si on te les demande. Tu ne chiffres jamais les travaux, pièces, main-d'œuvre hors taux horaire indiqué, ni un total d'intervention.",
   ]
   return lines.join("\n")
