@@ -24,7 +24,15 @@ function payloadFrom(body: Json): PushPayload | null {
   if (type === "call") {
     const client = String(body.client || "Client")
     const motif = String(body.motif || "Nouvel appel")
-    return { title: "Nouvel appel", body: `${client} · ${motif}`, url: "/reception", tag: `call-${body.call_id || Date.now()}` }
+    const rappel = body.rappel_souhaite === true
+    const creneau = String(body.rappel_creneau || "").trim()
+    const extra = rappel ? (creneau ? `À rappeler (${creneau})` : "À rappeler") : ""
+    return {
+      title: rappel ? "Nouvel appel · À rappeler" : "Nouvel appel",
+      body: extra ? `${client} · ${motif} · ${extra}` : `${client} · ${motif}`,
+      url: "/reception",
+      tag: `call-${body.call_id || Date.now()}`,
+    }
   }
   if (type === "appointment") {
     const client = String(body.client || "Client")

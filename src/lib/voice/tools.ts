@@ -34,6 +34,8 @@ export type SaveArgs = {
   type_demande?: string
   urgence?: string
   a_rappeler?: boolean
+  rappel_souhaite?: boolean
+  rappel_creneau?: string
   devis_demande?: boolean
   email_client?: string
   rdv_pris?: boolean
@@ -160,7 +162,9 @@ export async function saveCall(
 ) {
   const user = await me()
   const urgent = args.urgence === "urgent" || args.type_demande === "urgence"
-  const statut = args.rdv_pris ? "rdv_pris" : args.a_rappeler === false ? "renseigne" : "a_rappeler"
+  const rappelSouhaite = args.rappel_souhaite === true || (args.rappel_souhaite == null && args.a_rappeler === true)
+  const rappelCreneau = rappelSouhaite ? (args.rappel_creneau?.trim() || null) : null
+  const statut = rappelSouhaite ? "a_rappeler" : args.rdv_pris ? "rdv_pris" : "renseigne"
   const resume = (args.resume || "").trim() || "Appel test de la réceptionniste."
   const row = {
     artisan_id: user.id,
@@ -179,12 +183,14 @@ export async function saveCall(
     email_client: args.email_client?.trim() || null,
     statut,
     notes: args.notes?.trim() || null,
+    rappel_souhaite: rappelSouhaite,
+    rappel_creneau: rappelCreneau,
   }
   const wantDevis = inferDevisRequest(args, extra.transcript)
   if (wantDevis && row.type_demande === "autre") row.type_demande = "devis"
   const { data, error } = await supabase.from("calls").insert(row).select("id").maybeSingle()
   if (error) return { ok: false, error: "Impossible d'enregistrer l'appel." }
-  notifySelf({ type: "call", client: row.nom_client, motif: row.motif, call_id: data?.id })
+  notifySelf({ type: "call", client: row.nom_client, motif: row.motif, call_id: data?.id, rappel_souhaite: rappelSouhaite, rappel_creneau: rappelCreneau })
   try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ }
 
   let devis_id: string | undefined

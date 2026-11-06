@@ -5,9 +5,10 @@ import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } 
 import { useLocation, useNavigate } from "react-router-dom"
 import { Component, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
-import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace } from "lucide-react"
+import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace, Banknote } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed, DEFAULT_REVIEW_URL } from "../lib/store"
+import { mergeTarifs, tarifsSummary } from "../lib/tarifs"
 import { sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
@@ -42,7 +43,7 @@ const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"
 const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
-type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "clientReply"; data?: any } | null
+type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "clientReply"; data?: any } | null
 type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void }
 const C = createContext<Ctx>(null as any)
 const useC = () => useContext(C)
@@ -270,7 +271,7 @@ function Player({ p, c, onMic, compact }: { p: ReturnType<typeof usePlayer>; c: 
 }
 
 /* ---------------- Réception ---------------- */
-const callSt = (x: Call): [string, string] => x.callback ? (x.urgent ? ["Urgent", RED] : ["À rappeler", AMBER]) : ["Traité", GREEN]
+const callSt = (x: Call): [string, string] => x.callback ? [x.urgent ? "À rappeler · urgent" : "À rappeler", x.urgent ? RED : AMBER] : ["Traité", GREEN]
 
 /* Contacts : fiches clients + noms vus dans appels, devis et RDV, depuis le début */
 type Ct = { key: string; name: string; phone: string; calls: number; last: string; since?: string }
@@ -320,8 +321,8 @@ function Rec() {
   const open = (x: Call) => modal({ kind: "client", data: { name: x.name, call: x.id } }), cts = contacts(s)
   const todoS = todo.filter(x => match(q, x.name, x.topic, x.note)).sort((a, b) => Number(b.urgent) - Number(a.urgent))
   const done = (x: Call) => { const snap = s; set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`, () => set(() => snap)) }
-  const TRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</span>} s={`${x.tag || x.topic} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={c} onClick={() => done(x)} /></div>} />
-  const CRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={x.name} s={x.tag || x.topic} r={<span className={tx.cap}>{x.time}</span>} rs={<Chip c={callSt(x)[1]}>{callSt(x)[0]}</Chip>} />
+  const TRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}<Chip c={AMBER}>À rappeler</Chip></span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={c} onClick={() => done(x)} /></div>} />
+  const CRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.callback && <Chip c={x.urgent ? RED : AMBER}>À rappeler</Chip>}</span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""}`} r={<span className={tx.cap}>{x.time}</span>} rs={<Chip c={callSt(x)[1]}>{callSt(x)[0]}</Chip>} />
   return <><Shell k="rec" fig={<Num n={weekN} />} sub="appels reçus cette semaine" actions={[
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Sparkles, l: "Assistant", on: () => setChat(true) }]}>
@@ -337,7 +338,7 @@ function Rec() {
     <Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section>
 </Col>
   </Shell>
-  {voiceOn && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email }} onDone={msg => { setVoiceOn(false); try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ } if (msg) toast(msg) }} />}
+  {voiceOn && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email, tarifs: s.settings.tarifs }} onDone={msg => { setVoiceOn(false); try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ } if (msg) toast(msg) }} />}
   </>
 }
 
@@ -550,6 +551,7 @@ function SetP() {
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
+      <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section>
       <Section t="Avis clients"><List><S first I={Sparkles} l="Lien d'avis Google" v={(st.reviewUrl || DEFAULT_REVIEW_URL).replace(/^https?:\/\//, "").slice(0, 28)} onClick={() => modal({ kind: "reviewUrl" })} /></List></Section></Col>
   </Shell>
@@ -590,7 +592,7 @@ function ListenRow({ x, first, cur, setCur, acts }: { x: Call; first?: boolean; 
   useEffect(() => { if (cur !== x.id && p.play) p.toggle() }, [cur])
   const pp = { ...p, toggle: () => { if (!p.play) setCur(x.id); p.toggle() } }
   return <div className={`px-5 py-3.5 ${first ? "" : "border-t border-white/[.05]"}`}>
-    <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}</div></div>{acts ? <div className="flex shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => { if (x.callback) { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) } }} /></div> : <span className={`shrink-0 ${tx.cap}`}>{x.day ? "hier " : ""}{x.time}</span>}</div>
+    <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}{x.callback && <Chip c={AMBER}>À rappeler</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}{x.rappelAt ? ` · ${x.rappelAt}` : ""}</div></div>{acts ? <div className="flex shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => { if (x.callback) { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) } }} /></div> : <span className={`shrink-0 ${tx.cap}`}>{x.day ? "hier " : ""}{x.time}</span>}</div>
     {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? "Hier " : ""}{x.time}</div>}{x.recording ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
 }
 function CallsList({ todo, rest }: { todo: Call[]; rest: Call[] }) {
@@ -641,12 +643,12 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
     ...devis.map(d => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0], I: Receipt, o: 3 }))].sort((a, b) => a.o - b.o)
   const H = ({ children }: any) => <div className="mb-2 mt-6 px-1 text-[13px] font-medium text-white/45">{children}</div>
   return <Sheet title="Fiche client" c={A.rec.c} onClose={close}>
-    <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1"><Chip c={st[1]}>{st[0]}</Chip></div></div></div>
+    <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1 flex flex-wrap items-center gap-2"><Chip c={st[1]}>{st[0]}</Chip>{call?.callback && !/^À rappeler/.test(st[0]) && <Chip c={call.urgent ? RED : AMBER}>À rappeler</Chip>}</div>{call?.callback && call.rappelAt && <div className={`mt-1 ${tx.cap}`}>Rappel souhaité · {call.rappelAt}</div>}</div></div>
     <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}<CQA I={Receipt} l="Devis" onClick={() => modal({ kind: "devis", data: { client: nm, objet: ev?.topic || call?.besoin || call?.topic } })} /></div>
     <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{cl?.email && <KV I={Mail} l="E-mail" v={cl.email} href={`mailto:${cl.email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
     {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative</span></div>}
     {ev && <><H>Rendez-vous</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{ev.topic}</div><Chip c={past ? GREY : A.ag.c}>{past ? "Passé" : "À venir"}</Chip></div><div className={`mt-1 ${tx.cap}`}>{fmtD(ev.date)} · {hh(ev.start)} – {hh(ev.start + ev.dur)}</div>{(ev.notes || ev.addr) && <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{[ev.notes, ev.addr].filter(Boolean).join(" · ")}</p>}</div></>}
-    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div><p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{call.recording && <div className="mt-3"><CallInline call={call} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
+    {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div>{call.callback && <div className="mt-2"><Chip c={call.urgent ? RED : AMBER}>À rappeler{call.rappelAt ? ` · ${call.rappelAt}` : ""}</Chip></div>}<p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{call.recording && <div className="mt-3"><CallInline call={call} onMic={() => { close(); setChat(true) }} /></div>}</div></>}
     {(devis.length > 0 || evs.length > 0) && <><H>Devis et rendez-vous</H><div className="overflow-hidden rounded-[20px] bg-white/[.04]">
       {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
       {evs.map((e, i) => <Row key={e.id} first={!devis.length && i === 0} label={`RDV ${e.topic}`} onClick={() => modal({ kind: "ev", data: e })} lead={<Ic I={CalendarDays} />} t={e.topic} s={`${fmtD(e.date)} · ${hh(e.start)} – ${hh(e.start + e.dur)}`} r={<Chev />} />)}</div></>}
@@ -733,6 +735,58 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
   </Sheet>
 }
+function numField(s: string) {
+  const t = s.trim().replace(",", ".")
+  if (!t) return null
+  const n = Number(t)
+  return Number.isFinite(n) ? n : null
+}
+function TarifsSheet({ close }: { close: () => void }) {
+  const { s, set, toast } = useC()
+  const init = mergeTarifs(s.settings.tarifs)
+  const [deplacement, setDeplacement] = useState(init.deplacement == null ? "" : String(init.deplacement))
+  const [diagnostic, setDiagnostic] = useState(init.diagnostic == null ? "" : String(init.diagnostic))
+  const [tauxHoraire, setTauxHoraire] = useState(init.tauxHoraire == null ? "" : String(init.tauxHoraire))
+  const [devisGratuit, setDevisGratuit] = useState(init.devisGratuit ?? true)
+  const [majorationUrgence, setMajorationUrgence] = useState(init.majorationUrgence == null ? "" : String(init.majorationUrgence))
+  const [majorationWeekend, setMajorationWeekend] = useState(init.majorationWeekend == null ? "" : String(init.majorationWeekend))
+  const [zoneKm, setZoneKm] = useState(init.zoneKm == null ? "" : String(init.zoneKm))
+  const [entretienChaudiere, setEntretienChaudiere] = useState(init.entretienChaudiere == null ? "" : String(init.entretienChaudiere))
+  const save = () => {
+    set(x => ({
+      ...x,
+      settings: {
+        ...x.settings,
+        tarifs: mergeTarifs({
+          deplacement: numField(deplacement),
+          diagnostic: numField(diagnostic),
+          tauxHoraire: numField(tauxHoraire),
+          devisGratuit,
+          majorationUrgence: numField(majorationUrgence),
+          majorationWeekend: numField(majorationWeekend),
+          zoneKm: numField(zoneKm),
+          entretienChaudiere: numField(entretienChaudiere),
+        }),
+      },
+    }))
+    toast("Tarifs enregistrés")
+    close()
+  }
+  return <Sheet title="Tarifs" sub="Frais fixes cités par la réceptionniste" c={A.dev.c} onClose={close}>
+    <div className="space-y-3">
+      <F l="Frais de déplacement (€)"><input className={inp} inputMode="decimal" value={deplacement} placeholder="49" onChange={e => setDeplacement(e.target.value)} /></F>
+      <F l="Frais de diagnostic (€)"><input className={inp} inputMode="decimal" value={diagnostic} placeholder="Sur place" onChange={e => setDiagnostic(e.target.value)} /></F>
+      <F l="Taux horaire (€)"><input className={inp} inputMode="decimal" value={tauxHoraire} placeholder="Non communiqué" onChange={e => setTauxHoraire(e.target.value)} /></F>
+      <div className="flex items-center gap-3 px-1 text-[15px]"><Tg on={devisGratuit} onClick={() => setDevisGratuit(!devisGratuit)} label="Devis gratuit" />Devis gratuit</div>
+      <F l="Majoration urgence (%)"><input className={inp} inputMode="decimal" value={majorationUrgence} placeholder="50" onChange={e => setMajorationUrgence(e.target.value)} /></F>
+      <F l="Majoration week-end (%)"><input className={inp} inputMode="decimal" value={majorationWeekend} placeholder="Non communiquée" onChange={e => setMajorationWeekend(e.target.value)} /></F>
+      <F l="Zone d'intervention (km)"><input className={inp} inputMode="decimal" value={zoneKm} placeholder="30" onChange={e => setZoneKm(e.target.value)} /></F>
+      <F l="Entretien chaudière (€)"><input className={inp} inputMode="decimal" value={entretienChaudiere} placeholder="Non communiqué" onChange={e => setEntretienChaudiere(e.target.value)} /></F>
+    </div>
+    <p className={`mt-3 ${tx.cap}`}>La réceptionniste peut citer ces frais fixes. Elle ne chiffre jamais les travaux. Un champ vide reste « à confirmer » ; les valeurs 49 €, devis gratuit et +50 % d'urgence sont alors indiquées comme indicatives.</p>
+    <Btn primary className="mt-6 w-full" onClick={save}>Enregistrer</Btn>
+  </Sheet>
+}
 function ReviewUrlSheet({ close }: { close: () => void }) {
   const { s, set, toast } = useC()
   const [url, setUrl] = useState(s.settings.reviewUrl || DEFAULT_REVIEW_URL)
@@ -756,7 +810,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "contacts") return <ContactsSheet close={close} />
   if (m.kind === "client") return <ClientSheet name={d.name} callId={d.call} eventId={d.event} close={close} />
   if (m.kind === "callView") { const x = s.calls.find(y => y.id === d.id) || d as Call
-    return <Sheet title={x.name} sub={`${x.time} · ${x.topic}`} c={A.rec.c} onClose={close}><CallPlayer call={x} onMic={() => { close(); setChat(true) }} /><div className="text-[15px] leading-relaxed text-white/70">{x.note}</div>{x.addr && <div className="mt-3"><Sub>{x.addr}</Sub></div>}<div className="mt-3"><Sub dot={x.callback ? (x.urgent ? "#FF5F57" : "#FFB340") : "#30D158"}>{x.callback ? (x.urgent ? "À rappeler · urgent" : "À rappeler") : "Traité"}</Sub></div>
+    return <Sheet title={x.name} sub={`${x.time} · ${x.topic}`} c={A.rec.c} onClose={close}><CallPlayer call={x} onMic={() => { close(); setChat(true) }} /><div className="text-[15px] leading-relaxed text-white/70">{x.note}</div>{x.addr && <div className="mt-3"><Sub>{x.addr}</Sub></div>}<div className="mt-3"><Sub dot={x.callback ? (x.urgent ? "#FF5F57" : "#FFB340") : "#30D158"}>{x.callback ? (x.urgent ? "À rappeler · urgent" : "À rappeler") : "Traité"}</Sub>{x.callback && x.rappelAt && <div className={`mt-2 ${tx.cap}`}>Moment souhaité · {x.rappelAt}</div>}</div>
       <div className="mt-6 grid gap-2">{x.callback && <Btn primary onClick={() => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast("Marqué comme rappelé"); close() }}><Check size={15} />Marquer rappelé</Btn>}<div className="grid grid-cols-2 gap-2"><Btn onClick={() => modal({ kind: "devis", data: { client: x.name, objet: x.besoin || x.topic } })}><Receipt size={15} strokeWidth={1.5} />Créer un devis</Btn><Btn onClick={() => modal({ kind: "rdv", data: { name: x.name, topic: x.tag || x.topic, addr: x.addr } })}><CalendarDays size={15} strokeWidth={1.5} />Prendre RDV</Btn></div></div></Sheet> }
   if (m.kind === "rdv") return <Sheet title="Nouveau rendez-vous" c={A.ag.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><div className="grid grid-cols-[1.4fr_1fr_1fr] gap-2"><F l="Date"><input type="date" className={inp} {...v("date")} /></F><F l="Heure"><input type="time" step={900} className={inp} {...v("start")} /></F><F l="Durée (h)"><select className={inp} {...v("dur")}>{["0.5", "1", "1.5", "2", "3", "4"].map(x => <option key={x} value={x}>{x.replace(".", ",")}</option>)}</select></F></div><F l="Adresse"><input className={inp} {...v("addr")} /></F></div>
     {foot("Créer le RDV", !!f.name.trim() && !!f.date, () => { set(x => ({ ...x, events: [...x.events, { id: uid(), date: f.date, start: toH(f.start), dur: Number(f.dur), name: f.name.trim(), topic: f.topic || "Intervention", addr: f.addr, created: Date.now() }] })); const wd = dd(f.date).getDay(); toast(wd === 0 || wd === 6 ? "RDV créé (week-end : visible sur mobile)" : "RDV créé"); go("ag") }, A.ag.c)}</Sheet>
@@ -769,9 +823,10 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     return <Sheet title="Appels" sub={`${todo.length} à rappeler · ${s.calls.length} appels au total`} c={A.rec.c} onClose={close}><CallsList todo={todo} rest={rest} /></Sheet> }
   if (m.kind === "callbacks") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent))
     const done = (x: Call) => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) }
-    return <Sheet title="À rappeler" sub={`${todo.length} client${todo.length > 1 ? "s" : ""} · ${todo.filter(x => x.urgent).length} urgent${todo.filter(x => x.urgent).length > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}>{todo.length ? <div className="-mx-5 bg-black/20">{todo.map((x, i) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}</span>} s={`${x.tag || x.topic} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => done(x)} /></div>} />)}</div> : <div className={`py-8 text-center ${tx.cap}`}>Personne à rappeler. Tout est à jour.</div>}</Sheet> }
+    return <Sheet title="À rappeler" sub={`${todo.length} client${todo.length > 1 ? "s" : ""} · ${todo.filter(x => x.urgent).length} urgent${todo.filter(x => x.urgent).length > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}>{todo.length ? <div className="-mx-5 bg-black/20">{todo.map((x, i) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}<Chip c={AMBER}>À rappeler</Chip></span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => done(x)} /></div>} />)}</div> : <div className={`py-8 text-center ${tx.cap}`}>Personne à rappeler. Tout est à jour.</div>}</Sheet> }
   if (m.kind === "relList") return <Sheet title="Relances" sub={`${s.rels.filter(r => r.status === "prog").length} à venir`} c={A.rel.c} onClose={close}><div className="-mx-5 bg-black/20">{s.rels.map((r, i) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Ic I={canalI[r.canal] || Send} />} t={r.client} s={`${r.type} · ${r.date}`} r={<Chip c={RS[r.status][1]}>{RS[r.status][0]}</Chip>} />)}</div></Sheet>
   if (m.kind === "reviewUrl") return <ReviewUrlSheet close={close} />
+  if (m.kind === "tarifs") return <TarifsSheet close={close} />
   if (m.kind === "clientReply") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, ok = dv.status === "val"
     try { sessionStorage.setItem("akno-seen-" + dv.id, "1"); updateAppBadge(attentionCount(s)) } catch { }
     return <Sheet title={ok ? "Devis accepté" : "Devis refusé"} sub={dv.repliedAt ? new Date(dv.repliedAt).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "Réponse du client"} c={A.dev.c} onClose={close}>

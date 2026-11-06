@@ -33,7 +33,7 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
   })
   const { data: artisan } = await authed
     .from("artisans")
-    .select("prenom, nom_entreprise, entreprise_nom, entreprise_adresse, entreprise_cp_ville, entreprise_email, entreprise_telephone, email, telephone")
+    .select("prenom, nom_entreprise, entreprise_nom, entreprise_adresse, entreprise_cp_ville, entreprise_email, entreprise_telephone, email, telephone, tarifs")
     .eq("id", user.id)
     .maybeSingle()
 
@@ -62,6 +62,7 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
         phone: artisan?.entreprise_telephone || artisan?.telephone || "",
         address: artisan?.entreprise_adresse || "",
         city: artisan?.entreprise_cp_ville || "",
+        tarifs: artisan?.tarifs && typeof artisan.tarifs === "object" ? artisan.tarifs : undefined,
       },
     },
   }

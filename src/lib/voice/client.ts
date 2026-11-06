@@ -17,7 +17,7 @@ export type VoiceTokenResponse = {
 const WS_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 const SUPPORTED = new Set([8000, 16000, 22050, 24000, 32000, 44100, 48000])
 const PREFERRED_RATE = 24000
-const BARGE_MS = 320
+const BARGE_MS = 600
 const LOOKAHEAD = 0.08
 
 function nearestRate(n: number) {
@@ -38,6 +38,12 @@ function floatToBase64Pcm16(f32: Float32Array) {
     bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
   }
   return btoa(bin)
+}
+
+function rms(input: Float32Array) {
+  let sum = 0
+  for (let i = 0; i < input.length; i++) sum += input[i] * input[i]
+  return Math.sqrt(sum / Math.max(1, input.length))
 }
 
 function base64Pcm16ToFloat(b64: string) {
@@ -235,6 +241,9 @@ export async function startVoiceSession(opts: {
   let newUserTurn = false
   let newAssistantTurn = false
   let bargeTimer: ReturnType<typeof setTimeout> | null = null
+  let bargeSince: number | null = null
+  let bargeArmed = false
+  let echoTailUntil = 0
 
   const ctx = new AudioContext({ sampleRate: PREFERRED_RATE })
   if (ctx.state === "suspended") await ctx.resume()
@@ -275,16 +284,50 @@ export async function startVoiceSession(opts: {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
   }
 
-  const flushMic = (f32: Float32Array) => {
-    if (!ready || closed || ws.readyState !== WebSocket.OPEN) return
-    send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
+  const resetBarge = () => {
+    bargeArmed = false
+    bargeSince = null
+    if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
   }
 
   const interruptPlayback = () => {
     player.stop()
     assistantBuf = ""
     newUserTurn = true
+    if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
     opts.onStatus("listening")
+  }
+
+  const confirmBargeIn = () => {
+    if (closed || player.buffered <= 0.05) return
+    bargeArmed = true
+    bargeSince = null
+    interruptPlayback()
+    send({ type: "response.cancel" })
+  }
+
+  const flushMic = (f32: Float32Array) => {
+    if (!ready || closed || ws.readyState !== WebSocket.OPEN) return
+    const playing = player.buffered > 0.08
+    if (playing) echoTailUntil = Date.now() + 220
+    const hold = playing || Date.now() < echoTailUntil
+    if (hold && !bargeArmed) {
+      // Mute uplink while she speaks so her own voice cannot trigger server barge-in.
+      if (rms(f32) > 0.02) {
+        if (bargeSince == null) bargeSince = Date.now()
+        else if (Date.now() - bargeSince >= BARGE_MS) {
+          bargeArmed = true
+          confirmBargeIn()
+          send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
+          return
+        }
+      } else {
+        bargeSince = null
+      }
+      return
+    }
+    if (!hold) resetBarge()
+    send({ type: "input_audio_buffer.append", audio: floatToBase64Pcm16(f32) })
   }
 
   const handleTool = async (event: { name?: string; call_id?: string; arguments?: string }) => {
@@ -345,11 +388,13 @@ export async function startVoiceSession(opts: {
           content: [{ type: "output_text", text: welcomeLine(profile) }],
         },
       })
-      void slotsPromise.then(body => {
+      void slotsPromise.then(async body => {
         if (closed) return
         const slots = Array.isArray((body as { slots?: unknown }).slots) ? (body as { slots: { label?: string; date?: string; heure?: string }[] }).slots : []
         const hint = formatSlotsHint(slots)
         if (!hint) return
+        await player.waitIdle()
+        if (closed || ws.readyState !== WebSocket.OPEN) return
         send({ type: "session.update", session: { instructions: buildSessionConfig(profile, sampleRate).instructions + hint } })
       }).catch(() => { /* agenda préchargé optionnel */ })
       opts.onStatus("speaking")
@@ -357,9 +402,8 @@ export async function startVoiceSession(opts: {
     }
     if (type === "input_audio_buffer.speech_started") {
       if (bargeTimer) clearTimeout(bargeTimer)
-      const delay = player.buffered > 0.05 ? BARGE_MS : 0
-      if (delay === 0) interruptPlayback()
-      else bargeTimer = setTimeout(() => { bargeTimer = null; interruptPlayback() }, delay)
+      if (player.buffered <= 0.05) return
+      bargeTimer = setTimeout(() => { bargeTimer = null; confirmBargeIn() }, BARGE_MS)
       return
     }
     if (type === "response.created") {
@@ -369,6 +413,7 @@ export async function startVoiceSession(opts: {
     }
     if (type === "input_audio_buffer.speech_stopped") {
       if (bargeTimer) { clearTimeout(bargeTimer); bargeTimer = null }
+      if (player.buffered > 0.05) return
       opts.onStatus("thinking")
       return
     }
@@ -412,7 +457,7 @@ export async function startVoiceSession(opts: {
         send({ type: "session.update", session: simpleSession })
         return
       }
-      if (/transcription|language_hint|keyterms|reasoning/i.test(msg)) return
+      if (/transcription|language_hint|keyterms|reasoning|cancel/i.test(msg)) return
       opts.onNotice?.(msg)
     }
   }
@@ -467,6 +512,7 @@ export async function startVoiceSession(opts: {
         type_demande: "autre" as const,
         urgence: "normal" as const,
         a_rappeler: false,
+        rappel_souhaite: false,
         devis_demande: inferDevisRequest({ resume: summary, type_demande: "autre" }, lines),
       }
       const result = await saveCall(fallbackArgs, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
