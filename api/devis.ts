@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { devisAcceptUrl, devisEmailHtml, env, looksLikeEmail, replyToFor, scheduleDevisReminders, sendResend } from "./mail"
+import { notifyArtisan } from "./push"
 
 type Json = Record<string, unknown>
 type Line = { l: string; q: number; u: string; pu: number; tv: number }
@@ -182,6 +183,12 @@ async function handleDraft(supabase: SupabaseClient, userId: string, body: Json)
   }
   const { data: inserted, error: iErr } = await supabase.from("devis").insert(row).select("id, numero").maybeSingle()
   if (iErr || !inserted) return { status: 500, body: { error: "Impossible d'enregistrer le brouillon de devis." } }
+  notifyArtisan(userId, {
+    title: "Devis à valider",
+    body: `${inserted.numero} · ${call.nom_client || "Client"}`,
+    url: "/devis",
+    tag: `devis-${inserted.id}`,
+  })
   return {
     status: 200,
     body: { ok: true, devis_id: inserted.id, numero: inserted.numero, objet, lines: drafted.lines, total_ht: tot.ht, total_ttc: tot.ttc, statut: "brouillon" },

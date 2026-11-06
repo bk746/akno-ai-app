@@ -1,4 +1,5 @@
 import { adminClient, env, stopDevisReminders } from "./mail"
+import { notifyArtisan } from "./push"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
@@ -97,16 +98,16 @@ export async function handleResendWebhook(raw: string, headers: Headers): Promis
   try { sb = adminClient() }
   catch { return { status: 503, body: { error: "Configuration Supabase manquante." } } }
 
-  let devis: { id: string; statut: string; client_email?: string | null } | null = null
+  let devis: { id: string; statut: string; client_email?: string | null; artisan_id?: string | null; numero?: string | null; client_nom?: string | null } | null = null
   if (token) {
-    const { data: found } = await sb.from("devis").select("id, statut, client_email").eq("token", token).maybeSingle()
+    const { data: found } = await sb.from("devis").select("id, statut, client_email, artisan_id, numero, client_nom").eq("token", token).maybeSingle()
     devis = found
   }
   if (!devis && data.subject) {
     const num = String(data.subject).match(/devis\s*n[°o]?\s*(\d+)/i)
     const from = String(data.from || "").toLowerCase()
     if (num) {
-      const { data: rows } = await sb.from("devis").select("id, statut, client_email").ilike("numero", `%${num[1]}%`).limit(10)
+      const { data: rows } = await sb.from("devis").select("id, statut, client_email, artisan_id, numero, client_nom").ilike("numero", `%${num[1]}%`).limit(10)
       devis = (rows || []).find(r => r.client_email && from.includes(String(r.client_email).toLowerCase())) || null
     }
   }
@@ -117,6 +118,14 @@ export async function handleResendWebhook(raw: string, headers: Headers): Promis
   const now = new Date().toISOString()
   await sb.from("devis").update({ reponse_client: text.slice(0, 4000), repondu_le: now }).eq("id", devis.id)
   await stopDevisReminders(sb, devis.id, { markResponded: true })
+  if (devis.artisan_id) {
+    notifyArtisan(devis.artisan_id, {
+      title: "Réponse client",
+      body: `${devis.numero || "Devis"} · ${devis.client_nom || "Client"}`,
+      url: "/devis",
+      tag: `reply-${devis.id}`,
+    })
+  }
   return { status: 200, body: { ok: true, devis_id: devis.id } }
 }
 

@@ -1,4 +1,5 @@
 import { adminClient, stopDevisReminders } from "./mail"
+import { notifyArtisan } from "./push"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
@@ -58,6 +59,12 @@ export async function handleDevisPublic(method?: string, url?: string, body?: un
   const { error: uErr } = await sb.from("devis").update({ statut, repondu_le: now }).eq("id", devis.id)
   if (uErr) return { status: 500, body: { error: "Impossible d'enregistrer votre réponse." } }
   await stopDevisReminders(sb, devis.id, { markResponded: true })
+  notifyArtisan(devis.artisan_id, {
+    title: action === "accept" ? "Devis accepté" : "Devis refusé",
+    body: `${devis.numero} · ${devis.client_nom || "Client"}`,
+    url: "/devis",
+    tag: `devis-${devis.id}`,
+  }, 1)
   return { status: 200, body: { ...summary, statut, decided_at: now } }
 }
 

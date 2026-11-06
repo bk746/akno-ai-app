@@ -11,6 +11,7 @@ import { PHONES, useStore, uid, BASE, addDays, eur, seed, DEFAULT_REVIEW_URL } f
 import { sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
+import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, registerPushWorker, updateAppBadge } from "../lib/push"
 import Login from "./Login"
 import { LockScreen, LockSetup } from "./Lock"
 import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
@@ -509,9 +510,29 @@ function Dev() {
 function SetP() {
   const { s, set, desk, toast, modal } = useC(), st = s.settings
   const uidL: string = (window as any).__aknoUid || "", lk = hasLock(uidL), [bio, setBio] = useState(() => !!getLock(uidL)?.cred), [canBio, setCanBio] = useState(false)
+  const [pushBusy, setPushBusy] = useState(false)
   useEffect(() => { bioAvailable().then(setCanBio) }, [])
   const bioTg = async () => { if (!lk) { toast("Créez d'abord un code d'accès"); return } if (bio) { disableBio(uidL); setBio(false); toast("Face ID désactivé") } else { try { await enableBio(uidL, (window as any).__aknoEmail || ""); setBio(true); toast("Face ID activé") } catch { toast("Face ID non activé") } } }
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
+  const iosHint = isIos() && !isStandalone()
+  const pushOn = !!st.push && typeof Notification !== "undefined" && Notification.permission === "granted"
+  const togglePush = async () => {
+    if (pushBusy) return
+    if (iosHint) { toast("Ajoute Akno à l’écran d’accueil depuis Safari"); return }
+    if (pushOn) {
+      setPushBusy(true)
+      await disablePush()
+      up(x => ({ ...x, push: false }))
+      setPushBusy(false)
+      toast("Notifications désactivées")
+      return
+    }
+    setPushBusy(true)
+    const res = await enablePush()
+    setPushBusy(false)
+    if (res.ok) { up(x => ({ ...x, push: true })); toast("Notifications activées") }
+    else toast(res.error || "Notifications non activées")
+  }
   const demo = () => toast("Démo : réglage non modifiable")
   const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
   const TVA = [10, 20, 5.5], DUR = [0.5, 1, 1.5, 2]
@@ -524,7 +545,7 @@ function SetP() {
   return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u="/ 4" />} sub="agents actifs · offre Pro" actions={[
     { I: Phone, l: "Numéro", on: demo }, { I: Clock, l: "Horaires", on: demo }, { I: LifeBuoy, l: "Aide", on: demo }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
-      <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications push" onClick={() => up(x => ({ ...x, push: !x.push }))} lead={<Ic I={Bell} />} t="Notifications push" s="Appels et devis" r={<Tg on={st.push} onClick={() => up(x => ({ ...x, push: !x.push }))} label="Notifications push" />} /></List></Section>
+      <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari</p>}</Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
@@ -751,7 +772,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "relList") return <Sheet title="Relances" sub={`${s.rels.filter(r => r.status === "prog").length} à venir`} c={A.rel.c} onClose={close}><div className="-mx-5 bg-black/20">{s.rels.map((r, i) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Ic I={canalI[r.canal] || Send} />} t={r.client} s={`${r.type} · ${r.date}`} r={<Chip c={RS[r.status][1]}>{RS[r.status][0]}</Chip>} />)}</div></Sheet>
   if (m.kind === "reviewUrl") return <ReviewUrlSheet close={close} />
   if (m.kind === "clientReply") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, ok = dv.status === "val"
-    try { sessionStorage.setItem("akno-seen-" + dv.id, "1") } catch { }
+    try { sessionStorage.setItem("akno-seen-" + dv.id, "1"); updateAppBadge(attentionCount(s)) } catch { }
     return <Sheet title={ok ? "Devis accepté" : "Devis refusé"} sub={dv.repliedAt ? new Date(dv.repliedAt).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "Réponse du client"} c={A.dev.c} onClose={close}>
       <div className="text-[15px] text-white/60">{dv.client} a {ok ? "accepté" : "refusé"} le devis n° {dv.num}{dv.objet ? ` · ${dv.objet}` : ""}.</div>
       {dv.reply && <div className="mt-4 rounded-[16px] bg-white/[.04] p-4 text-[14px] text-white/75">« {dv.reply} »</div>}
@@ -859,6 +880,31 @@ function AknoApp() {
   const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void } | null>(null), [q, setQ] = useState("")
   useEffect(() => { document.title = `Akno · ${page === "set" ? "Paramètres" : A[page].tab}` }, [page])
   useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo ? 5000 : 2600); return () => clearTimeout(t) }, [toastT])
+  useEffect(() => { void registerPushWorker() }, [])
+  useEffect(() => { if (s.settings.push) void ensurePush() }, [s.settings.push])
+  useEffect(() => {
+    const sync = () => updateAppBadge(attentionCount(s))
+    sync()
+    document.addEventListener("visibilitychange", sync)
+    window.addEventListener("focus", sync)
+    return () => { document.removeEventListener("visibilitychange", sync); window.removeEventListener("focus", sync) }
+  }, [s.calls, s.devis])
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return
+    const onMsg = (e: MessageEvent) => {
+      const data = e.data as { type?: string; url?: string } | null
+      if (!data || data.type !== "akno-nav") return
+      const raw = String(data.url || "/reception")
+      let slug = "reception"
+      try {
+        const path = raw.startsWith("http") ? new URL(raw).pathname : raw
+        slug = path.replace(/^\//, "").split("/")[0] || "reception"
+      } catch { /* ignore */ }
+      navigate(`/${slugOf(SLUG[slug] || "rec")}`)
+    }
+    navigator.serviceWorker.addEventListener("message", onMsg)
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg)
+  }, [navigate])
   const sw = useRef<{ x: number, y: number, t: number, ok: boolean } | null>(null), dir = useRef(0)
   const go = (p: P) => { if (ORD.indexOf(p) !== ORD.indexOf(page)) dir.current = ORD.indexOf(p) > ORD.indexOf(page) ? 1 : -1; setQ(""); setM(null); if (p !== page) navigate(`/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`); if (!desk) setChatS(false) }
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }

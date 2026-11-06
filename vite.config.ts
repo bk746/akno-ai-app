@@ -22,7 +22,7 @@ function json(res: Res, status: number, body: unknown) {
   res.end(JSON.stringify(body))
 }
 
-const API = new Set(["/api/voice-token", "/api/booking", "/api/devis", "/api/relances", "/api/devis-public", "/api/resend-webhook"])
+const API = new Set(["/api/voice-token", "/api/booking", "/api/devis", "/api/relances", "/api/devis-public", "/api/resend-webhook", "/api/notify"])
 
 function apiDev(): Plugin {
   const middleware = async (req: Req, res: Res, next: () => void) => {
@@ -71,6 +71,14 @@ function apiDev(): Plugin {
         const raw = await readRaw(req)
         const { handleResendWebhook } = await import("./api/resend-webhook")
         const result = await handleResendWebhook(raw, req.headers)
+        json(res, result.status, result.body)
+        return
+      }
+      if (path === "/api/notify") {
+        if (req.method !== "POST") { json(res, 405, { error: "Méthode non autorisée." }); return }
+        const raw = await readRaw(req)
+        const { handleNotify } = await import("./api/notify")
+        const result = await handleNotify(req.headers.authorization, raw ? JSON.parse(raw) : {})
         json(res, result.status, result.body)
         return
       }

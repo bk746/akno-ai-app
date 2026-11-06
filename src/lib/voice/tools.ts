@@ -66,6 +66,20 @@ async function me() {
   return user
 }
 
+function notifySelf(payload: Record<string, unknown>) {
+  void (async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) return
+      await fetch("/api/notify", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+    } catch { /* ignore */ }
+  })()
+}
+
 async function bookingApi(action: "slots" | "book", payload: object) {
   try {
     const { data: { session } } = await supabase.auth.getSession()
@@ -117,6 +131,8 @@ export async function bookAppointment(args: BookArgs) {
     notes: [args.notes?.trim(), booked.cal_uid ? `cal:${booked.cal_uid}` : ""].filter(Boolean).join(" ") || null,
   }
   const { data, error } = await supabase.from("appointments").insert(row).select("id").maybeSingle()
+  const when = [args.date, args.heure].filter(Boolean).join(" à ") || booked.label || "Nouveau rendez-vous"
+  notifySelf({ type: "appointment", client: row.client, when, appointment_id: data?.id })
   if (error) {
     return { ok: true, appointment_id: null, confirmation: booked.confirmation || "Rendez-vous confirmé dans l'agenda.", warning: "Enregistré dans Cal.com, mais pas encore visible dans l'Agenda." }
   }
@@ -158,6 +174,7 @@ export async function saveCall(
   }
   const { data, error } = await supabase.from("calls").insert(row).select("id").maybeSingle()
   if (error) return { ok: false, error: "Impossible d'enregistrer l'appel." }
+  notifySelf({ type: "call", client: row.nom_client, motif: row.motif, call_id: data?.id })
 
   let devis_id: string | undefined
   if (data?.id && (args.devis_demande || args.type_demande === "devis")) {
