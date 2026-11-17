@@ -1045,8 +1045,9 @@ function AknoRootInner() {
   useEffect(() => { supabase.auth.getSession().then(({ data }) => { if (data.session && hasLock(data.session.user.id)) setLocked(true) }) }, [])
   // Retour d'arrière-plan après plus de 30 s : verrouiller
   useEffect(() => { let hid = 0; const f = () => { if (document.hidden) hid = Date.now(); else if (hid && Date.now() - hid > 30000 && uid && hasLock(uid) && !isVoiceCallActive()) setLocked(true) }; document.addEventListener("visibilitychange", f); return () => document.removeEventListener("visibilitychange", f) }, [uid])
-  // Proposer la création du code une seule fois après connexion
-  useEffect(() => { if (uid && !hasLock(uid) && !localStorage.getItem(`akno-lock-asked:${uid}`)) setSetup(true); if (!uid) setLocked(false) }, [uid])
+  // update47 · La création du code n'est plus proposée dès la connexion : Gate déclenche « akno-lock-setup »
+  // une fois l'offre choisie / l'onboarding terminé, juste avant d'entrer dans l'app.
+  useEffect(() => { if (!uid) setLocked(false) }, [uid])
   useEffect(() => { const f = () => setSetup(true); addEventListener("akno-lock-setup", f); return () => removeEventListener("akno-lock-setup", f) }, [])
   if (!ready || ses === undefined) return <div className="fixed inset-0 bg-black" />
   if (ses && locked) return <LockScreen uid={ses.user.id} onUnlock={() => setLocked(false)} />
