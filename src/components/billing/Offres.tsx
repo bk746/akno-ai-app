@@ -11,6 +11,7 @@ import { EASE, Spinner } from "../auth/fields"
 import { api, reloadAccount, useAccount, type Plan } from "../../lib/accountApi"
 import { OFFERS, RECEPTION, TVA, dateFr, eur, perMonth, perPeriod, yearly, type Interval } from "../../lib/offers"
 import { supabase } from "../../lib/supabase"
+import { FlowSteps } from "../auth/FlowShell"
 
 const StripePane = lazy(() => import("./StripePane"))
 const PK = String(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "").trim()
@@ -43,7 +44,7 @@ function Num({ v, dec }: { v: number; dec?: 0 | 2 }) {
 
 const out = () => { if (confirm("Se déconnecter ?")) void supabase.auth.signOut() }
 
-export default function Offres({ mode, onClose, onDone, returnSession }: { mode: "gate" | "sheet"; onClose?: () => void; onDone: () => void; returnSession?: string }) {
+export default function Offres({ mode, onClose, onDone, returnSession, flow }: { mode: "gate" | "sheet"; onClose?: () => void; onDone: () => void; returnSession?: string; /** update49 · affiché dans le parcours d'accueil : indicateur commun + « Continuer » */ flow?: boolean }) {
   const a = useAccount()
   const reduce = useReducedMotion()
   const init = useRef(readPick()).current
@@ -87,19 +88,20 @@ export default function Offres({ mode, onClose, onDone, returnSession }: { mode:
       <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 h-[420px] [background:radial-gradient(50%_60%_at_50%_0%,rgba(255,255,255,.07),transparent_70%)]" />
       <header className="relative mx-auto flex h-16 w-full max-w-[1160px] items-center justify-between gap-4 px-5 pt-[env(safe-area-inset-top)] sm:px-8">
         <div className="flex items-center gap-2.5"><Blob c="#E6E6E6" s={26} /><span className="text-[17px] font-semibold tracking-[-0.03em]">Akno</span></div>
-        <ol className="hidden items-center gap-2 sm:flex" aria-label={`Étape ${idx + 1} sur 3 : ${steps[idx]}`}>
+        {flow ? <FlowSteps i={2} className="hidden sm:flex" /> : <ol className="hidden items-center gap-2 sm:flex" aria-label={`Étape ${idx + 1} sur 3 : ${steps[idx]}`}>
           {steps.map((l, i) => <li key={l} className="flex items-center gap-2" aria-current={i === idx ? "step" : undefined}>
             <span className={`flex h-[22px] w-[22px] items-center justify-center rounded-full text-[11.5px] font-semibold transition-colors duration-300 ${i < idx ? "bg-white text-black" : i === idx ? "bg-white/[.14] text-white ring-1 ring-white/40" : "bg-white/[.05] text-white/35"}`}>{i < idx ? <Check size={12} strokeWidth={3} /> : i + 1}</span>
             <span className={`text-[13px] transition-colors duration-300 ${i === idx ? "font-medium text-white" : "text-white/40"}`}>{l}</span>
             {i < 2 && <span className="relative mx-1 h-px w-8 overflow-hidden bg-white/[.12]"><motion.span className="absolute inset-0 origin-left bg-white/70" initial={false} animate={{ scaleX: i < idx ? 1 : 0 }} transition={{ duration: .5, ease: EASE }} /></span>}
           </li>)}
-        </ol>
+        </ol>}
         {mode === "gate"
           ? <button type="button" onClick={out} className="flex h-9 items-center gap-2 rounded-full border border-white/[.12] px-3.5 text-[13.5px] font-medium text-white/75 transition-colors hover:border-white/25 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"><LogOut size={15} strokeWidth={1.9} /><span className="hidden sm:inline">Se déconnecter</span></button>
           : <button type="button" onClick={onClose} aria-label="Fermer" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[.08] text-white/80 transition-colors hover:bg-white/[.14] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"><X size={17} /></button>}
       </header>
 
       <main className="relative mx-auto w-full max-w-[1160px] px-5 pb-40 pt-6 sm:px-8 lg:pb-16 lg:pt-10">
+        {flow && <FlowSteps i={2} className="mb-6 sm:hidden" />}
         <AnimatePresence mode="wait" initial={false} custom={dir}>
           <motion.div key={step} custom={dir} variants={slide} initial="initial" animate="animate" exit="exit" transition={{ duration: .34, ease: EASE }}>
             {step === "choose" && <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-10">
@@ -144,7 +146,7 @@ export default function Offres({ mode, onClose, onDone, returnSession }: { mode:
               </div></aside>
             </div>}
 
-            {step === "done" && <Done session={session} pick={{ plan, interval, reception }} offerName={offer.full} trial={trial} trialDays={trialDays} onEnter={onDone} />}
+            {step === "done" && <Done session={session} pick={{ plan, interval, reception }} offerName={offer.full} trial={trial} trialDays={trialDays} onEnter={onDone} enterLabel={flow ? "Continuer" : undefined} />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -286,7 +288,7 @@ function PaneSkeleton() {
 }
 
 /** Activation : relit l'abonnement chez Stripe côté serveur jusqu'à ce que l'accès soit ouvert. */
-function Done({ session, pick, offerName, trial, trialDays, onEnter }: { session: string; pick: Pick; offerName: string; trial: boolean; trialDays: number; onEnter: () => void }) {
+function Done({ session, pick, offerName, trial, trialDays, onEnter, enterLabel = "Entrer dans Akno" }: { session: string; pick: Pick; offerName: string; trial: boolean; trialDays: number; onEnter: () => void; enterLabel?: string }) {
   const reduce = useReducedMotion()
   const [ok, setOk] = useState(false), [slow, setSlow] = useState(false), [run, setRun] = useState(0), [end, setEnd] = useState<string | null>(null)
   const [inTrial, setInTrial] = useState(trial)
@@ -324,7 +326,7 @@ function Done({ session, pick, offerName, trial, trialDays, onEnter }: { session
       : "Nous confirmons votre abonnement auprès de Stripe. Cela prend quelques secondes."}</p>
     <div className="mt-8">
       <motion.button type="button" disabled={!ok} onClick={onEnter} whileTap={{ scale: .985 }} className="group/b flex h-12 w-full items-center justify-center gap-2 rounded-full bg-white text-[15.5px] font-semibold text-black transition-opacity duration-200 hover:bg-[#F2F2F2] focus-visible:outline-2 focus-visible:outline-offset-[3px] focus-visible:outline-white disabled:cursor-progress disabled:opacity-70">
-        {ok ? <>Entrer dans Akno<ArrowRight size={17} strokeWidth={2} className="transition-transform duration-200 group-hover/b:translate-x-0.5" /></> : <><Spinner />Activation…</>}
+        {ok ? <>{enterLabel}<ArrowRight size={17} strokeWidth={2} className="transition-transform duration-200 group-hover/b:translate-x-0.5" /></> : <><Spinner />Activation…</>}
       </motion.button>
       {slow && !ok && <div className="mt-4 text-[13.5px] leading-[1.5] text-white/55">L'activation prend plus de temps que prévu. <button type="button" onClick={() => setRun(x => x + 1)} className="inline-flex items-center gap-1 font-semibold text-white underline decoration-white/40 underline-offset-2 hover:decoration-white"><RotateCcw size={13} />Réessayer</button></div>}
     </div>

@@ -27,6 +27,7 @@ import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
 import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, registerPushWorker, sendTestNotification, updateAppBadge } from "../lib/push"
 import Login from "./Login"
+import Flow from "./onboarding/Flow"
 import { LockScreen, LockSetup } from "./Lock"
 import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
 import type { Session } from "@supabase/supabase-js"
@@ -1071,5 +1072,6 @@ function AknoRootInner() {
   if (ses && locked) return <LockScreen uid={ses.user.id} onUnlock={() => setLocked(false)} />
   if (ses && setup && !rec) return <LockSetup uid={ses.user.id} email={ses.user.email || ""} onDone={() => { localStorage.setItem(`akno-lock-asked:${ses.user.id}`, "1"); setSetup(false) }} />
   if (rec && ses) return <Login mode="reset" onDone={() => { setRec(false); history.replaceState(null, "", "/reception") }} />
-  return ses ? <AknoApp key={ses.user.id} /> : <Login mode={new URLSearchParams(location.search).has("signup") || location.pathname === "/inscription" ? "signup" : "login"} />
+  // update49 · parcours d'accueil (vous → offre → entreprise → code) AVANT l'app, déduit des données serveur
+  return ses ? <Flow key={ses.user.id} ses={ses}><AknoApp key={ses.user.id} /></Flow> : <Login mode={new URLSearchParams(location.search).has("signup") || location.pathname === "/inscription" ? "signup" : "login"} />
 }

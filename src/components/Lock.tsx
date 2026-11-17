@@ -4,6 +4,7 @@ import { Delete, ScanFace } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { bioAvailable, checkCode, enableBio, getLock, isMissingGestureError, setCode, unlockBio } from "../lib/lock"
 import { supabase } from "../lib/supabase"
+import { FlowSteps } from "./auth/FlowShell"
 
 const buzz = () => { try { navigator.vibrate?.([30, 40, 30]) } catch { } }
 function Bot({ s = 64 }: { s?: number }) {
@@ -70,7 +71,7 @@ export function LockScreen({ uid, onUnlock }: { uid: string; onUnlock: () => voi
 }
 
 /** Création / changement du code (saisie + confirmation), puis proposition Face ID. */
-export function LockSetup({ uid, email, onDone }: { uid: string; email: string; onDone: (skipped?: boolean) => void }) {
+export function LockSetup({ uid, email, onDone, flow }: { uid: string; email: string; onDone: (skipped?: boolean) => void; /** update49 · dernière étape du parcours d'accueil */ flow?: boolean }) {
   const [step, setStep] = useState<"a" | "b" | "bio">("a"), [first, setFirst] = useState(""), [code, setC] = useState(""), [msg, setMsg] = useState(""), [canBio, setCanBio] = useState(false), ctl = useAnimationControls()
   useEffect(() => { bioAvailable().then(setCanBio) }, [])
   const key = async (d: string) => {
@@ -81,7 +82,8 @@ export function LockSetup({ uid, email, onDone }: { uid: string; email: string; 
   }
   const bio = async () => { try { await enableBio(uid, email); onDone() } catch { setMsg("Face ID non activé"); setTimeout(() => onDone(), 900) } }
   return <div className="fixed inset-0 z-[100] flex flex-col bg-black px-6 text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
-    <button onClick={() => onDone(true)} className="absolute right-5 top-[calc(env(safe-area-inset-top)+16px)] text-[15px] text-white/50">Plus tard</button>
+    {flow && <div className="absolute left-6 top-[calc(env(safe-area-inset-top)+22px)]"><FlowSteps i={4} compact /></div>}
+    <button onClick={() => onDone(true)} className="absolute right-5 top-[calc(env(safe-area-inset-top)+16px)] rounded-full px-2 py-1 text-[15px] text-white/50 transition-colors hover:text-white">Plus tard</button>
     <div className="mx-auto mt-[9vh]"><Bot s={56} /></div>
     {step === "bio" ? <div className="flex flex-1 flex-col items-center">
       <h1 className="mt-5 text-[22px] font-semibold tracking-[-0.02em]">Activer Face ID</h1>
@@ -92,7 +94,7 @@ export function LockSetup({ uid, email, onDone }: { uid: string; email: string; 
       <button onClick={() => onDone()} className="mb-6 mt-4 text-[15px] font-medium text-white/60">Pas maintenant</button>
     </div> : <div className="flex flex-1 flex-col items-center">
       <h1 className="mt-5 text-[22px] font-semibold tracking-[-0.02em]">{step === "a" ? "Créer un code d'accès" : "Confirmez le code"}</h1>
-      <p className="mt-2 text-[15px] text-white/50">6 chiffres</p>
+      <p className="mt-2 text-center text-[15px] text-white/50">{flow && step === "a" ? "6 chiffres pour ouvrir Akno sur cet appareil" : "6 chiffres"}</p>
       <div className="mt-8"><Dots n={code.length} ctl={ctl} /></div>
       <div className="mt-3 h-5 text-[14px] text-[#FF5F57]">{msg}</div>
       <div className="mb-10 mt-auto"><Pad onKey={key} onDel={() => setC(c => c.slice(0, -1))} /></div>
