@@ -108,7 +108,7 @@ export default function Offres({ mode, onClose, onDone, returnSession, flow }: {
               <section>
                 <Rise i={0}><h1 className="text-[32px] font-semibold leading-[1.05] tracking-[-0.04em] text-balance sm:text-[40px]">{expired ? "Reprenez avec Akno" : "Choisissez votre offre"}</h1></Rise>
                 <Rise i={1}><p className="mt-3 max-w-[540px] text-[15.5px] leading-[1.55] text-white/55 text-pretty">{trial
-                  ? <>{trialDays} jours d'essai gratuit sur toutes les offres. <span className="text-white">0 € aujourd'hui</span>, sans engagement, résiliable à tout moment depuis Akno.</>
+                  ? <>{trialDays} jours d'essai gratuit sur toutes les offres, sans engagement.</>
                   : <>Vos données sont conservées. Choisissez une offre pour reprendre là où vous en étiez.</>}</p></Rise>
 
                 {annual && <Rise i={2} className="mt-7"><IntervalToggle v={interval} set={setIntv} /></Rise>}

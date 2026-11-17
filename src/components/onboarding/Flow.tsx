@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
 import { AnimatePresence, MotionConfig, motion, useAnimate, useReducedMotion } from "motion/react"
 import type { Session } from "@supabase/supabase-js"
-import { Check, LogOut, RotateCcw } from "lucide-react"
+import { Check, ChevronDown, LogOut, RotateCcw } from "lucide-react"
 import { api, useAccountState } from "../../lib/accountApi"
 import { useProfileState, type Profile } from "../../lib/profile"
 import { CGV_VERSION } from "../../lib/legal"
@@ -16,7 +16,7 @@ import { hasLock } from "../../lib/lock"
 import { supabase } from "../../lib/supabase"
 import { Blob } from "../ui"
 import { EASE, Field, Ghost, Spinner, Submit } from "../auth/fields"
-import FlowShell, { AlertBox, FlowSteps, Outline } from "../auth/FlowShell"
+import FlowShell, { AlertBox, FlowSteps } from "../auth/FlowShell"
 import Offres from "../billing/Offres"
 import { LockSetup } from "../Lock"
 
@@ -133,21 +133,25 @@ function Vous({ p, ses }: { p: Profile | null; ses: Session }) {
     <motion.div {...rise(0)}><FlowSteps i={1} className="mb-7" /></motion.div>
     <motion.h1 {...rise(1)} className="text-[30px] font-semibold leading-[1.1] tracking-[-0.035em] text-balance">Parlons de vous</motion.h1>
     <motion.p {...rise(2)} className="mt-2.5 text-[15px] leading-[1.5] text-white/50 text-pretty">Akno s'en sert pour vous présenter au téléphone et sur vos devis.</motion.p>
-    <motion.form {...rise(3)} ref={scope} onSubmit={submit} noValidate className="mt-8 space-y-6">
+    <motion.form {...rise(3)} ref={scope} onSubmit={submit} noValidate className="mt-8 space-y-5">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field data-f="prenom" label="Prénom" name="given-name" autoComplete="given-name" placeholder="Julien" value={prenom} onChange={e => { setPrenom(e.target.value); clear("prenom") }} error={errs.prenom} required />
         <Field data-f="entreprise" label="Entreprise" name="organization" autoComplete="organization" placeholder="Martin Plomberie" value={entreprise} onChange={e => { setEntreprise(e.target.value); clear("entreprise") }} error={errs.entreprise} required />
       </div>
-      <fieldset>
-        <legend className="mb-2.5 px-0.5 text-[13px] font-medium text-white/70">Métier <span className="font-normal text-white/35">· facultatif</span></legend>
-        <div className="flex flex-wrap gap-1.5">{METIERS.map(m => <label key={m} className="cursor-pointer">
-          <input type="radio" name="metier" value={m} checked={metier === m} onChange={() => setMetier(m)} onClick={() => metier === m && setMetier("")} className="peer sr-only" />
-          <span className="flex h-8 items-center rounded-full border border-white/[.1] px-3 text-[13px] text-white/65 transition-[background-color,color,border-color,transform] duration-150 hover:border-white/25 hover:text-white active:scale-[.96] peer-checked:border-white peer-checked:bg-white peer-checked:font-medium peer-checked:!text-black peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-white/60">{m}</span>
-        </label>)}</div>
+      {/* update50 · une liste déroulante au lieu de 13 pastilles : même choix, écran plus calme */}
+      <div className="group/f">
+        <label htmlFor="metier" className="mb-2 flex items-baseline gap-1.5 px-0.5 text-[13px] font-medium text-white/70 transition-colors group-focus-within/f:text-white">Métier <span className="font-normal text-white/35">facultatif</span></label>
+        <div className="relative">
+          <select id="metier" name="metier" value={metier} onChange={e => setMetier(e.target.value)} className={`h-12 w-full appearance-none rounded-[12px] border border-white/[.09] bg-[#0E0E10] pl-4 pr-11 text-[15.5px] outline-none transition-[border-color,box-shadow,background-color] duration-200 [color-scheme:dark] hover:border-white/[.16] focus:border-white/45 focus:bg-[#121214] focus:shadow-[0_0_0_4px_rgba(255,255,255,.07)] ${metier ? "text-white" : "text-white/25"}`}>
+            <option value="">Choisir votre métier</option>
+            {METIERS.map(m => <option key={m} value={m} className="text-white">{m}</option>)}
+          </select>
+          <ChevronDown aria-hidden size={17} strokeWidth={1.8} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/40" />
+        </div>
         <AnimatePresence initial={false}>{metier === "Autre" && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: .25, ease: EASE }} className="overflow-hidden">
           <div className="pt-3"><Field label="Votre métier" name="metier-autre" placeholder="Façadier, vitrier, paysagiste…" value={autre} onChange={e => setAutre(e.target.value)} /></div>
         </motion.div>}</AnimatePresence>
-      </fieldset>
+      </div>
       <Field data-f="tel" label="Téléphone portable" name="tel" type="tel" autoComplete="tel" inputMode="tel" placeholder="06 12 34 56 78" hint="Pour vous transférer les appels urgents." value={tel} onChange={e => { setTel(fmtTel(e.target.value)); clear("tel") }} error={errs.tel} />
       {needCgv && <div>
         <label className="group/c flex cursor-pointer items-start gap-3 text-[13px] leading-[1.55] text-white/55">
@@ -200,45 +204,43 @@ function Entreprise({ p }: { p: Profile }) {
     if (Object.keys(x).length) { setErrs(x); return }
     void save({ onboarding_done: true, entreprise_siret: digits || null, entreprise_nom: f.nom.trim() || null, entreprise_adresse: f.adresse.trim() || null, entreprise_cp_ville: f.cpv.trim() || null, entreprise_tva: f.tva.trim() || null, entreprise_ape: f.ape.trim() || null, entreprise_ei: f.ei, avis_url: f.avis.trim() || null, assurance_nom: f.assureur.trim() || null, assurance_numero: f.police.trim() || null }, "save")
   }
-  const Group = ({ t, d, children }: { t: string; d?: string; children: ReactNode }) => <section className="space-y-4">
-    <div><h2 className="text-[15px] font-semibold tracking-[-0.01em]">{t}</h2>{d && <p className="mt-0.5 text-[12.5px] text-white/40">{d}</p>}</div>{children}</section>
+  // update50 · sections séparées par un filet fin : la structure porte l'information, rien de décoratif
+  const Group = ({ t, d, children }: { t: string; d?: string; children: ReactNode }) => <section className="space-y-4 border-t border-white/[.07] pt-6 first:border-t-0 first:pt-0">
+    <div className="flex items-baseline justify-between gap-4"><h2 className="text-[14px] font-semibold tracking-[-0.01em]">{t}</h2>{d && <p className="text-right text-[12.5px] text-white/40">{d}</p>}</div>{children}</section>
   return <FlowShell right={<OutBtn />} wide>
     <motion.div {...rise(0)}><FlowSteps i={3} className="mb-7" /></motion.div>
     <motion.h1 {...rise(1)} className="text-[30px] font-semibold leading-[1.1] tracking-[-0.035em] text-balance">Votre entreprise</motion.h1>
     <motion.p {...rise(2)} className="mt-2.5 text-[15px] leading-[1.5] text-white/50 text-pretty">Les mentions obligatoires de vos devis et factures. Saisissez votre SIRET : Akno remplit le reste.</motion.p>
-    <motion.form {...rise(3)} onSubmit={submit} noValidate className="mt-8 space-y-8">
+    <motion.form {...rise(3)} onSubmit={submit} noValidate className="mt-8 space-y-6">
       <Group t="Identité">
         <Field data-f="siret" label="SIRET" name="siret" inputMode="numeric" autoComplete="off" placeholder="14 chiffres" value={f.siret} onChange={set("siret")} error={errs.siret}
           hint={look === "" ? "Recherche automatique dans l'annuaire des entreprises." : undefined}
           trailing={look === "busy" ? <span className="flex h-9 w-9 items-center justify-center text-white/60"><Spinner /></span> : look === "ok" ? <span className="flex h-9 w-9 items-center justify-center text-[#30D158]"><Check size={18} strokeWidth={2.4} /></span> : undefined} />
         <AnimatePresence initial={false}>{(look === "ok" || look === "ko") && found && <motion.p key={look + found} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className={`-mt-1.5 overflow-hidden px-0.5 text-[12.5px] ${look === "ok" ? "text-[#30D158]" : "text-white/50"}`}>{look === "ok" ? `Trouvé : ${found}` : found}</motion.p>}</AnimatePresence>
         <Field label="Raison sociale" name="organization" autoComplete="organization" value={f.nom} onChange={set("nom")} />
-      </Group>
-      <Group t="Adresse du siège">
-        <Field label="Adresse" name="street-address" autoComplete="street-address" placeholder="12 rue des Lilas" value={f.adresse} onChange={set("adresse")} />
+        <Field label="Adresse du siège" name="street-address" autoComplete="street-address" placeholder="12 rue des Lilas" value={f.adresse} onChange={set("adresse")} />
         <Field label="Code postal et ville" name="postal" autoComplete="address-level2" placeholder="69003 Lyon" value={f.cpv} onChange={set("cpv")} />
-      </Group>
-      <Group t="TVA">
         <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
           <Field label="N° de TVA intracommunautaire" name="tva" placeholder="FR12 345678901" value={f.tva} onChange={set("tva")} />
           <Field label="Code APE" name="ape" placeholder="43.21A" value={f.ape} onChange={set("ape")} />
         </div>
       </Group>
-      <Group t="Assurance décennale" d="Obligatoire sur les devis du bâtiment.">
+      <Group t="Assurance décennale" d="Obligatoire sur les devis du bâtiment">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Assureur" name="assureur" placeholder="AXA, MAAF, SMABTP…" value={f.assureur} onChange={set("assureur")} />
           <Field label="N° de police" name="police" value={f.police} onChange={set("police")} />
         </div>
       </Group>
-      <Group t="Avis Google" d="Facultatif. Akno pourra l'envoyer à vos clients après un chantier.">
-        <Field data-f="avis" label="Lien de votre fiche d'avis" name="avis" type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={f.avis} onChange={set("avis")} error={errs.avis} />
+      <Group t="Avis Google" d="Facultatif">
+        <Field data-f="avis" label="Lien de votre fiche d'avis" name="avis" type="url" inputMode="url" placeholder="https://g.page/r/…/review" hint="Akno l'enverra à vos clients après un chantier." value={f.avis} onChange={set("avis")} error={errs.avis} />
       </Group>
       <AnimatePresence initial={false}>{alert && <AlertBox key={alert} t={alert} />}</AnimatePresence>
-      <div className="space-y-4 pt-1">
+      <div className="pt-2">
         <Submit busy={busy === "save"} busyLabel="Enregistrement…">Enregistrer et continuer</Submit>
-        <div className="rounded-[16px] border border-white/[.07] bg-white/[.02] p-4 text-[13px] leading-[1.5] text-white/50">
-          Pas votre SIRET sous la main ? Vous pourrez tout compléter plus tard dans Paramètres › Entreprise. Ces mentions seront nécessaires pour envoyer des devis conformes.
-          <Outline className="mt-3 h-10 w-full text-[14px]" disabled={!!busy} onClick={() => void save({ onboarding_done: true }, "later")}>{busy === "later" ? <Spinner /> : null}Compléter plus tard</Outline>
+        {/* update50 · « plus tard » en lien discret, une seule phrase d'explication */}
+        <div className="mt-4 flex flex-col items-center gap-1 text-center">
+          <Ghost onClick={() => { if (!busy) void save({ onboarding_done: true }, "later") }} className="inline-flex h-9 items-center gap-2 px-2">{busy === "later" ? <Spinner /> : null}Compléter plus tard</Ghost>
+          <p className="text-[12.5px] text-white/35">Modifiable à tout moment dans Paramètres › Entreprise.</p>
         </div>
       </div>
     </motion.form>

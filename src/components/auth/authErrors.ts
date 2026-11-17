@@ -1,5 +1,11 @@
 /* update45 · Messages d'erreur Supabase Auth traduits en français clair.
-   L'erreur brute part toujours dans la console pour le diagnostic. */
+   L'erreur brute part toujours dans la console pour le diagnostic.
+   update50 · supabase-js range TOUTE réponse 5xx du serveur sous « AuthRetryableFetchError » :
+   avant, une erreur serveur (ex. base de données qui refuse la création du compte) s'affichait
+   « Connexion au serveur impossible ». On distingue maintenant vrai problème réseau (status 0)
+   et erreur côté serveur (status ≥ 500), qui est aussi remontée au monitoring. */
+import { reportClientError } from "../../lib/monitoring"
+
 export type AuthCtx = "login" | "signup" | "forgot" | "reset" | "resend"
 
 type AnyErr = { code?: string; message?: string; status?: number; name?: string } | null | undefined
@@ -10,8 +16,19 @@ export function authErrorFr(err: unknown, ctx: AuthCtx): string {
   const code = String(e.code || ""), msg = String(e.message || ""), st = Number(e.status || 0)
   const is = (...c: string[]) => c.includes(code)
 
-  // Réseau : fetch impossible, hors ligne, CORS, délai dépassé
-  if (e.name === "AuthRetryableFetchError" || e.name === "TypeError" || (st === 0 && /fetch|network|load failed|timeout/i.test(msg)) || (typeof navigator !== "undefined" && navigator.onLine === false))
+  // Hors ligne : on le dit clairement, quel que soit le reste
+  if (typeof navigator !== "undefined" && navigator.onLine === false)
+    return "Vous semblez hors ligne. Vérifiez votre connexion internet, puis réessayez."
+  // Erreur côté serveur (5xx) : ce n'est PAS un problème de réseau chez l'utilisateur
+  if (st >= 500) {
+    reportClientError(new Error(`auth ${ctx} ${st}: ${msg}`.slice(0, 300)), { ctx, status: st, code })
+    if (st === 504 || /timeout|timed out/i.test(msg)) return "Le serveur met trop de temps à répondre. Réessayez dans un instant."
+    return ctx === "signup" ? "Nous n'avons pas pu créer votre compte : erreur de notre côté. Réessayez dans quelques minutes."
+      : ctx === "login" ? "Connexion impossible : erreur de notre côté. Réessayez dans quelques minutes."
+      : "Le service est momentanément indisponible. Réessayez dans quelques minutes."
+  }
+  // Réseau : fetch impossible, CORS, délai dépassé (status 0)
+  if (e.name === "AuthRetryableFetchError" || e.name === "TypeError" || /failed to fetch|networkerror|load failed|network request failed/i.test(msg))
     return "Connexion au serveur impossible. Vérifiez votre réseau, puis réessayez."
   if (is("signup_disabled", "email_provider_disabled") || /signups? not allowed/i.test(msg))
     return "Les inscriptions sont momentanément fermées. Réessayez plus tard ou contactez-nous."

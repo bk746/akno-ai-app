@@ -47,10 +47,10 @@ const LV = [null, { l: "Trop court", c: "#FF453A" }, { l: "Faible", c: "#FFB340"
 
 export function Strength({ pw, id }: { pw: string; id?: string }) {
   const s = pwScore(pw), lv = LV[s]
-  return <div id={id} className="mt-2.5 flex items-center gap-3 px-0.5" aria-live="polite">
+  return <div id={id} className={`mt-2.5 flex items-center gap-3 px-0.5 transition-opacity duration-300 ${s ? "opacity-100" : "opacity-0"}`} aria-live="polite">
     <div className="flex flex-1 gap-1.5" aria-hidden>{[1, 2, 3, 4].map(i => <span key={i} className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/[.08]">
       <motion.span className="block h-full origin-left rounded-full" initial={false} animate={{ scaleX: s >= i ? 1 : 0, backgroundColor: lv?.c || "#FFFFFF" }} transition={{ duration: .35, ease: EASE }} /></span>)}</div>
-    <span className="w-[74px] text-right text-[12px] tabular-nums" style={{ color: lv ? lv.c : "rgba(255,255,255,.4)" }}>{lv ? lv.l : "8 car. min."}</span>
+    <span className="w-[74px] text-right text-[12px] tabular-nums" style={{ color: lv ? lv.c : "rgba(255,255,255,.4)" }}>{lv ? lv.l : ""}</span>
   </div>
 }
 

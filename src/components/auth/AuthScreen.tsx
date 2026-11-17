@@ -4,7 +4,7 @@
    pour tout le monde (e-mail, Google ou Apple). Mot de passe oublié / nouveau mot de passe : Login.tsx (inchangés). */
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { AnimatePresence, MotionConfig, motion, useAnimate, useReducedMotion } from "motion/react"
-import { Check, MailCheck } from "lucide-react"
+import { MailCheck } from "lucide-react"
 import { supabase } from "../../lib/supabase"
 import { Blob } from "../ui"
 import { EASE, Field, Ghost, PasswordField, Spinner, Strength, Submit } from "./fields"
@@ -90,7 +90,11 @@ export default function AuthScreen({ initial = "signup", onForgot }: { initial?:
         if (error) fail({}, { t: authErrorFr(error, "login") })
         return
       }
-      const { data, error } = await supabase.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: home() } })
+      // update50 · le déclencheur SQL d'inscription (handle_new_user) écrit prenom / nom_entreprise, colonnes NOT NULL :
+      // sans ces métadonnées il insérait NULL → erreur 500 → « Connexion au serveur impossible ».
+      // Valeurs vides (un espace, ignoré partout grâce à trim) en attendant l'étape « Parlons de vous », qui les remplace.
+      // Correctif côté base : supabase/migrations/20261117_06_update50_signup_trigger.sql (indispensable pour Google / Apple).
+      const { data, error } = await supabase.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: home(), data: { prenom: " ", entreprise: " " } } })
       // Avec la protection anti-énumération, un e-mail déjà inscrit revient sans erreur mais avec identities = []
       const exists = error ? /^(user_already_exists|email_exists|identity_already_exists)$/.test(String(error.code)) || /already/i.test(error.message) : !!data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0
       if (exists) fail({}, { t: "Un compte existe déjà avec cet e-mail.", action: { l: "Se connecter", on: () => switchMode("login") } })
@@ -115,27 +119,20 @@ export default function AuthScreen({ initial = "signup", onForgot }: { initial?:
       <AnimatePresence mode="wait" initial={false}>
         {sent ? <motion.div key="sent" {...trans}><Sent email={email.trim()} cool={cool} busy={busy === "form"} resent={resent} alert={alert} onResend={resend} onBack={() => setSent(false)} onLogin={() => { setSent(false); switchMode("login") }} /></motion.div>
         : <motion.div key="form" {...trans}>
-          <div className="mb-7 h-4">{signup ? <FlowSteps i={0} /> : null}</div>
+          <div className="mb-8 h-4">{signup ? <FlowSteps i={0} /> : null}</div>
           <AnimatePresence mode="wait" initial={false}>
             <motion.div key={mode} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: .22, ease: EASE }}>
               <h1 className="text-[30px] font-semibold leading-[1.1] tracking-[-0.035em] text-balance">{signup ? "Créez votre espace Akno" : "Bon retour sur Akno"}</h1>
-              <p className="mt-2.5 text-[15px] leading-[1.5] text-white/50 text-pretty">{signup ? "30 jours d'essai gratuit, 0 € aujourd'hui." : "Connectez-vous pour retrouver votre espace."}</p>
+              <p className="mt-2.5 text-[15px] leading-[1.5] text-white/50 text-pretty">{signup ? "30 jours d'essai gratuit, sans engagement." : "Connectez-vous pour retrouver votre espace."}</p>
             </motion.div>
           </AnimatePresence>
 
-          <div role="tablist" aria-label="Connexion ou création de compte" className="mt-7 grid grid-cols-2 rounded-full bg-white/[.05] p-1">
-            {(["signup", "login"] as Mode[]).map(m => <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => switchMode(m)} className={`relative h-9 rounded-full text-[13.5px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 ${mode === m ? "text-black" : "text-white/60 hover:text-white"}`}>
-              {mode === m && <motion.span layoutId="auth-tab" className="absolute inset-0 rounded-full bg-white" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
-              <span className="relative">{m === "signup" ? "Créer un compte" : "Se connecter"}</span>
-            </button>)}
-          </div>
-
           {providers.length > 0 && <>
-            <div className="mt-6 space-y-2.5">{providers.map(p => <Outline key={p} className="w-full" disabled={!!busy} onClick={() => oauth(p)}>{busy === p ? <Spinner /> : p === "google" ? <GoogleG /> : <AppleLogo />}Continuer avec {NAME[p]}</Outline>)}</div>
+            <div className="mt-8 space-y-2.5">{providers.map(p => <Outline key={p} className="w-full" disabled={!!busy} onClick={() => oauth(p)}>{busy === p ? <Spinner /> : p === "google" ? <GoogleG /> : <AppleLogo />}Continuer avec {NAME[p]}</Outline>)}</div>
             <div className="my-6 flex items-center gap-3 text-[12px] text-white/35"><span className="h-px flex-1 bg-white/[.08]" />ou avec votre e-mail<span className="h-px flex-1 bg-white/[.08]" /></div>
           </>}
 
-          <form onSubmit={submit} noValidate method="post" action="#" className={`${providers.length ? "" : "mt-7"} space-y-5`}>
+          <form onSubmit={submit} noValidate method="post" action="#" className={`${providers.length ? "" : "mt-8"} space-y-5`}>
             <Field data-f="email" label="E-mail professionnel" name="email" type="email" autoComplete={signup ? "email" : "username"} inputMode="email" autoCapitalize="none" placeholder="vous@entreprise.fr" value={email} onChange={e => { setEmail(e.target.value); setErrs(x => ({ ...x, email: undefined })) }} error={errs.email} required />
             <div>
               <PasswordField data-f="pw" label="Mot de passe" name="password" autoComplete={signup ? "new-password" : "current-password"} placeholder={signup ? "8 caractères minimum" : "Votre mot de passe"} value={pw} onChange={e => { setPw(e.target.value); setErrs(x => ({ ...x, pw: undefined })) }} error={errs.pw} required
@@ -144,8 +141,10 @@ export default function AuthScreen({ initial = "signup", onForgot }: { initial?:
             </div>
             <AnimatePresence initial={false}>{alert && <AlertBox key={alert.t} t={alert.t} action={alert.action} />}</AnimatePresence>
             <div className="pt-1"><Submit busy={busy === "form"} busyLabel={signup ? "Création…" : "Connexion…"}>{signup ? "Créer mon compte" : "Se connecter"}</Submit></div>
-            {signup && <ul className="flex flex-wrap gap-x-4 gap-y-1.5 pt-1 text-[12.5px] text-white/40">{["30 jours offerts", "0 € aujourd'hui", "Sans engagement"].map(t => <li key={t} className="flex items-center gap-1.5"><Check size={13} strokeWidth={2.2} className="text-white/55" />{t}</li>)}</ul>}
           </form>
+          {/* update50 · un seul lien discret au lieu des onglets : moins d'éléments, même parcours */}
+          <p className="mt-6 text-center text-[13.5px] text-white/45">{signup ? "Déjà un compte ?" : "Pas encore de compte ?"}{" "}
+            <button type="button" onClick={() => switchMode(signup ? "login" : "signup")} className="rounded font-medium text-white underline decoration-white/25 underline-offset-[3px] transition-colors hover:decoration-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60">{signup ? "Se connecter" : "Créer un compte"}</button></p>
         </motion.div>}
       </AnimatePresence>
     </div>

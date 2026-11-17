@@ -81,23 +81,37 @@ export function LockSetup({ uid, email, onDone, flow }: { uid: string; email: st
     await setCode(uid, c); if (canBio && !getLock(uid)?.cred) setStep("bio"); else onDone()
   }
   const bio = async () => { try { await enableBio(uid, email); onDone() } catch { setMsg("Face ID non activé"); setTimeout(() => onDone(), 900) } }
-  return <div className="fixed inset-0 z-[100] flex flex-col bg-black px-6 text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
-    {flow && <div className="absolute left-6 top-[calc(env(safe-area-inset-top)+22px)]"><FlowSteps i={4} compact /></div>}
-    <button onClick={() => onDone(true)} className="absolute right-5 top-[calc(env(safe-area-inset-top)+16px)] rounded-full px-2 py-1 text-[15px] text-white/50 transition-colors hover:text-white">Plus tard</button>
-    <div className="mx-auto mt-[9vh]"><Bot s={56} /></div>
-    {step === "bio" ? <div className="flex flex-1 flex-col items-center">
+  // update50 · sur ordinateur, le code se tape aussi au clavier (chiffres, retour arrière)
+  const keyRef = useRef(key); keyRef.current = key
+  useEffect(() => {
+    if (step === "bio") return
+    const f = (e: KeyboardEvent) => { if (/^[0-9]$/.test(e.key)) void keyRef.current(e.key); else if (e.key === "Backspace") setC(c => c.slice(0, -1)) }
+    addEventListener("keydown", f); return () => removeEventListener("keydown", f)
+  }, [step])
+  // update50 · dans le parcours : même en-tête que les autres étapes (logo, « Plus tard »), bloc centré sur grand écran
+  return <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-black px-6 text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+    {flow ? <header className="flex h-10 shrink-0 items-center justify-between gap-3 pt-5 sm:px-4">
+      <span className="flex items-center gap-2.5" aria-label="Akno"><svg viewBox="0 0 267 279" width={26} height={26 * 279 / 267} aria-hidden><path d={BLOB} fill="#E6E6E6" /><ellipse cx={106.5} cy={104.5} rx={22.5} ry={31} fill="#000" /><ellipse cx={169.5} cy={104.5} rx={22.5} ry={31} fill="#000" /></svg><span className="text-[17px] font-semibold tracking-[-0.03em]">Akno</span></span>
+      <button onClick={() => onDone(true)} className="rounded-full px-3 py-1.5 text-[14px] font-medium text-white/55 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-white/60">Plus tard</button>
+    </header>
+    : <button onClick={() => onDone(true)} className="absolute right-5 top-[calc(env(safe-area-inset-top)+16px)] rounded-full px-2 py-1 text-[15px] text-white/50 transition-colors hover:text-white">Plus tard</button>}
+    <div className={flow ? "flex flex-1 flex-col sm:justify-center" : "contents"}>
+    {flow && <div className="mx-auto mt-[6vh] sm:mt-0"><FlowSteps i={4} compact /></div>}
+    <div className={`mx-auto ${flow ? "mt-8" : "mt-[9vh]"}`}><Bot s={56} /></div>
+    {step === "bio" ? <div className={`flex flex-1 flex-col items-center ${flow ? "sm:flex-none" : ""}`}>
       <h1 className="mt-5 text-[22px] font-semibold tracking-[-0.02em]">Activer Face ID</h1>
       <p className="mt-2 text-center text-[15px] text-white/50">Déverrouillez Akno d'un regard.</p>
       <ScanFace size={72} strokeWidth={1.2} className="mt-12" />
       <div className="mt-3 h-5 text-[14px] text-[#FF5F57]">{msg}</div>
       <button onClick={bio} className="mt-auto h-[52px] w-full max-w-[360px] rounded-full bg-white text-[16px] font-semibold text-black">Activer Face ID</button>
       <button onClick={() => onDone()} className="mb-6 mt-4 text-[15px] font-medium text-white/60">Pas maintenant</button>
-    </div> : <div className="flex flex-1 flex-col items-center">
-      <h1 className="mt-5 text-[22px] font-semibold tracking-[-0.02em]">{step === "a" ? "Créer un code d'accès" : "Confirmez le code"}</h1>
-      <p className="mt-2 text-center text-[15px] text-white/50">{flow && step === "a" ? "6 chiffres pour ouvrir Akno sur cet appareil" : "6 chiffres"}</p>
+    </div> : <div className={`flex flex-1 flex-col items-center ${flow ? "sm:flex-none" : ""}`}>
+      <h1 className={`mt-5 font-semibold tracking-[-0.03em] ${flow ? "text-[26px]" : "text-[22px]"}`}>{step === "a" ? "Créer un code d'accès" : "Confirmez le code"}</h1>
+      <p className="mt-2 text-center text-[15px] text-white/50">{flow && step === "a" ? "6 chiffres pour ouvrir Akno sur cet appareil." : "6 chiffres"}</p>
       <div className="mt-8"><Dots n={code.length} ctl={ctl} /></div>
       <div className="mt-3 h-5 text-[14px] text-[#FF5F57]">{msg}</div>
-      <div className="mb-10 mt-auto"><Pad onKey={key} onDel={() => setC(c => c.slice(0, -1))} /></div>
+      <div className={flow ? "mb-10 mt-auto sm:mb-0 sm:mt-8" : "mb-10 mt-auto"}><Pad onKey={key} onDel={() => setC(c => c.slice(0, -1))} /></div>
     </div>}
+    </div>
   </div>
 }
