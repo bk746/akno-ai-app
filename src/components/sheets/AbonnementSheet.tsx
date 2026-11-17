@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { createPortal } from "react-dom"
 import { Btn, Card, Chip, GREEN, AMBER, RED, GREY, Sheet, tx, useC } from "../ui"
-import { api, reloadAccount, useAccount } from "../../lib/accountApi"
+import { api, openUpgrade, reloadAccount, rights, useAccount } from "../../lib/accountApi"
 import Offres from "../billing/Offres"
 
 /* update45 · Abonnement : offres Stripe, essai 30 jours, portail client, usage du mois.
@@ -32,6 +32,11 @@ export default function AbonnementSheet({ close }: { close: () => void }) {
       </div>}
     </Card>
     {e?.hasStripeCustomer && <Btn className="mt-4 w-full" disabled={busy} onClick={portal}>{busy ? "Ouverture…" : "Gérer mon abonnement (carte, factures, résiliation)"}</Btn>}
+    {/* update48 · montée en gamme directe sur l'abonnement en cours (même pendant l'essai) */}
+    {rights(a).canUpgrade && (!e?.reception || e?.plan === "bureau") && <div className="mt-4 flex flex-col gap-2">
+      {!e?.reception && <Btn primary className="w-full" onClick={() => openUpgrade("reception")}>Ajouter la Réceptionniste IA</Btn>}
+      {e?.plan === "bureau" && <Btn className="w-full" onClick={() => openUpgrade("clients")}>Passer à l'offre Clients</Btn>}
+    </div>}
     {showPicker && <div className="mt-5"><div className={`mb-3 px-1 ${tx.cap}`}>{e?.trialEligible !== false ? `${a?.billing.trial_days || 30} jours d'essai gratuit · 0 € aujourd'hui` : "Choisir une offre"}{a?.billing.annual ? " · -20 % en annuel" : ""}</div><Btn primary className="w-full" onClick={() => setOffers(true)}>Voir les offres</Btn></div>}
     {offers && createPortal(<Offres mode="sheet" onClose={() => setOffers(false)} onDone={() => { setOffers(false); close() }} />, document.body)}
     {err && <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{err}</p>}

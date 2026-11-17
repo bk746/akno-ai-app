@@ -23,6 +23,8 @@ export type Entitlements = {
   features: string[]; trialEndsAt: string | null; periodEnd: string | null; cancelAtPeriodEnd: boolean; hasStripeCustomer: boolean
   /** update46 · essai de 30 jours encore possible (jamais abonné) */
   trialEligible?: boolean
+  /** update48 · compte avec plan_override : rien n'est verrouillé dans l'interface */
+  override?: boolean
   quotas: { devis_drafts: number; voice_sessions_day: number; voice_minutes: number; sms: number }
 }
 export type AccountStatus = {
@@ -33,6 +35,7 @@ export type AccountStatus = {
 }
 
 let cache: AccountStatus | null = null
+let settled = false
 let inflight: Promise<void> | null = null
 const subs = new Set<() => void>()
 
@@ -45,6 +48,7 @@ export function reloadAccount() {
       cache = null
     }
     inflight = null
+    settled = true
     subs.forEach(f => f())
   })()
   return inflight
@@ -65,3 +69,21 @@ export function useAccount() {
 }
 
 export const canUse = (a: AccountStatus | null, f: string) => !a || !a.entitlements.billingEnabled || (a.entitlements.access && a.entitlements.features.includes(f))
+
+/* update48 · droits appliqués à l'interface.
+   Tout reste ouvert : compte non chargé / serveur absent, paiement désactivé, ou plan_override. */
+export type Rights = { ready: boolean; has: (f: string) => boolean; reception: boolean; clients: boolean; canUpgrade: boolean; plan: Plan | null; annual: boolean }
+export function rights(a: AccountStatus | null): Rights {
+  const e = a?.entitlements
+  const open = !e || !e.billingEnabled || !!e.override
+  const has = (f: string) => open || (!!e && e.access && e.features.includes(f))
+  // Montée en gamme directe : abonnement Stripe en essai ou actif (pas d'override, pas d'impayé)
+  const canUpgrade = !!e && e.billingEnabled && !e.override && e.hasStripeCustomer && (e.status === "trial" || e.status === "active") && !e.cancelAtPeriodEnd
+  return { ready: settled, has, reception: has("reception"), clients: has("avis") && has("leads"), canUpgrade, plan: e?.plan ?? null, annual: !!a?.billing.annual }
+}
+export function useRights() { return rights(useAccount()) }
+export const accountSettled = () => settled
+
+/** Ouvre l'écran « Ajouter l'option » / « Passer en Clients » (monté une fois dans l'app). */
+export type UpgradeKind = "reception" | "clients"
+export const openUpgrade = (kind: UpgradeKind) => dispatchEvent(new CustomEvent("akno-upgrade", { detail: kind }))

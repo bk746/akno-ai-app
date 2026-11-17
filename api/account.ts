@@ -4,6 +4,7 @@ import { billingEnabled, loadEntitlements, PLAN_LABEL, TRIAL_DAYS, type PlanId }
 import { dayKey, monthKey, rateLimit } from "./_lib/limits.js"
 import { annualAvailable, priceFor, priceIds, stripe, STRIPE_VERSION_ELEMENTS, type Interval } from "./_lib/stripe.js"
 import { syncSubscription } from "./_lib/stripeSync.js"
+import { upgradeSubscription } from "./_lib/upgrade.js"
 import { sendSmsMetered, smsConfigured } from "./_lib/sms.js"
 import { reportError } from "./_lib/monitoring.js"
 
@@ -166,6 +167,24 @@ async function checkoutSync(sb: import("@supabase/supabase-js").SupabaseClient, 
   return { status: 200, body: { ok: true, complete: done, entitlements: ent as unknown as Json } }
 }
 
+/* update48 · Ajouter la Réceptionniste IA / passer en Clients sur l'abonnement EXISTANT (même pendant l'essai).
+   confirm=false → aperçu des montants ; confirm=true → modification Stripe + synchro directe des droits (sans attendre le webhook). */
+async function upgrade(sb: import("@supabase/supabase-js").SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+  if (!billingEnabled()) return { status: 503, body: { error: "Paiement non activé." } }
+  const kind = body.add === "reception" ? "reception" : body.add === "clients" ? "clients" : null
+  if (!kind) return { status: 400, body: { error: "Option inconnue." } }
+  let admin
+  try { admin = adminClient() } catch { return { status: 503, body: { error: "SUPABASE_SERVICE_ROLE_KEY manquante." } } }
+  const { data: row } = await admin.from("subscriptions").select("stripe_subscription_id, stripe_customer_id").eq("artisan_id", userId).maybeSingle()
+  if (!row?.stripe_subscription_id) return { status: 409, body: { error: "Aucun abonnement en cours : choisissez d'abord une offre.", offers: true } }
+  const r = await upgradeSubscription(String(row.stripe_subscription_id), kind, { confirm: body.confirm === true, customer: String(row.stripe_customer_id || "") || undefined, artisanId: userId })
+  if (!r.ok) return { status: r.status, body: { error: r.error } }
+  if (body.confirm !== true) return { status: 200, body: { ok: true, preview: r.preview as unknown as Json } }
+  try { await syncSubscription(String(row.stripe_subscription_id), userId) } catch (e) { await reportError(e, { route: "account", action: "upgrade_sync" }) }
+  const ent = await loadEntitlements(sb, userId)
+  return { status: 200, body: { ok: true, done: true, preview: r.preview as unknown as Json, entitlements: ent as unknown as Json } }
+}
+
 async function portal(userId: string, headers?: Headers): Promise<ApiResult> {
   if (!billingEnabled()) return { status: 503, body: { error: "Le paiement en ligne n'est pas encore activé." } }
   let admin
@@ -249,6 +268,7 @@ export async function handleAccount(authorization?: string, body?: unknown, head
     if (!await rateLimit(userId, "account", 20)) return { status: 429, body: { error: "Trop de requêtes. Patientez une minute." } }
     if (action === "checkout") return await checkout(supabase, userId, session.email, input, headers)
     if (action === "checkout_sync") return await checkoutSync(supabase, userId, input)
+    if (action === "upgrade") return await upgrade(supabase, userId, input)
     if (action === "portal") return await portal(userId, headers)
     if (action === "save_calcom") return await saveCalcom(userId, input)
     if (action === "siret_lookup") return await siretLookup(input)

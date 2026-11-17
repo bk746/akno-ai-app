@@ -3,7 +3,9 @@ import VoiceCall from "./VoiceCall"
 import { formatVoiceTimings, isVoiceDebugEnabled, setVoiceDebugEnabled, subscribeVoiceTimings } from "../lib/voice/timing"
 import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
 import { buildDoc, missingLegal } from "../lib/devisDoc"
-import { useAccount } from "../lib/accountApi"
+import { openUpgrade, useAccount, useRights } from "../lib/accountApi"
+import { LockTag, ReceptionLocked, UpgradeHost } from "./billing/Upgrade"
+import { Lock as LockIco } from "lucide-react"
 import { useProfile } from "../lib/profile"
 import EntrepriseSheet from "./sheets/EntrepriseSheet"
 import AbonnementSheet from "./sheets/AbonnementSheet"
@@ -61,14 +63,14 @@ const findC = (n: string) => CL.find(c => c.key === ckey(n))
 const tel = (n: string) => { const p = PHONES.get(n); if (p) return p; const f = findC(n); if (f) return f.phone.replace(/ /g, ""); return "" } // update44 : plus de faux numéro inventé quand le client n'a pas de téléphone connu
 
 function Side() {
-  const { page, go, s } = useC()
+  const { page, go, s } = useC(), rr = useRights()
   const nDev = s.devis.filter(toValidate).length
-  const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}<span className="ml-auto flex items-center gap-2">{id === "dev" && nDev > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}{on && <span className="h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></span></motion.button> }
+  const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}<span className="ml-auto flex items-center gap-2">{id === "rec" && !rr.reception && <LockIco size={13} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" />}{id === "dev" && nDev > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}{on && <span className="h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></span></motion.button> }
   return <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/[.07] px-4 py-6">
     <div className="flex h-12 items-center px-3"><img src="/logo.png" alt="Akno" className="h-9" /></div>
     <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}</nav>
     <div className={`mt-8 px-3 ${tx.cap}`}>Agents</div>
-    <div className="mt-3 space-y-3 px-3">{agents.map(a => <button key={a} onClick={() => go(a)} className="flex w-full items-center gap-3 text-[13px] text-white/70"><Blob c={A[a].c} s={16} />{A[a].n}<span className="ml-auto"><Dot c={s.settings.agents[a] ? GREEN : GREY} /></span></button>)}</div>
+    <div className="mt-3 space-y-3 px-3">{agents.map(a => <button key={a} onClick={() => go(a)} className="flex w-full items-center gap-3 text-[13px] text-white/70"><Blob c={A[a].c} s={16} />{A[a].n}<span className="ml-auto">{a === "rec" && !rr.reception ? <LockIco size={12} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" /> : <Dot c={s.settings.agents[a] ? GREEN : GREY} />}</span></button>)}</div>
     <div className="mt-auto"><It id="set" l="Paramètres" c="#fff" /><div className="mt-3 flex items-center gap-3 border-t border-white/[.07] px-3 pt-4"><Av n={meName(s)} /><div><div className="text-[13px] font-medium">{meName(s)}</div><div className="text-[12px] text-white/50">{s.settings.company || ""}</div></div></div></div>
   </aside>
 }
@@ -79,14 +81,14 @@ function Capsule({ k, sm }: { k: K; sm?: boolean }) {
   return <div className={`flex items-center ${sm ? "gap-2" : "gap-4"}`}><button data-hit aria-label={`Discuter avec l'IA ${A[k].n}`} title="Assistant" onClick={() => setChat(!chat)} className={`relative flex ${sm ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-[10px] bg-[#141416] text-white/55 hover:text-white`}><Sparkles size={sm ? 16 : 18} strokeWidth={1.5} /><span className="absolute right-[5px] top-[5px] h-[6px] w-[6px] rounded-full" style={{ background: A[k].c }} /></button>{!sm && <button aria-label={PLUS[k]} title={`${PLUS[k]} (N)`} onClick={() => modal({ kind: plusKind[k] })} className={`${sm ? "flex h-8 w-8 rounded-[10px]" : "-mx-[11px] flex h-11 w-11"} items-center justify-center text-white hover:text-white/80`}><Plus size={sm ? 20 : 22} strokeWidth={1.5} /></button>}</div>
 }
 function Top() {
-  const { page, q, setQ, modal } = useC(), ref = useRef<HTMLInputElement>(null)
+  const { page, q, setQ, modal } = useC(), ref = useRef<HTMLInputElement>(null), rr = useRights()
   useEffect(() => { const f = (e: KeyboardEvent) => { const t = e.target as HTMLElement, typing = /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable
     if (((e.metaKey || e.ctrlKey) && e.key === "k") || (!typing && e.key === "/")) { e.preventDefault(); ref.current?.focus() }
     else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === "n" || e.key === "N") && page !== "set" && !document.querySelector("[role=dialog]")) { e.preventDefault(); modal({ kind: plusKind[page] }) } }
     addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [page, modal])
   return <div className="flex h-16 shrink-0 items-center border-b border-white/[.07] bg-black px-8"><span className={tx.title}>{page === "set" ? "Paramètres" : A[page].n}</span>
     <div className="ml-auto flex items-center gap-4"><label className="flex h-9 w-[240px] items-center gap-2 rounded-full bg-white/[.07] px-3 text-[13px] text-white/50"><Search size={16} strokeWidth={SW} className="shrink-0" /><input ref={ref} value={q} onChange={e => setQ(e.target.value)} placeholder="Rechercher" className="w-full min-w-0 bg-transparent text-white outline-none placeholder:text-white/40" />{q ? <button aria-label="Effacer" onClick={() => setQ("")}><X size={14} /></button> : <kbd className="ml-auto rounded-[6px] bg-white/[.08] px-1.5 font-sans text-[11px] text-white/50">/</kbd>}</label>
-      {page !== "set" && <Capsule k={page} />}</div></div>
+      {page !== "set" && !(page === "rec" && !rr.reception) && <Capsule k={page} />}</div></div>
 }
 function Num({ n, u, money }: { n: number; u?: string; money?: boolean }) {
   const reduce = useReducedMotion(), [v, setV] = useState(0), from = useRef(0)
@@ -128,7 +130,7 @@ const NAV_C: Record<P, string> = { rec: "#fff", ag: A.ag.c, rel: A.rel.c, dev: A
 const NAV_L: Record<P, string> = { rec: "Réception", ag: "Agenda", rel: "Relance", dev: "Devis", set: "Réglages" }
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
 function TabBar() {
-  const { page, go, s } = useC()
+  const { page, go, s } = useC(), rr = useRights()
   const nDev = s.devis.filter(toValidate).length
   const ids: P[] = ["rec", "ag", "rel", "dev", "set"]
   return <nav aria-label="Navigation principale" className="pointer-events-none fixed inset-x-4 z-30 flex justify-center" style={{ bottom: "max(calc(var(--sab) - 10px), 12px)" }}>
@@ -136,7 +138,7 @@ function TabBar() {
       {ids.map(id => { const on = id === page; return <motion.button key={id} onClick={() => go(id)} aria-label={NAV_L[id]} aria-current={on ? "page" : undefined} whileTap={{ scale: .94 }}
         className={`relative flex h-full flex-1 flex-col items-center justify-center gap-[5px] rounded-full transition-colors ${on ? "text-white" : "text-white/60"}`}>
         {on && <motion.span layoutId="tab-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/[.10]" />}
-        <span className="relative">{id === "set" ? <Me size={24} on={on} /> : id === "rec" ? <span className="flex h-6 w-6 items-center justify-center"><img src="/logo.png" alt="" className={`h-[18px] w-auto transition-opacity ${on ? "opacity-100" : "opacity-60"}`} /></span> : <NI d={NAV_I[id]} size={24} />}{id === "dev" && nDev > 0 && <span className="absolute -right-2.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}</span>
+        <span className="relative">{id === "set" ? <Me size={24} on={on} /> : id === "rec" ? <span className="flex h-6 w-6 items-center justify-center"><img src="/logo.png" alt="" className={`h-[18px] w-auto transition-opacity ${on ? "opacity-100" : "opacity-60"}`} /></span> : <NI d={NAV_I[id]} size={24} />}{id === "rec" && !rr.reception && <span aria-hidden className="absolute -bottom-1 -right-2 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-[#2C2C2E] text-white/70 ring-2 ring-[#161618]"><LockIco size={8} strokeWidth={2.6} /></span>}{id === "dev" && nDev > 0 && <span className="absolute -right-2.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}</span>
         <span className="relative whitespace-nowrap text-[11px] font-semibold leading-none tracking-[-0.005em]">{NAV_L[id]}</span>
       </motion.button> })}
     </div></nav>
@@ -257,7 +259,14 @@ function weekCallCount(calls: Call[]) {
   const mon = mondayParisYmd()
   return calls.filter(c => c.createdAt && parisYmd(new Date(c.createdAt)) >= mon).length
 }
+/* update48 · sans l'option Réceptionniste IA : présentation de l'option (les appels déjà enregistrés restent dans les fiches clients). */
 function Rec() {
+  const { desk, s, modal } = useC(), rr = useRights()
+  if (!rr.ready) return <div className="h-full" />
+  if (!rr.reception) return <ReceptionLocked desk={desk} calls={s.calls.length} onCalls={() => modal({ kind: "calls" })} />
+  return <RecFull />
+}
+function RecFull() {
   const { s, set, modal, q, setChat, toast } = useC(), c = A.rec.c
   const [voiceOn, setVoiceOn] = useState(false)
   const today = s.calls.filter(x => !x.day && match(q, x.name, x.topic, x.note)), hier = s.calls.filter(x => x.day && match(q, x.name, x.topic, x.note))
@@ -519,19 +528,20 @@ function SetP() {
   const tgA = (a: K) => { up(x => ({ ...x, agents: { ...x.agents, [a]: !x.agents[a] } })); toast(`${A[a].n} ${st.agents[a] ? "en pause" : "activé"}`) }
   const V = ({ v }: any) => <span className="flex items-center gap-1 text-[15px] text-white/50">{v}<Chev /></span>
   const S = ({ I, l, v, onClick, first }: any) => <Row first={first} label={l} onClick={onClick} lead={<Ic I={I} />} t={l} r={<V v={v} />} />
-  const n = agents.filter(a => st.agents[a]).length
-  return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u="/ 4" />} sub={`agents actifs · ${planL}`} actions={[
-    { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
-    <Col><Section t="Mes agents"><List>{agents.map((x, i) => <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
+  const rr = useRights(), recLock = !rr.reception, cliLock = !rr.clients
+  const mine = agents.filter(a => a !== "rec" || !recLock), n = mine.filter(a => st.agents[a]).length
+  return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u={`/ ${mine.length}`} />} sub={`agents actifs · ${planL}`} actions={[
+    { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => recLock ? openUpgrade("reception") : modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
+    <Col><Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
-      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} /><S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} /></List></Section>
+      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
-    <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>
+    <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={ImageIcon} l="Logo" v={prof?.logo_path ? "Ajouté" : "À ajouter"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /></List></Section>
-      <Section t="Avis clients"><List><S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} /></List></Section>
+      <Section t="Avis clients"><List>{cliLock ? <Row first label="Demandes d'avis Google" onClick={() => openUpgrade("clients")} lead={<Ic I={Sparkles} />} t="Demandes d'avis Google" s="Automatiques après chaque chantier" r={<LockTag />} /> : <S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} />}</List></Section>
       <Section t="Informations légales"><List>{[["CGV", "/cgv"], ["Mentions légales", "/mentions-legales"], ["Confidentialité", "/confidentialite"], ["Sous-traitance des données (DPA)", "/dpa"]].map(([l, h], i) => <S key={h} first={!i} I={FileText} l={l} v="" onClick={() => window.open(h, "_blank", "noopener")} />)}</List></Section></Col>
   </Shell>
 }
@@ -832,7 +842,7 @@ function ReviewUrlSheet({ close }: { close: () => void }) {
   </Sheet>
 }
 function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
-  const { s, set, toast, go, modal, setChat, desk } = useC(), d = m.data || {}
+  const { s, set, toast, go, modal, setChat, desk } = useC(), d = m.data || {}, rr = useRights()
   const clients = [...new Set([...s.calls.map(x => x.name), ...s.devis.map(x => x.client), ...s.rels.map(x => x.client)])]
   const [f, setF] = useState<any>(() => ({ name: d.name || d.client || "", topic: d.topic || d.objet || "", addr: d.addr || "", date: d.date || TODAY, start: hh(d.start ?? 9).padStart(5, "0"), dur: String(s.settings.duree), amount: d.amount ?? "", note: "", urgent: false, callback: true, type: "Relance devis", canal: "Appel", when: "Demain 9:00" }))
   const v = (k: string) => ({ value: f[k], onChange: (e: any) => setF({ ...f, [k]: e.target.value }) })
@@ -857,8 +867,8 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "abonnement") return <AbonnementSheet close={close} />
   if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} /></Suspense>
   if (m.kind === "conformite") return <ConformiteSheet close={close} />
-  if (m.kind === "leads") return <LeadsSheet close={close} />
-  if (m.kind === "reception") return <ReceptionSheet close={close} />
+  if (m.kind === "leads") return rr.clients ? <LeadsSheet close={close} /> : null
+  if (m.kind === "reception") return rr.reception ? <ReceptionSheet close={close} /> : null
   if (m.kind === "agendaCal") return <AgendaCalSheet close={close} />
   if (m.kind === "sms") return <SmsSheet close={close} />
   if (m.kind === "listen") { const n = s.calls.filter(x => x.recording).length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
@@ -979,6 +989,13 @@ function AknoApp() {
   const [m, setM] = useState<Modal>(null), [chat, setChatS] = useState(() => new URLSearchParams(location.search).has("chat"))
   const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void } | null>(null), [q, setQ] = useState("")
   const [pushNote, setPushNote] = useState<{ title: string; body: string; url: string; k: number } | null>(null)
+  // update48 · page d'arrivée : sans l'option Réceptionniste IA, on arrive sur l'Agenda (et non sur /reception).
+  const rr = useRights(), landed = useRef(false)
+  useEffect(() => {
+    if (landed.current || !rr.ready) return
+    landed.current = true
+    if (!rr.reception && page === "rec") navigate(`/${slugOf("ag")}${location.search}`, { replace: true })
+  }, [rr.ready, rr.reception, page, navigate])
   useEffect(() => { document.title = `Akno · ${page === "set" ? "Paramètres" : A[page].tab}` }, [page])
   useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo ? 5000 : 2600); return () => clearTimeout(t) }, [toastT])
   useEffect(() => { if (!pushNote) return; const t = setTimeout(() => setPushNote(null), 10000); return () => clearTimeout(t) }, [pushNote])
@@ -1020,6 +1037,7 @@ function AknoApp() {
       : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
+    <UpgradeHost />
     <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>

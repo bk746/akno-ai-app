@@ -38,6 +38,8 @@ export type Entitlements = {
   hasStripeCustomer: boolean
   /** update46 · essai de 30 jours possible (jamais eu d'abonnement Stripe). */
   trialEligible: boolean
+  /** update48 · plan_override (compte offert / équipe) : l'interface ne verrouille rien. */
+  override: boolean
   quotas: { devis_drafts: number; voice_sessions_day: number; voice_minutes: number; sms: number }
 }
 
@@ -60,7 +62,7 @@ function asPlan(x?: string | null): PlanId | null {
 /** Droits d'un artisan. Tant que Stripe n'est pas configuré, tout est ouvert (comportement d'avant l'update44). */
 export function computeEntitlements(sub: SubRow | null, artisanCreatedAt?: string | null, now = new Date()): Entitlements {
   const enabled = billingEnabled()
-  const base = { billingEnabled: enabled, hasStripeCustomer: !!sub?.stripe_customer_id, trialEligible: !sub?.status, cancelAtPeriodEnd: !!sub?.cancel_at_period_end, periodEnd: sub?.current_period_end || null }
+  const base = { billingEnabled: enabled, override: !!asPlan(sub?.plan_override), hasStripeCustomer: !!sub?.stripe_customer_id, trialEligible: !sub?.status, cancelAtPeriodEnd: !!sub?.cancel_at_period_end, periodEnd: sub?.current_period_end || null }
   const override = asPlan(sub?.plan_override)
   if (!enabled) {
     return { ...base, access: true, status: "free", plan: override || "clients", reception: true, features: ALL, trialEndsAt: null, quotas: { ...QUOTAS.clients, voice_minutes: QUOTAS.reception.voice_minutes, voice_sessions_day: QUOTAS.reception.voice_sessions_day } }
