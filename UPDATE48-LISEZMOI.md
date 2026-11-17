@@ -57,3 +57,7 @@ Aucune nouvelle variable. Les variables existantes sont utilisées : `STRIPE_PRI
     - Article remplacé.
   - Réception annuelle : 480 €.
   - Les données de test ont été supprimées.
+
+## Ajout : prorata encaissé immédiatement
+Hors essai, quand un abonné ajoute la Réceptionniste ou passe en Clients, le prorata est facturé et débité tout de suite (Stripe `always_invoice`). Si la carte est refusée, rien n'est modifié et l'app renvoie vers le portail de facturation. Pendant l'essai : rien à payer, l'essai continue.
+Testé en mode test : Bureau annuel actif + Réception → facture immédiate de 480 € HT (576 € TTC) payée.

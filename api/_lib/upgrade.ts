@@ -4,8 +4,9 @@ import { planFromPrices, priceFor, stripe, type Interval } from "./stripe.js"
 /* update48 · Montée en gamme d'un abonnement EXISTANT (y compris pendant l'essai) :
    - « reception » : ajoute l'option Réceptionniste IA (nouvel article, même intervalle que l'abonnement) ;
    - « clients »   : remplace l'article Bureau par Clients (même intervalle).
-   Proratisation standard Stripe (create_prorations) : pendant l'essai rien n'est facturé et l'essai continue ;
-   hors essai, l'ajustement au prorata apparaît sur la prochaine facture. Tout est relu chez Stripe côté serveur. */
+   Pendant l'essai : create_prorations, rien n'est facturé et l'essai continue.
+   Hors essai : always_invoice + error_if_incomplete, le prorata est facturé et débité TOUT DE SUITE ;
+   si le paiement échoue, Stripe refuse la modification (rien ne change). Tout est relu chez Stripe côté serveur. */
 
 export type UpgradeKind = "reception" | "clients"
 type Item = { id: string; price: string; amount: number; qty: number }
@@ -20,7 +21,7 @@ export type UpgradePreview = {
   current: number
   next: number
   added: number
-  /** ajustement au prorata HT (centimes) ajouté à la prochaine facture, 0 pendant l'essai */
+  /** ajustement au prorata HT (centimes) débité immédiatement hors essai, 0 pendant l'essai */
   proration: number
   taxPct: number
 }
@@ -62,7 +63,7 @@ export async function upgradeSubscription(subId: string, kind: UpgradeKind, opts
   if (!trialing) {
     const up = await stripe("GET", "/invoices/upcoming", {
       customer: String(sub.customer), subscription: subId,
-      subscription_items: change, subscription_proration_behavior: "create_prorations", subscription_proration_date: prorationDate,
+      subscription_items: change, subscription_proration_behavior: "always_invoice", subscription_proration_date: prorationDate,
     })
     if (up.ok) proration = (((up.data as any).lines?.data || []) as any[]).filter(l => l.proration).reduce((t, l) => t + Number(l.amount || 0), 0)
   }
@@ -74,10 +75,13 @@ export async function upgradeSubscription(subId: string, kind: UpgradeKind, opts
 
   const u = await stripe("POST", `/subscriptions/${subId}`, {
     items: change,
-    proration_behavior: "create_prorations",
-    ...(trialing ? {} : { proration_date: prorationDate }),
+    ...(trialing ? { proration_behavior: "create_prorations" } : { proration_behavior: "always_invoice", payment_behavior: "error_if_incomplete", proration_date: prorationDate }),
     metadata: { ...(opts.artisanId ? { artisan_id: opts.artisanId } : {}), plan: kind === "clients" ? "clients" : plan, reception: kind === "reception" ? "1" : reception ? "1" : "0", interval },
   })
-  if (!u.ok) return fail(502, String((u.data as any)?.error?.message || "Stripe a refusé la modification."))
+  if (!u.ok) {
+    const e = (u.data as any)?.error
+    if (e?.type === "card_error" || u.status === 402) return fail(402, "Le paiement du prorata a échoué : mettez à jour votre carte dans le portail de facturation. Rien n'a été modifié.")
+    return fail(502, String(e?.message || "Stripe a refusé la modification."))
+  }
   return { ok: true as const, preview, subscription: u.data }
 }
