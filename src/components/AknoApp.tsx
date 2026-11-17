@@ -7,7 +7,6 @@ import { useAccount } from "../lib/accountApi"
 import { useProfile } from "../lib/profile"
 import EntrepriseSheet from "./sheets/EntrepriseSheet"
 import AbonnementSheet from "./sheets/AbonnementSheet"
-const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
 import ConformiteSheet from "./sheets/ConformiteSheet"
 import LeadsSheet from "./sheets/LeadsSheet"
 import { AgendaCalSheet, ReceptionSheet, SmsSheet } from "./sheets/ReglagesSheets"
@@ -31,6 +30,8 @@ import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lo
 import type { Session } from "@supabase/supabase-js"
 import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
 import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
+// update45 : déclaré après les imports (sinon « Cannot access lazy before initialization » en mode dev Vite)
+const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const

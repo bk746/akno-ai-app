@@ -15,3 +15,10 @@ export function formatPhonePairs(raw?: string | null) {
 export function hasEmergencyPhone(raw?: string | null) {
   return digitsFr(raw).length >= 10
 }
+
+/** update45 · formatage pendant la saisie : 0612345678 → « 06 12 34 56 78 », +33612345678 → « +33 6 12 34 56 78 » */
+export function fmtTel(v: string) {
+  const plus = v.trim().startsWith("+"), d = v.replace(/\D/g, "")
+  if (plus) { if (!d.startsWith("33")) return "+" + d.slice(0, 15); const r = d.slice(2, 11); return ("+33 " + r.slice(0, 1) + " " + (r.slice(1).match(/.{1,2}/g) || []).join(" ")).trim() }
+  return (d.slice(0, 10).match(/.{1,2}/g) || []).join(" ")
+}
