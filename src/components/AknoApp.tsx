@@ -2,14 +2,23 @@ import DevisPaper from "./DevisPaper"
 import VoiceCall from "./VoiceCall"
 import { formatVoiceTimings, isVoiceDebugEnabled, setVoiceDebugEnabled, subscribeVoiceTimings } from "../lib/voice/timing"
 import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
-import { buildDoc } from "../lib/devisDoc"
+import { buildDoc, missingLegal } from "../lib/devisDoc"
+import { useAccount } from "../lib/accountApi"
+import { useProfile } from "../lib/profile"
+import EntrepriseSheet from "./sheets/EntrepriseSheet"
+import AbonnementSheet from "./sheets/AbonnementSheet"
+const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
+import ConformiteSheet from "./sheets/ConformiteSheet"
+import LeadsSheet from "./sheets/LeadsSheet"
+import { AgendaCalSheet, ReceptionSheet, SmsSheet } from "./sheets/ReglagesSheets"
+import Gate from "./sheets/Gate"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Component, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { Component, Suspense, lazy, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
-import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace, Banknote } from "lucide-react"
+import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck } from "lucide-react"
 import { BLOB } from "./blobPath"
-import { PHONES, useStore, uid, BASE, addDays, eur, seed, DEFAULT_REVIEW_URL } from "../lib/store"
+import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
 import { mergeTarifs, tarifsSummary } from "../lib/tarifs"
 import { digitsFr, formatPhonePairs } from "../lib/phone"
 import { draftDevisFromCall, sendDevisEmail } from "../lib/devisApi"
@@ -21,16 +30,9 @@ import { LockScreen, LockSetup } from "./Lock"
 import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
 import type { Session } from "@supabase/supabase-js"
 import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
+import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
-type K = "rec" | "ag" | "rel" | "dev"
-type P = K | "set"
-const A = {
-  rec: { n: "Réceptionniste", c: "#E6E6E6", tab: "Réception", I: PhoneCall, slug: "reception", d: "Décroche 24/7" },
-  ag: { n: "Agenda", c: "#FF7070", tab: "Agenda", I: CalendarDays, slug: "agenda", d: "Cale vos RDV" },
-  rel: { n: "Relance", c: "#5B1BE0", tab: "Relance", I: Repeat2, slug: "relance", d: "Avis et rappels" },
-  dev: { n: "Devis", c: "#0E8F8F", tab: "Devis", I: Receipt, slug: "devis", d: "Chiffre en direct" },
-} as const
 const agents = ["rec", "ag", "rel", "dev"] as const
 const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel", devis: "dev", parametres: "set" }
 const slugOf = (p: P) => p === "set" ? "parametres" : A[p].slug
@@ -46,74 +48,16 @@ const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"
 const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
-type Modal = { kind: "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "urgencePhone" | "clientReply"; data?: any } | null
-type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void }
-const C = createContext<Ctx>(null as any)
-const useC = () => useContext(C)
 const match = (q: string, ...xs: string[]) => !q || xs.join(" ").toLowerCase().includes(q.toLowerCase())
 
-// Écoute (Réceptionniste qui lit un appel) : petit store global pour élargir les yeux
-let listenV = false; const listenL = new Set<() => void>()
-const setListen = (v: boolean) => { listenV = v; listenL.forEach(f => f()) }
-const useListen = () => useSyncExternalStore(f => { listenL.add(f); return () => { listenL.delete(f) } }, () => listenV, () => false)
-const rnd = (a: number, b: number) => a + Math.random() * (b - a)
-// Yeux vivants : clignements aléatoires (parfois doubles) + regards/saccades autonomes. Pas de suivi du pointeur.
-function Eyes({ small, wide }: { small: boolean; wide: boolean }) {
-  const reduce = useReducedMotion(), [blink, setBlink] = useState(false), [look, setLook] = useState({ x: 0, y: 0 })
-  useEffect(() => {
-    if (reduce) return
-    let alive = true; const ts: ReturnType<typeof setTimeout>[] = []; const at = (ms: number, f: () => void) => ts.push(setTimeout(() => alive && f(), ms))
-    const doBlink = () => { setBlink(true); at(120, () => setBlink(false)); if (Math.random() < .22) { at(260, () => setBlink(true)); at(380, () => setBlink(false)) } at(rnd(3000, 6000), doBlink) }
-    const amp = small ? 5 : 9
-    const doLook = () => { const r = Math.random(); const t = r < .3 ? { x: -amp, y: rnd(-2, 2) } : r < .6 ? { x: amp, y: rnd(-2, 2) } : r < .75 ? { x: rnd(-3, 3), y: -amp * .7 } : r < .85 ? { x: rnd(-3, 3), y: amp * .5 } : { x: rnd(-3, 3), y: rnd(-2, 2) }
-      setLook(t); if (Math.random() < .4) at(rnd(180, 320), () => setLook({ x: t.x + rnd(-2.5, 2.5), y: t.y + rnd(-1.5, 1.5) }))
-      at(rnd(700, 1600), () => setLook({ x: 0, y: 0 })); at(rnd(2200, 5000), doLook) }
-    at(rnd(800, 3000), doBlink); at(rnd(1200, 3500), doLook)
-    return () => { alive = false; ts.forEach(clearTimeout) }
-  }, [reduce, small])
-  const sy = blink ? .1 : wide ? 1.12 : 1, sx = wide && !blink ? 1.06 : 1
-  return <motion.g animate={{ x: look.x, y: look.y }} transition={{ type: "spring", stiffness: 260, damping: 20, mass: .6 }}>
-    <motion.g style={{ transformBox: "fill-box", transformOrigin: "center" }} animate={{ scaleY: sy, scaleX: sx }} transition={blink ? { duration: .06, ease: "easeIn" } : { type: "spring", stiffness: 500, damping: 30 }}>
-      <ellipse cx={106.5} cy={104.5} rx={22.5} ry={31} fill="#000" /><ellipse cx={169.5} cy={104.5} rx={22.5} ry={31} fill="#000" /></motion.g></motion.g>
-}
-const Blob = ({ c, s }: { c: string; s: number }) => { const l = useListen(); return <svg viewBox="0 0 267 279" width={s} height={s * 279 / 267}><path d={BLOB} fill={c} /><Eyes small={s < 60} wide={l && s >= 60 && c === A.rec.c} /></svg> }
 /* ================= Design system (tokens uniques) =================
    Espacements : 4/8/12/16/20/24/32 · Rayon carte : 24 · Surface : #121214 · Filet : white/7 %
    Texte : fig (chiffre), title 17 semibold, body 15 medium, cap 13 gris · Icônes : 20 px, trait 1.75 */
-const GREEN = "#30D158", AMBER = "#FFB340", RED = "#FF5F57", GREY = "rgba(255,255,255,.3)"
-const tx = { fig: "font-semibold leading-none tracking-[-0.04em]", title: "text-[17px] font-semibold tracking-[-0.02em]", body: "text-[15px] font-medium tracking-[-0.01em] text-white", cap: "text-[13px] text-white/50" }
-const IS = 20, SW = 1.75
-const ink = (c: string) => c === "#E6E6E6" || c === "#FFFFFF" ? "#fff" : c
-const initials = (n: string) => n.replace(/^(M\.|Mme|Chantier)\s*/, "").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()
-const durF = (d: number) => d < 1 ? "30 min" : `${String(d).replace(".", ",")} h`
-const Card = ({ children, className = "" }: any) => <div className={`rounded-[24px] bg-gradient-to-b from-[#151517] to-[#111113] shadow-[inset_0_1px_0_rgba(255,255,255,.06),0_16px_40px_-24px_rgba(0,0,0,.9)] ${className}`}>{children}</div>
-const Dot = ({ c }: { c: string }) => <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c }} />
-const Chip = ({ c, children }: any) => <span className="inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2 text-[12px] font-medium" style={{ background: c === GREY ? "rgba(255,255,255,.06)" : c + "1F", color: c === GREY ? "rgba(255,255,255,.55)" : c }}><span className="h-[5px] w-[5px] rounded-full" style={{ background: c === GREY ? "rgba(255,255,255,.4)" : c }} />{children}</span>
-const Circ = ({ children, c, className = "" }: any) => <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white ${className}`} style={c ? { background: c + "29", color: ink(c) } : {}}>{children}</span>
-const Ic = ({ I, c }: any) => <Circ c={c}><I size={IS} strokeWidth={SW} /></Circ>
-const Av = ({ n }: { n: string }) => { const { page } = useC(), c = page === "set" ? "#FFFFFF" : A[page].c; return <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold tracking-[.02em] text-white/90" style={{ background: `linear-gradient(180deg, ${c}38, ${c}1A)`, boxShadow: `inset 0 0 0 1px ${c}26` }}>{initials(n)}</span> }
-const Row = ({ lead, t, s, r, rs, onClick, first, label }: any) => <div onClick={onClick} {...(onClick ? { role: "button", tabIndex: 0, "aria-label": label, onKeyDown: (e: any) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick() } } } : {})} className={`flex w-full items-center gap-3 pl-4 text-left ${onClick ? "cursor-pointer transition-colors hover:bg-white/[.03] focus-visible:bg-white/[.04]" : ""} first:rounded-t-[24px] last:rounded-b-[24px]`}>
-  {lead}<div className={`flex min-h-[64px] min-w-0 flex-1 items-center gap-3 py-3 pr-4 ${first ? "" : "border-t border-white/[.07]"}`}>
-    <div className="min-w-0 flex-1"><div className={`truncate ${tx.body}`}>{t}</div>{s && <div className={`mt-0.5 truncate ${tx.cap}`}>{s}</div>}</div>
-    {(r !== undefined || rs) && <div className="flex shrink-0 flex-col items-end">{typeof r === "string" || typeof r === "number" ? <div className={tx.body}>{r}</div> : r}{rs && <div className="mt-0.5">{typeof rs === "string" ? <span className={tx.cap}>{rs}</span> : rs}</div>}</div>}</div></div>
-const List = ({ children, empty = "Aucun résultat", I = Search }: any) => { const xs = (Array.isArray(children) ? children.flat() : [children]).filter(Boolean); return <Card className="overflow-hidden">{xs.length ? xs : <div className="flex h-[96px] flex-col items-center justify-center gap-1 text-center"><I size={IS} strokeWidth={SW} className="text-white/30" /><div className={tx.cap}>{empty}</div></div>}</Card> }
-const rise = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: .42, ease: [.22, 1, .36, 1] as const } } }
-const Section = ({ t, more, moreL, aside, children }: any) => <motion.section variants={rise} className="min-w-0"><div className="mb-3 flex h-6 items-center justify-between px-1"><h2 className={tx.title}>{t}</h2>{more ? <button onClick={more} className="text-[15px] font-medium text-white/50 hover:text-white">{moreL || "Voir tout"}</button> : aside && <span className={tx.cap}>{aside}</span>}</div>{children}</motion.section>
-const Col = ({ children }: any) => { const { desk } = useC(); return <div className={desk ? "flex min-w-0 flex-col gap-8" : "contents"}>{children}</div> }
-type QAi = { I: any; l: string; on: () => void; dis?: boolean }
-const QA = ({ items }: { items: QAi[] }) => <div className="grid grid-cols-4 gap-2">{items.map(x => <button key={x.l} disabled={x.dis} onClick={x.on} className="group flex flex-col items-center gap-2 disabled:opacity-35"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-b from-white/[.14] to-white/[.05] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_8px_20px_-10px_rgba(0,0,0,.9)] transition-[background,transform] duration-200 group-hover:from-white/[.2] group-active:scale-[.94]"><x.I size={IS} strokeWidth={SW} /></span><span className="text-[12px] font-medium text-white/70">{x.l}</span></button>)}</div>
-/* Un seul style de graphique : barres arrondies, barre active en couleur d'agent */
-const Chart = ({ label, value, v, l, sel, c, onPick }: any) => { const mx = Math.max(...v, 1); return <Card className="p-4"><div className={tx.cap}>{label}</div><div className={`mt-2 text-[22px] ${tx.fig}`}>{value}</div>
-  <div className="mt-4 flex h-[112px] gap-2">{v.map((x: number, i: number) => <button key={i} disabled={!onPick} onClick={() => onPick?.(i)} aria-label={`${l[i]} : ${x}`} aria-pressed={onPick ? i === sel : undefined} className="flex h-full flex-1 flex-col items-center gap-2"><div className="flex w-full flex-1 items-end justify-center"><motion.span initial={{ height: 0 }} animate={{ height: `${Math.max(6, x / mx * 100)}%` }} transition={{ duration: .6, delay: i * .04 }} className="w-full max-w-[32px] rounded-[10px]" style={i === sel ? { background: `linear-gradient(180deg, ${ink(c)}, ${ink(c)}99)`, boxShadow: `0 0 24px -4px ${ink(c)}80, inset 0 1px 0 rgba(255,255,255,.35)` } : { background: "linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.04))", boxShadow: "inset 0 1px 0 rgba(255,255,255,.08)" }} /></div><span className={`text-[12px] ${i === sel ? "text-white" : "text-white/50"}`}>{l[i]}</span></button>)}</div></Card> }
-const Tg = ({ on, onClick, label }: any) => <button data-hit role="switch" aria-checked={on} aria-label={label} onClick={e => { e.stopPropagation(); onClick?.() }} className="relative h-[28px] w-[46px] shrink-0 rounded-full transition-colors" style={{ background: on ? "#2F7BFF" : "rgba(255,255,255,.14)" }}><span className="absolute top-[3px] h-[22px] w-[22px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,.4)] transition-all" style={{ left: on ? 21 : 3 }} /></button>
-const Btn = ({ children, onClick, primary, c, disabled, className = "", ...r }: any) => <button disabled={disabled} onClick={onClick} {...r} className={`flex h-12 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 text-[15px] font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${primary ? "" : "bg-white/[.08] text-white hover:bg-white/[.12]"} ${className}`} style={primary ? { background: c ? ink(c) : "#fff", color: c && ink(c) !== "#fff" ? "#fff" : "#000" } : {}}>{children}</button>
 let CL: Client[] = []
+const isUuidL = (x: string) => /^[0-9a-f-]{36}$/i.test(x)
 const ckey = (n: string) => n.replace(/^(M\.|Mme|Chantier)\s*/, "").trim().split(" ").slice(-1)[0].toLowerCase()
 const findC = (n: string) => CL.find(c => c.key === ckey(n))
-const tel = (n: string) => { const p = PHONES.get(n); if (p) return p; const f = findC(n); if (f) return f.phone.replace(/ /g, ""); let h = 7; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) % 100000000; return "06" + String(h).padStart(8, "0") }
-const TBtn = ({ I, label, onClick, href, c, dis }: any) => { const cls = "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-[transform,background] duration-150 active:scale-[.9] disabled:opacity-35", st = c ? { background: c, color: ink(c) === "#fff" && c !== "#E6E6E6" ? "#fff" : "#000" } : { background: "rgba(255,255,255,.09)" }, inner = <I size={16} strokeWidth={SW} />
-  return href ? <a data-hit href={href} aria-label={label} title={label} onClick={e => { e.stopPropagation(); onClick?.() }} className={cls} style={st}>{inner}</a> : <button data-hit disabled={dis} aria-label={label} title={label} onClick={e => { e.stopPropagation(); onClick?.() }} className={cls} style={st}>{inner}</button> }
-const Chev = () => <ChevronRight size={IS} strokeWidth={SW} className="text-white/30" />
+const tel = (n: string) => { const p = PHONES.get(n); if (p) return p; const f = findC(n); if (f) return f.phone.replace(/ /g, ""); return "" } // update44 : plus de faux numéro inventé quand le client n'a pas de téléphone connu
 
 function Side() {
   const { page, go, s } = useC()
@@ -283,7 +227,7 @@ function contacts(s: St): Ct[] {
   const m = new Map<string, Ct>(), y = addDays(TODAY, -1)
   const up = (n: string, d?: string, call = false) => { const k = ckey(n); let c = m.get(k); if (!c) { const f = (s.clients || []).find(x => x.key === k); c = { key: k, name: f?.name || n, phone: f?.phone || tel(n).replace(/(\d{2})(?=\d)/g, "$1 "), calls: 0, last: "" }; m.set(k, c) } if (call) c.calls++; if (d && d > c.last) c.last = d }
   ;(s.clients || []).forEach(x => { up(x.name, x.hist?.last); const c = m.get(x.key)!; c.calls += x.hist?.calls || 0; c.since = x.hist?.since })
-  s.calls.forEach(x => up(x.name, x.day ? y : TODAY, true))
+  s.calls.forEach(x => up(x.name, x.day && x.createdAt ? new Date(x.createdAt).toLocaleDateString("sv-SE") : x.day ? y : TODAY, true))
   s.events.forEach(x => !/^Chantier/.test(x.name) || findC(x.name) ? up(x.name, x.date <= TODAY ? x.date : undefined) : null)
   s.devis.forEach(x => up(x.client))
   return [...m.values()]
@@ -324,7 +268,7 @@ function Rec() {
   const open = (x: Call) => modal({ kind: "client", data: { name: x.name, call: x.id } }), cts = contacts(s)
   const todoS = todo.filter(x => match(q, x.name, x.topic, x.note)).sort((a, b) => Number(b.urgent) - Number(a.urgent))
   const done = (x: Call) => { const snap = s; set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`, () => set(() => snap)) }
-  const TRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}<Chip c={AMBER}>À rappeler</Chip></span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={c} onClick={() => done(x)} /></div>} />
+  const TRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}<Chip c={AMBER}>À rappeler</Chip></span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""} · ${x.day ? `${x.day.toLowerCase()} ` : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={c} onClick={() => done(x)} /></div>} />
   const CRow = (x: Call, i: number) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => open(x)} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.callback && <Chip c={x.urgent ? RED : AMBER}>À rappeler</Chip>}</span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""}`} r={<span className={tx.cap}>{x.time}</span>} rs={<Chip c={callSt(x)[1]}>{callSt(x)[0]}</Chip>} />
   return <><Shell k="rec" fig={<Num n={weekN} />} sub="appels reçus cette semaine" actions={[
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
@@ -438,7 +382,7 @@ function Ag() {
     { I: Plus, l: "Nouveau", on: () => modal({ kind: "rdv", data: { date: day } }) }, { I: ChevronLeft, l: "Précédente", on: () => goWk(wk - 1) },
     { I: ChevronRight, l: "Suivante", on: () => goWk(wk + 1) }, { I: RotateCcw, l: "Aujourd'hui", on: () => goWk(0), dis: wk === 0 && day === TODAY }]}>
     <Col><Section t={day === TODAY ? "Aujourd'hui" : dlabel(day)} aside={`${list.length} RDV`}>{list.length ? <List>{list.map(ERow)}</List> : <List><Row first label="Ajouter un rendez-vous" onClick={() => modal({ kind: "rdv", data: { date: day } })} lead={<Ic I={Plus} />} t="Journée libre" s="Touchez pour ajouter un rendez-vous" r={<Chev />} /></List>}</Section>
-      {!desk && <AgCal />}<Section t="À retenir"><List>{next && <Row first label="Prochain rendez-vous" onClick={() => modal({ kind: "ev", data: next })} lead={<Ic I={Clock} />} t="Prochain" s={`${next.name} · ${next.topic}`} r={hh(next.start)} rs={fmtD(next.date)} />}{last && <Row label="Dernier RDV pris" onClick={() => modal({ kind: "ev", data: last })} lead={<Ic I={Sparkles} />} t="Dernier pris" s={`${last.name} · ${last.topic}`} r={hh(last.start)} rs={<Chip c={s.settings.sms ? GREEN : GREY}>{s.settings.sms ? "SMS envoyé" : "Confirmé"}</Chip>} />}</List></Section></Col>
+      {!desk && <AgCal />}<Section t="À retenir"><List>{next && <Row first label="Prochain rendez-vous" onClick={() => modal({ kind: "ev", data: next })} lead={<Ic I={Clock} />} t="Prochain" s={`${next.name} · ${next.topic}`} r={hh(next.start)} rs={fmtD(next.date)} />}{last && <Row label="Dernier RDV pris" onClick={() => modal({ kind: "ev", data: last })} lead={<Ic I={Sparkles} />} t="Dernier pris" s={`${last.name} · ${last.topic}`} r={hh(last.start)} rs={<Chip c={GREEN}>Confirmé</Chip>} />}</List></Section></Col>
     <Col><Section t="Semaine" aside={range}><Chart c={c} label="Rendez-vous par jour" value={`${wkE.length} RDV`} v={per} l={days.map(d => DAYS[(dd(d).getDay() + 6) % 7].slice(0, 3))} sel={days.indexOf(day)} onPick={(i: number) => setDay(days[i])} /></Section></Col>
     {desk && <div className="col-span-2"><AgCal /></div>}
   </Shell>
@@ -453,8 +397,9 @@ function RelP() {
   const rels = s.rels.filter(r => match(q, r.client, r.type))
   const prog = s.rels.filter(r => r.status === "prog"), nx = prog[0]
   const stopD = (id: string) => { set(x => ({ ...x, devis: x.devis.map(d => d.id === id ? { ...d, remindersOff: true } : d), rels: x.rels.map(y => y.devisId === id && y.status === "prog" ? { ...y, status: "pause" } : y) })); toast("Relances de ce devis arrêtées") }
-  const sendR = (r: Rel) => { if (r.devisId && r.canal === "E-mail") { toast(`Cette relance partira automatiquement${r.date ? ` (${r.date})` : ""}.`); return } const snap = s; set(x => ({ ...x, rels: x.rels.map(y => y.id === r.id ? { ...y, status: "env", date: "À l'instant" } : y), lastRel: { client: r.client, type: r.type, time: "À l'instant", canal: r.canal } })); toast(`Relance envoyée à ${r.client}`, () => set(() => snap)) }
-  const QRow = (r: Rel, i: number) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Av n={r.client} />} t={r.client} s={`${r.type} · ${r.canal} · ${r.date}`} r={<div className="flex items-center gap-3">{r.status === "pause" && <Chip c={GREY}>{r.devisId ? "Arrêtées" : "En pause"}</Chip>}{r.devisId && r.status === "prog" ? <TBtn I={Pause} label={`Arrêter les relances pour ${r.client}`} c={c} onClick={() => stopD(r.devisId!)} /> : !r.devisId ? <TBtn I={Send} label={`Envoyer maintenant à ${r.client}`} c={c} onClick={() => sendR(r)} /> : null}</div>} />
+  // update44 : une relance manuelle est un rappel pour l'artisan. Akno ne l'envoie pas : on la marque « faite », sans prétendre l'avoir envoyée.
+  const sendR = (r: Rel) => { if (r.devisId) { toast(`Cette relance partira automatiquement${r.date ? ` (${r.date})` : ""}.`); return } const snap = s; set(x => ({ ...x, rels: x.rels.map(y => y.id === r.id ? { ...y, status: "env", date: "Faite" } : y), lastRel: { client: r.client, type: r.type, time: "À l'instant", canal: r.canal } })); toast(`Relance marquée comme faite · ${r.client}`, () => set(() => snap)) }
+  const QRow = (r: Rel, i: number) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Av n={r.client} />} t={r.client} s={`${r.type} · ${r.canal} · ${r.date}`} r={<div className="flex items-center gap-3">{r.status === "pause" && <Chip c={GREY}>{r.devisId ? "Arrêtées" : "En pause"}</Chip>}{r.devisId && r.status === "prog" ? <TBtn I={Pause} label={`Arrêter les relances pour ${r.client}`} c={c} onClick={() => stopD(r.devisId!)} /> : !r.devisId ? <TBtn I={Check} label={`Marquer comme faite · ${r.client}`} c={c} onClick={() => sendR(r)} /> : null}</div>} />
   const RRow = (r: Rel, i: number) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "client", data: { name: r.client } })} lead={<Ic I={canalI[r.canal] || Send} />} t={r.client} s={`${r.type} · ${r.canal}`} r={<span className={tx.cap}>{r.date}</span>} rs={<Chip c={RS[r.status][1]}>{RS[r.status][0]}</Chip>} />
   const tg = () => { set(x => ({ ...x, settings: { ...x.settings, agents: { ...x.settings.agents, rel: !on } } })); toast(`Relance ${on ? "en pause" : "activé"}`) }
   return <Shell k="rel" fig={<Num n={prog.length} />} sub={nx ? `relances à venir · prochaine ${nx.date.toLowerCase()}` : "relances à venir"} actions={[
@@ -479,7 +424,14 @@ function Dev() {
   const openD = (d?: Devis) => { if (d) modal({ kind: "devisPrev", data: d }) }
   const send = () => openD(pend)
   const queued = (d: Devis) => s.rels.some(r => r.status === "prog" && r.type.includes(String(d.num)))
-  const relance = (d: Devis) => { const snap = s; set(x => ({ ...x, rels: [{ id: uid(), client: d.client, type: `Relance devis N° ${d.num}`, canal: "SMS", status: "prog", date: "Demain 9:00" }, ...x.rels] })); toast(`Relance prévue demain 9:00 · ${d.client}`, () => set(() => snap)) }
+  // update44 : relance réelle (e-mail, + SMS si activés) envoyée par le cron demain 9:00, liée au devis. Sans e-mail ni SMS : rappel « à faire ».
+  const relance = (d: Devis) => {
+    const auto = !!d.email || (s.settings.sms && !!d.phone)
+    const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(9, 0, 0, 0)
+    const snap = s
+    set(x => ({ ...x, rels: [{ id: uid(), client: d.client, type: `Relance devis N° ${d.num}`, canal: d.email ? (s.settings.sms && d.phone ? "E-mail + SMS" : "E-mail") : auto ? "SMS" : "Appel", status: "prog", date: auto ? "Demain 9:00" : "À faire", ...(auto && isUuidL(d.id) ? { devisId: d.id, scheduledFor: t.toISOString() } : {}) }, ...x.rels] }))
+    toast(auto ? `Relance prévue demain 9:00 · ${d.client}` : `Rappel ajouté : appelez ${d.client} (pas d'e-mail sur le devis)`, () => set(() => snap))
+  }
   const FRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${eur(d.amount)}`} r={<div className="flex items-center gap-3"><Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>{d.status === "brouillon" ? <TBtn I={Send} label={`Envoyer le devis ${d.num}`} c={c} onClick={() => openD(d)} /> : queued(d) ? <TBtn I={Check} label="Relance déjà prévue" dis /> : <TBtn I={Repeat2} label={`Relancer ${d.client}`} c={c} onClick={() => relance(d)} />}</div>} />
   const exp = () => { const csv = ["N°;Client;Objet;Statut;Montant HT", ...s.devis.map(d => [d.num, d.client, d.objet, ST[d.status][0], d.amount].join(";"))].join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new window.Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = "devis-akno.csv"; a.click(); toast("Export CSV téléchargé") }
   const DRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />
@@ -552,32 +504,38 @@ function SetP() {
       ? { ok: true, text: "Notification de test envoyée. Vous devriez la voir ici et dans le centre de notifications." }
       : { ok: false, text: res.error || "Le test a échoué." })
   }
-  const demo = () => toast("Démo : réglage non modifiable")
+  const acc = useAccount(), ent = acc?.entitlements
+  const planL = !ent ? "…" : ent.status === "free" ? "Accès ouvert" : ent.status === "trial" ? `Essai · ${Math.max(0, Math.ceil((new Date(ent.trialEndsAt || Date.now()).getTime() - Date.now()) / 864e5))} j` : ent.status === "active" ? (ent.plan === "clients" ? "Clients + Bureau" : "Bureau") + (ent.reception ? " + Récept." : "") : ent.status === "past_due" ? "Paiement en échec" : "Essai terminé"
+  const support = (import.meta.env.VITE_SUPPORT_URL as string | undefined) || ((import.meta.env.VITE_SUPPORT_EMAIL as string | undefined) ? `mailto:${import.meta.env.VITE_SUPPORT_EMAIL}` : "")
+  const help = () => { if (support) window.open(support, "_blank", "noopener") }
+  const { p: prof, save: saveProf } = useProfile()
+  const cycR = async () => { const opts = [[3, 7], [2, 5, 10], [7, 14], [3, 7, 15]], cur = JSON.stringify(relDelays(prof?.relance_delais)), i = opts.findIndex(o => JSON.stringify(o) === cur), nx = opts[(i + 1) % opts.length]; const e = await saveProf({ relance_delais: nx }); toast(e || `Relances : ${relDelaysL(nx)}`) }
+  const hor = prof?.horaires && typeof prof.horaires === "object" ? Object.values(prof.horaires as Record<string, unknown>).filter(Boolean).length : 0
   const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
   const TVA = [10, 20, 5.5], DUR = [0.5, 1, 1.5, 2]
   const tva = `${String(st.tva).replace(".", ",")} %`, dur = durF(st.duree)
   const cycT = () => up(x => ({ ...x, tva: TVA[(TVA.indexOf(x.tva) + 1) % TVA.length] })), cycD = () => up(x => ({ ...x, duree: DUR[(DUR.indexOf(x.duree) + 1) % DUR.length] }))
   const tgA = (a: K) => { up(x => ({ ...x, agents: { ...x.agents, [a]: !x.agents[a] } })); toast(`${A[a].n} ${st.agents[a] ? "en pause" : "activé"}`) }
   const V = ({ v }: any) => <span className="flex items-center gap-1 text-[15px] text-white/50">{v}<Chev /></span>
-  const S = ({ I, l, v, onClick, first }: any) => <Row first={first} label={l} onClick={onClick || demo} lead={<Ic I={I} />} t={l} r={<V v={v} />} />
+  const S = ({ I, l, v, onClick, first }: any) => <Row first={first} label={l} onClick={onClick} lead={<Ic I={I} />} t={l} r={<V v={v} />} />
   const n = agents.filter(a => st.agents[a]).length
-  return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u="/ 4" />} sub="agents actifs · offre Pro" actions={[
-    { I: Phone, l: "Numéro", on: demo }, { I: Clock, l: "Horaires", on: demo }, { I: LifeBuoy, l: "Aide", on: demo }, { I: LogOut, l: "Quitter", on: reset }]}>
+  return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u="/ 4" />} sub={`agents actifs · ${planL}`} actions={[
+    { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
-      <Section t="Notifications"><List><Row first label="SMS" onClick={() => up(x => ({ ...x, sms: !x.sms }))} lead={<Ic I={Smartphone} />} t="SMS" s="Confirmations clients" r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
-      <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v="Pro" /><S I={LifeBuoy} l="Aide & support" v="" /><S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
-    <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v="Non configuré" /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v="Non configuré" /><S I={AudioLines} l="Voix" v="Par défaut" /><S I={MessageSquareText} l="Message d'accueil" v="Modifier" /></List></Section>
+      <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
+      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} /><S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} /></List></Section>
+      <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
+    <Col><Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
-      <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v="" /><S I={ImageIcon} l="Logo" v="À ajouter" /></List></Section>
+      <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={ImageIcon} l="Logo" v={prof?.logo_path ? "Ajouté" : "À ajouter"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
-      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v="Non configuré" /></List></Section>
-      <Section t="Avis clients"><List><S first I={Sparkles} l="Lien d'avis Google" v={(st.reviewUrl || DEFAULT_REVIEW_URL).replace(/^https?:\/\//, "").slice(0, 28)} onClick={() => modal({ kind: "reviewUrl" })} /></List></Section></Col>
+      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /></List></Section>
+      <Section t="Avis clients"><List><S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} /></List></Section>
+      <Section t="Informations légales"><List>{[["CGV", "/cgv"], ["Mentions légales", "/mentions-legales"], ["Confidentialité", "/confidentialite"], ["Sous-traitance des données (DPA)", "/dpa"]].map(([l, h], i) => <S key={h} first={!i} I={FileText} l={l} v="" onClick={() => window.open(h, "_blank", "noopener")} />)}</List></Section></Col>
   </Shell>
 }
 
 /* ---------------- Feuilles / formulaires (même système visuel) ---------------- */
-const inp = "h-12 w-full rounded-[14px] border border-transparent bg-white/[.07] px-4 text-[15px] text-white outline-none [color-scheme:dark] placeholder:text-white/35 focus:border-white/25"
-const F = ({ l, children }: any) => <label className="block"><span className="mb-2 block px-1 text-[13px] text-white/50">{l}</span>{children}</label>
 function PwSheet({ close }: { close: () => void }) {
   const { toast } = useC(), [a, setA] = useState(""), [b, setB] = useState(""), [busy, setBusy] = useState(false), [err, setErr] = useState("")
   const ok = a.length >= 8 && a === b
@@ -590,18 +548,6 @@ function PwSheet({ close }: { close: () => void }) {
     <button disabled={!ok || busy} className="mt-2 h-12 w-full rounded-full bg-white text-[15px] font-semibold text-black disabled:opacity-40">{busy ? "Enregistrement…" : "Enregistrer"}</button>
   </form></Sheet>
 }
-function Sheet({ title, sub, onClose, children, c, footer }: any) {
-  const { desk } = useC()
-  useEffect(() => { const f = (e: KeyboardEvent) => e.key === "Escape" && onClose(); addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [onClose])
-  return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-center justify-center" : "items-end"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-label={title} onClick={e => e.stopPropagation()} initial={desk ? { scale: .97, opacity: 0 } : { y: 40, opacity: 0 }} animate={desk ? { scale: 1, opacity: 1 } : { y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 340, damping: 32, mass: .9 }} className={`w-full border-white/[.08] bg-[#121214] shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] ${desk ? "max-h-[86dvh] max-w-[480px] rounded-[24px] border" : "max-h-[90dvh] rounded-t-[24px] border-t"} ${footer ? "relative flex flex-col overflow-hidden" : desk ? "overflow-y-auto p-6" : "overflow-y-auto px-5 pt-3"}`} style={desk || footer ? {} : { paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
-      <div className={footer ? `min-h-0 flex-1 overflow-y-auto ${desk ? "px-6 pt-6" : "px-5 pt-3"}` : "contents"} style={footer ? { paddingBottom: desk ? 104 : "calc(112px + env(safe-area-inset-bottom))" } : {}}>
-      {!desk && <div className="mx-auto mb-4 h-[5px] w-9 rounded-full bg-white/20" />}
-      <div className="mb-6 flex items-center gap-3">{c && <Circ><Blob c={c} s={20} /></Circ>}<div className="min-w-0"><div className={`truncate ${tx.title}`}>{title}</div>{sub && <div className={`truncate ${tx.cap}`}>{sub}</div>}</div><button aria-label="Fermer" onClick={onClose} className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/70 hover:text-white"><X size={IS} strokeWidth={SW} /></button></div>
-      {children}</div>
-      {footer && <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 ${desk ? "px-6 pb-6" : "px-5"}`} style={{ paddingBottom: desk ? undefined : "max(20px, env(safe-area-inset-bottom))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(18,18,20,0) 0, rgba(18,18,20,.82) 26px, #121214 52px)" }}><div className="pointer-events-auto">{footer}</div></div>}</motion.div></motion.div>
-}
-const Sub = ({ children, dot }: any) => dot ? <Chip c={dot}>{children}</Chip> : <div className={tx.cap}>{children}</div>
 const LRow = ({ children, onClick, first }: any) => <div onClick={onClick} className={`flex min-h-[48px] items-center gap-3 text-[14px] ${onClick ? "cursor-pointer" : ""} ${first ? "" : "border-t border-white/[.05]"}`}>{children}</div>
 const CallPlayer = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); if (!call.recording) return null; return <Card className="mb-5 p-4"><Player p={p} c={A.rec.c} onMic={onMic} compact /></Card> }
 /* Ligne « à écouter » : un seul enregistrement joue à la fois */
@@ -610,8 +556,8 @@ function ListenRow({ x, first, cur, setCur, acts }: { x: Call; first?: boolean; 
   useEffect(() => { if (cur !== x.id && p.play) p.toggle() }, [cur])
   const pp = { ...p, toggle: () => { if (!p.play) setCur(x.id); p.toggle() } }
   return <div className={`px-5 py-3.5 ${first ? "" : "border-t border-white/[.05]"}`}>
-    <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}{x.callback && <Chip c={AMBER}>À rappeler</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}{x.rappelAt ? ` · ${x.rappelAt}` : ""}</div></div>{acts ? <div className="flex shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => { if (x.callback) { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) } }} /></div> : <span className={`shrink-0 ${tx.cap}`}>{x.day ? "hier " : ""}{x.time}</span>}</div>
-    {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? "Hier " : ""}{x.time}</div>}{x.recording ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
+    <div role="button" tabIndex={0} aria-label={`Fiche ${x.name}`} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} onKeyDown={e => { if (e.key === "Enter") modal({ kind: "client", data: { name: x.name, call: x.id } }) }} className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[14px] px-2 py-1 transition-colors hover:bg-white/[.03]"><Av n={x.name} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2 text-[15px] font-medium"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}{x.callback && <Chip c={AMBER}>À rappeler</Chip>}</div><div className={`truncate ${tx.cap}`}>{x.tag || x.topic}{x.rappelAt ? ` · ${x.rappelAt}` : ""}</div></div>{acts ? <div className="flex shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => { if (x.callback) { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) } }} /></div> : <span className={`shrink-0 ${tx.cap}`}>{x.day ? `${x.day.toLowerCase()} ` : ""}{x.time}</span>}</div>
+    {acts && <div className={`mt-1 pl-[52px] ${tx.cap}`}>{x.day ? `${x.day} ` : ""}{x.time}</div>}{x.recording ? <div className="mt-2.5 pl-[52px]"><Player p={pp} c={A.rec.c} compact /></div> : null}</div>
 }
 function CallsList({ todo, rest }: { todo: Call[]; rest: Call[] }) {
   const [cur, setCur] = useState<string | null>(null)
@@ -690,7 +636,7 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
   const st: [string, string] = ev ? (past ? ["Passé", GREY] : ["À venir", A.ag.c]) : call ? callSt(call) : devis.some(d => d.status === "att") ? ["Devis en attente", AMBER] : ["Client", GREY]
   const rawPhone = cl?.phone || ev?.phone || call?.phone || tel(name)
   const raw = rawPhone.replace(/ /g, ""), ph = raw.replace(/(\d\d)(?=\d)/g, "$1 "), addr = cl?.addr || ev?.addr || call?.addr
-  const hist = [...calls.map(x => ({ t: `Appel · ${x.tag || x.topic}`, w: `${x.day ? "Hier" : "Aujourd'hui"} ${x.time}`, I: Phone, o: 0 + (x.day ? 1 : 0) })),
+  const hist = [...calls.map(x => ({ t: `Appel · ${x.tag || x.topic}`, w: `${x.day || "Aujourd'hui"} ${x.time}`, I: Phone, o: 0 + (x.day ? 1 : 0) })),
     ...rels.map(r => ({ t: `${r.type} · ${r.canal}`, w: `${r.date} · ${RS[r.status][0]}`, I: Send, o: 2 })),
     ...devis.map(d => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0], I: Receipt, o: 3 }))].sort((a, b) => a.o - b.o)
   const H = ({ children }: any) => <div className="mb-2 mt-6 px-1 text-[13px] font-medium text-white/45">{children}</div>
@@ -708,8 +654,23 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
   </Sheet>
 }
 const CallInline = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); if (!call.recording) return null; return <Player p={p} c={A.rec.c} onMic={onMic} /> }
+const relDelays = (raw: unknown) => { const a = Array.isArray(raw) ? [...new Set(raw.map(Number).filter(n => n >= 1 && n <= 60))].sort((x, y) => x - y).slice(0, 3) : []; return a.length ? a : [3, 7] }
+const relDelaysL = (a: number[]) => a.map(n => `J+${n}`).join(", ").replace(/, (J\+\d+)$/, " et $1")
 function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => void }) {
-  const { s, set, toast } = useC()
+  const { s, set, toast, modal } = useC()
+  const prof = useProfile().p, delays = relDelays(prof?.relance_delais)
+  const [factBusy, setFactBusy] = useState(false)
+  const toFacture = async (type: "facture" | "acompte") => {
+    if (!isUuidL(String(dv.id))) { toast("Enregistrez d'abord le devis"); return }
+    let pct: number | undefined
+    if (type === "acompte") { const r = prompt("Pourcentage d'acompte ?", "30"); if (!r) return; pct = Number(r.replace(",", ".")); if (!(pct > 0 && pct <= 100)) { toast("Pourcentage invalide"); return } }
+    setFactBusy(true)
+    const { createFactureFromDevis } = await import("./sheets/FacturesSheet")
+    const r = await createFactureFromDevis(String(dv.id), type, pct)
+    setFactBusy(false)
+    if (!r.ok || typeof r.facture_id !== "string") { toast(r.error || "Création impossible"); return }
+    onClose(); modal({ kind: "factures", data: { id: r.facture_id } })
+  }
   const dv = s.devis.find(x => x.id === initial.id) || initial
   const tv = s.settings.tva
   const cl = findC(dv.client)
@@ -749,11 +710,11 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     {!draft && (dv.status === "val" || dv.status === "ref" || dv.status === "sans" || dv.reply) && <div className="mb-4 rounded-[16px] bg-white/[.04] px-4 py-3 text-[13.5px] text-white/80">
       {dv.status === "val" && dv.repliedAt && <div>Accepté par le client le {when(dv.repliedAt)}.</div>}
       {dv.status === "ref" && dv.repliedAt && <div>Refusé par le client le {when(dv.repliedAt)}.</div>}
-      {dv.status === "sans" && <div>Sans réponse après deux relances automatiques.</div>}
+      {dv.status === "sans" && <div>Sans réponse après les relances automatiques.</div>}
       {dv.reply && <div className={`${dv.repliedAt || dv.status === "sans" ? "mt-2" : ""} text-white/70`}>« {dv.reply} »</div>}
     </div>}
     {dv.status === "env" && <div className="mb-4 flex items-center justify-between gap-3 rounded-[16px] bg-white/[.04] px-4 py-3 text-[13.5px] text-white/75">
-      <span>{dv.remindersOff ? "Relances automatiques arrêtées." : "Relances automatiques prévues à J+3 et J+7."}</span>
+      <span>{dv.remindersOff ? "Relances automatiques arrêtées." : `Relances automatiques prévues à ${relDelaysL(delays)}.`}</span>
       {!dv.remindersOff && <button type="button" className="shrink-0 text-[13px] font-medium text-white" onClick={stopRem}>Arrêter</button>}
     </div>}
     {draft && <>
@@ -781,7 +742,9 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
         <div className="mt-4"><F l="E-mail du client"><input className={inp} type="email" value={email} placeholder="kevin.m@example.com" onChange={e => { setEmail(e.target.value); setMailErr("") }} /></F></div>
       </div>
     </>}
+    {draft && missingLegal("devis").length > 0 && <button type="button" onClick={() => modal({ kind: "entreprise" })} className="mb-3 block w-full rounded-[14px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-4 py-3 text-left text-[13px] text-white/80">Mentions obligatoires manquantes : {missingLegal("devis").join(", ")}. <span className="font-medium text-white">Compléter</span></button>}
     {mailErr && <div className="mb-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{mailErr}</div>}
+    {dv.status === "val" && <div className="mb-3 grid grid-cols-2 gap-2"><Btn primary c={A.dev.c} disabled={factBusy} onClick={() => toFacture("facture")}><Receipt size={16} />{factBusy ? "…" : "Créer la facture"}</Btn><Btn disabled={factBusy} onClick={() => toFacture("acompte")}>Facture d'acompte</Btn></div>}
     <DevisPaper d={doc} />
     <div className="mt-3"><Btn className="w-full" onClick={download}><Download size={15} strokeWidth={1.5} />Télécharger PDF</Btn></div>
     {dv.token && !draft && <div className="mt-2"><Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${location.origin}/accept/${dv.token}`); toast("Lien d'acceptation copié") }}>Copier le lien client</Btn></div>}
@@ -860,17 +823,17 @@ function UrgencePhoneSheet({ close }: { close: () => void }) {
 }
 function ReviewUrlSheet({ close }: { close: () => void }) {
   const { s, set, toast } = useC()
-  const [url, setUrl] = useState(s.settings.reviewUrl || DEFAULT_REVIEW_URL)
+  const [url, setUrl] = useState(s.settings.reviewUrl || "")
   return <Sheet title="Lien d'avis Google" sub="Envoyé le lendemain d'un rendez-vous" c={A.rel.c} onClose={close}>
-    <F l="URL de la page d'avis"><input className={inp} value={url} onChange={e => setUrl(e.target.value)} placeholder={DEFAULT_REVIEW_URL} /></F>
-    <p className={`mt-3 ${tx.cap}`}>Un seul e-mail par rendez-vous, uniquement si le client a un e-mail. Laissez vide pour utiliser le lien par défaut.</p>
-    <Btn primary className="mt-6 w-full" onClick={() => { set(x => ({ ...x, settings: { ...x.settings, reviewUrl: url.trim() || DEFAULT_REVIEW_URL } })); toast("Lien d'avis enregistré"); close() }}>Enregistrer</Btn>
+    <F l="URL de la page d'avis"><input className={inp} value={url} onChange={e => setUrl(e.target.value)} placeholder="https://g.page/r/…/review" /></F>
+    <p className={`mt-3 ${tx.cap}`}>Le lien de VOTRE fiche Google (Google Business Profile → « Demander des avis »). Un seul message par rendez-vous, par e-mail (ou SMS si activés). Sans lien, aucune demande d'avis ne part.</p>
+    <Btn primary className="mt-6 w-full" onClick={() => { set(x => ({ ...x, settings: { ...x.settings, reviewUrl: url.trim() } })); toast(url.trim() ? "Lien d'avis enregistré" : "Lien d'avis retiré : aucune demande d'avis ne partira"); close() }}>Enregistrer</Btn>
   </Sheet>
 }
 function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   const { s, set, toast, go, modal, setChat, desk } = useC(), d = m.data || {}
   const clients = [...new Set([...s.calls.map(x => x.name), ...s.devis.map(x => x.client), ...s.rels.map(x => x.client)])]
-  const [f, setF] = useState<any>(() => ({ name: d.name || d.client || "", topic: d.topic || d.objet || "", addr: d.addr || "", date: d.date || TODAY, start: hh(d.start ?? 9).padStart(5, "0"), dur: String(s.settings.duree), amount: d.amount ?? "", note: "", urgent: false, callback: true, type: "Relance devis", canal: "SMS", when: "Demain 9:00" }))
+  const [f, setF] = useState<any>(() => ({ name: d.name || d.client || "", topic: d.topic || d.objet || "", addr: d.addr || "", date: d.date || TODAY, start: hh(d.start ?? 9).padStart(5, "0"), dur: String(s.settings.duree), amount: d.amount ?? "", note: "", urgent: false, callback: true, type: "Relance devis", canal: "Appel", when: "Demain 9:00" }))
   const v = (k: string) => ({ value: f[k], onChange: (e: any) => setF({ ...f, [k]: e.target.value }) })
   const toH = (t: string) => { const [a, b] = t.split(":").map(Number); return a + (b || 0) / 60 }
   const foot = (label: string, ok: boolean, run: () => void, c?: string, hint = "Indiquez le nom du client pour continuer") => <div className={`sticky bottom-0 z-10 mt-6 bg-[#121214] pt-3 ${desk ? "-mx-6 px-6" : "-mx-5 px-5"}`}><datalist id="akno-clients">{clients.map(x => <option key={x} value={x} />)}</datalist><div className="flex gap-2"><Btn className="flex-1" onClick={close}>Annuler</Btn><Btn primary c={c} className="flex-[1.4]" disabled={!ok} onClick={() => { run(); close() }}>{label}</Btn></div><p aria-live="polite" className={`h-5 pt-2 text-center text-[12px] text-white/50 transition-opacity ${ok ? "opacity-0" : "opacity-100"}`}>{ok ? "" : hint}</p></div>
@@ -886,15 +849,23 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "rdv") return <Sheet title="Nouveau rendez-vous" c={A.ag.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><div className="grid grid-cols-[1.4fr_1fr_1fr] gap-2"><F l="Date"><input type="date" className={inp} {...v("date")} /></F><F l="Heure"><input type="time" step={900} className={inp} {...v("start")} /></F><F l="Durée (h)"><select className={inp} {...v("dur")}>{["0.5", "1", "1.5", "2", "3", "4"].map(x => <option key={x} value={x}>{x.replace(".", ",")}</option>)}</select></F></div><F l="Adresse"><input className={inp} {...v("addr")} /></F></div>
     {foot("Créer le RDV", !!f.name.trim() && !!f.date, () => { set(x => ({ ...x, events: [...x.events, { id: uid(), date: f.date, start: toH(f.start), dur: Number(f.dur), name: f.name.trim(), topic: f.topic || "Intervention", addr: f.addr, created: Date.now() }] })); const wd = dd(f.date).getDay(); toast(wd === 0 || wd === 6 ? "RDV créé (week-end : visible sur mobile)" : "RDV créé"); go("ag") }, A.ag.c)}</Sheet>
   if (m.kind === "ev") { const e = s.events.find(y => y.id === d.id) || d as Ev; return <ClientSheet name={e.name} callId={linkedCall(s, e)?.id} eventId={e.id} close={close} /> }
-  if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>SMS</option><option>Appel</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div></div>
+  if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>Appel</option><option>SMS</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div><p className="px-1 text-[13px] leading-5 text-white/50">C'est un rappel pour vous : Akno ne l'envoie pas tout seul. Les relances de devis envoyés et les demandes d'avis, elles, partent automatiquement.</p></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
+  if (m.kind === "entreprise") return <EntrepriseSheet close={close} />
+  if (m.kind === "abonnement") return <AbonnementSheet close={close} />
+  if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} /></Suspense>
+  if (m.kind === "conformite") return <ConformiteSheet close={close} />
+  if (m.kind === "leads") return <LeadsSheet close={close} />
+  if (m.kind === "reception") return <ReceptionSheet close={close} />
+  if (m.kind === "agendaCal") return <AgendaCalSheet close={close} />
+  if (m.kind === "sms") return <SmsSheet close={close} />
   if (m.kind === "listen") { const n = s.calls.filter(x => x.recording).length; return <Sheet title="À écouter" sub={`${n} enregistrement${n > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}><ListenList /></Sheet> }
   if (m.kind === "calls") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent)), rest = s.calls.filter(x => !x.callback)
     return <Sheet title="Appels" sub={`${todo.length} à rappeler · ${s.calls.length} appels au total`} c={A.rec.c} onClose={close}><CallsList todo={todo} rest={rest} /></Sheet> }
   if (m.kind === "callbacks") { const todo = s.calls.filter(x => x.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent))
     const done = (x: Call) => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast(`${x.name} · marqué rappelé`) }
-    return <Sheet title="À rappeler" sub={`${todo.length} client${todo.length > 1 ? "s" : ""} · ${todo.filter(x => x.urgent).length} urgent${todo.filter(x => x.urgent).length > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}>{todo.length ? <div className="-mx-5 bg-black/20">{todo.map((x, i) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}<Chip c={AMBER}>À rappeler</Chip></span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""} · ${x.day ? "hier " : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => done(x)} /></div>} />)}</div> : <div className={`py-8 text-center ${tx.cap}`}>Personne à rappeler. Tout est à jour.</div>}</Sheet> }
+    return <Sheet title="À rappeler" sub={`${todo.length} client${todo.length > 1 ? "s" : ""} · ${todo.filter(x => x.urgent).length} urgent${todo.filter(x => x.urgent).length > 1 ? "s" : ""}`} c={A.rec.c} onClose={close}>{todo.length ? <div className="-mx-5 bg-black/20">{todo.map((x, i) => <Row key={x.id} first={i === 0} label={x.name} onClick={() => modal({ kind: "client", data: { name: x.name, call: x.id } })} lead={<Av n={x.name} />} t={<span className="flex items-center gap-2"><span className="truncate">{x.name}</span>{x.urgent && <Chip c={RED}>Urgent</Chip>}<Chip c={AMBER}>À rappeler</Chip></span>} s={`${x.tag || x.topic}${x.rappelAt ? ` · ${x.rappelAt}` : ""} · ${x.day ? `${x.day.toLowerCase()} ` : ""}${x.time}`} r={<div className="flex items-center gap-2"><TBtn I={MessageSquareText} label={`SMS à ${x.name}`} href={`sms:${tel(x.name)}`} /><TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${tel(x.name)}`} c={A.rec.c} onClick={() => done(x)} /></div>} />)}</div> : <div className={`py-8 text-center ${tx.cap}`}>Personne à rappeler. Tout est à jour.</div>}</Sheet> }
   if (m.kind === "relList") return <Sheet title="Relances" sub={`${s.rels.filter(r => r.status === "prog").length} à venir`} c={A.rel.c} onClose={close}><div className="-mx-5 bg-black/20">{s.rels.map((r, i) => <Row key={r.id} first={i === 0} label={r.client} onClick={() => modal({ kind: "relView", data: r })} lead={<Ic I={canalI[r.canal] || Send} />} t={r.client} s={`${r.type} · ${r.date}`} r={<Chip c={RS[r.status][1]}>{RS[r.status][0]}</Chip>} />)}</div></Sheet>
   if (m.kind === "reviewUrl") return <ReviewUrlSheet close={close} />
   if (m.kind === "urgencePhone") return <UrgencePhoneSheet close={close} />
@@ -909,10 +880,10 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "relView") { const r = s.rels.find(y => y.id === d.id) || d as Rel, on = s.settings.agents.rel
     const stopAll = () => { if (!r.devisId) return; set(x => ({ ...x, devis: x.devis.map(dv => dv.id === r.devisId ? { ...dv, remindersOff: true } : dv), rels: x.rels.map(y => y.devisId === r.devisId && y.status === "prog" ? { ...y, status: "pause" } : y) })); toast("Relances de ce devis arrêtées"); close() }
     return <Sheet title={r.client} sub={`${r.type} · ${r.canal}`} c={A.rel.c} onClose={close}><div className="space-y-2"><Sub dot={RS[r.status][1]}>{RS[r.status][0]} · {r.date}</Sub>{!on && <Sub>Agent Relance en pause : envoi manuel désactivé</Sub>}{r.devisId && <Sub>Relance automatique liée au devis</Sub>}</div>
-      <div className="mt-6 grid grid-cols-2 gap-2">{r.devisId && (r.status === "prog" || r.status === "pause") ? <Btn className="col-span-2" onClick={stopAll} disabled={!!s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause"}>{s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause" ? "Relances arrêtées" : "Arrêter les relances de ce devis"}</Btn> : (r.status === "prog" || r.status === "pause") ? <><Btn primary disabled={!on} aria-label={`Envoyer ${r.client}`} onClick={() => { relUpd(r.id, "env", `Relance envoyée à ${r.client} (simulé)`, "À l'instant"); close() }}><Send size={14} strokeWidth={1.5} />Envoyer</Btn><Btn onClick={() => { relUpd(r.id, r.status === "pause" ? "prog" : "pause", r.status === "pause" ? "Relance reprise" : "Relance en pause"); close() }}>{r.status === "pause" ? <><Play size={13} strokeWidth={1.5} />Reprendre</> : <><Pause size={13} strokeWidth={1.5} />Mettre en pause</>}</Btn></> : <Btn className="col-span-2" onClick={() => { relUpd(r.id, "prog", "Relance reprogrammée", "Demain 9:00"); close() }}><RotateCcw size={14} strokeWidth={1.5} />Reprogrammer</Btn>}</div></Sheet> }
+      <div className="mt-6 grid grid-cols-2 gap-2">{r.devisId && (r.status === "prog" || r.status === "pause") ? <Btn className="col-span-2" onClick={stopAll} disabled={!!s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause"}>{s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause" ? "Relances arrêtées" : "Arrêter les relances de ce devis"}</Btn> : (r.status === "prog" || r.status === "pause") ? <><Btn primary disabled={!on} aria-label={`Envoyer ${r.client}`} onClick={() => { relUpd(r.id, "env", `Relance marquée comme faite · ${r.client}`, "Faite"); close() }}><Check size={14} strokeWidth={1.5} />Marquer faite</Btn><Btn onClick={() => { relUpd(r.id, r.status === "pause" ? "prog" : "pause", r.status === "pause" ? "Relance reprise" : "Relance en pause"); close() }}>{r.status === "pause" ? <><Play size={13} strokeWidth={1.5} />Reprendre</> : <><Pause size={13} strokeWidth={1.5} />Mettre en pause</>}</Btn></> : <Btn className="col-span-2" onClick={() => { relUpd(r.id, "prog", "Relance reprogrammée", "Demain 9:00"); close() }}><RotateCcw size={14} strokeWidth={1.5} />Reprogrammer</Btn>}</div></Sheet> }
   if (m.kind === "devis") return <Sheet title="Nouveau devis" c={A.dev.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><F l={`Montant HT (€) · TVA ${String(s.settings.tva).replace(".", ",")} %`}><input type="number" min={0} className={inp} {...v("amount")} /></F></div>
     {foot("Créer le brouillon", !!f.name.trim() && Number(f.amount) > 0, () => { set(x => ({ ...x, devis: [{ id: uid(), num: Math.max(...x.devis.map(y => y.num), 9087) + 1, client: f.name.trim(), objet: f.topic || "Travaux", amount: Number(f.amount), status: "brouillon", created: Date.now() }, ...x.devis] })); toast("Brouillon de devis créé"); go("dev") }, A.dev.c, "Indiquez le client et un montant")}</Sheet>
-  if (m.kind === "devisList") return <Sheet title="Devis" sub="Septembre" c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <Row key={x.id} first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisPrev", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} />)}</div></Sheet>
+  if (m.kind === "devisList") return <Sheet title="Devis" sub={`${s.devis.length} devis`} c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <Row key={x.id} first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisPrev", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} />)}</div></Sheet>
   if (m.kind === "aiPop") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, n = s.devis.filter(toValidate).length
     if (!toValidate(dv)) return null
     return <Sheet title="Nouveau devis" sub="Brouillon — à valider" c={A.dev.c} onClose={close}>
@@ -1047,6 +1018,7 @@ function AknoApp() {
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
       : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
+    <Gate />
     <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
@@ -1079,5 +1051,5 @@ function AknoRootInner() {
   if (ses && locked) return <LockScreen uid={ses.user.id} onUnlock={() => setLocked(false)} />
   if (ses && setup && !rec) return <LockSetup uid={ses.user.id} email={ses.user.email || ""} onDone={() => { localStorage.setItem(`akno-lock-asked:${ses.user.id}`, "1"); setSetup(false) }} />
   if (rec && ses) return <Login mode="reset" onDone={() => { setRec(false); history.replaceState(null, "", "/reception") }} />
-  return ses ? <AknoApp key={ses.user.id} /> : <Login />
+  return ses ? <AknoApp key={ses.user.id} /> : <Login mode={new URLSearchParams(location.search).has("signup") || location.pathname === "/inscription" ? "signup" : "login"} />
 }

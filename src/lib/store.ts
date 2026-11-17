@@ -10,7 +10,8 @@ export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref" | "
 export type DevisLine = { l: string; q: number; pu: number; u?: string; tv?: number }
 export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string; token?: string; remindersOff?: boolean; reply?: string; repliedAt?: string; reminderCount?: number; phone?: string }
 export type Msg = { id: string; from: "me" | "ai"; text: string; devisId?: string; action?: string; card?: { num: number; client: string; objet: string; amount: number }; items?: import("./assistant").RItem[]; acts?: import("./assistant").RAct[]; chips?: string[]; done?: string[] }
-export const DEFAULT_REVIEW_URL = "https://g.page/r/CUFA_AEl10CzECE/review"
+/** update44 : plus de lien d'avis par défaut (il appartenait à une autre entreprise). Chaque artisan saisit le sien. */
+export const DEFAULT_REVIEW_URL = ""
 export type Settings = { agents: { rec: boolean; ag: boolean; rel: boolean; dev: boolean }; sms: boolean; push: boolean; tva: number; duree: number; name?: string; company?: string; email?: string; reviewUrl?: string; urgencePhone?: string; tarifs?: Tarifs }
 export type Client = { key: string; name: string; phone: string; email?: string; addr: string; lat: number; lon: number; hist?: { calls: number; last: string; since: string } }
 export type St = { clients: Client[]; calls: Call[]; events: Ev[]; rels: Rel[]; devis: Devis[]; settings: Settings; chat: Msg[]; lastRel: { client: string; type: string; time: string; canal: string } }
@@ -69,7 +70,7 @@ export const seed = (): St => ({
     { id: "d5", num: 9083, client: "Julie Moreau", objet: "Ballon d'eau chaude", status: "val", amount: 1890, created: 2, lines: [{ l: "Ballon électrique 300 L stéatite", q: 1, pu: 1250 }, { l: "Groupe de sécurité + raccords", q: 1, pu: 140 }, { l: "Dépose et évacuation de l'ancien ballon", q: 1, pu: 100 }, { l: "Main d'œuvre", q: 4, pu: 100 }] },
     { id: "d6", num: 9082, client: "Mme Leroy", objet: "Rénovation salle d'eau", status: "val", amount: 1290, created: 1, lines: [{ l: "Meuble vasque 80 cm", q: 1, pu: 480 }, { l: "Mitigeur lavabo", q: 1, pu: 160 }, { l: "Évacuations PVC et raccords", q: 1, pu: 150 }, { l: "Main d'œuvre", q: 5, pu: 100 }] },
   ],
-  settings: { agents: { rec: true, ag: true, rel: false, dev: true }, sms: true, push: true, tva: 10, duree: 1 },
+  settings: { agents: { rec: true, ag: true, rel: false, dev: true }, sms: false, push: true, tva: 10, duree: 1 },
   chat: [
     { id: "m1", from: "me", text: "Prépare un devis pour M. Dubois, remplacement chaudière gaz." },
     { id: "m2", from: "ai", text: "Brouillon prêt : chaudière à condensation 24 kW, pose et mise en service.", card: { num: 9088, client: "Clément Dubois", objet: "Chaudière à condensation 24 kW", amount: 4850 } },
@@ -90,13 +91,13 @@ type Row = Record<string, any>
 /** Numéros réels des appelants, par nom (utilisé par les boutons Appeler / SMS). */
 export const PHONES = new Map<string, string>()
 const toCall = (r: Row): Call => {
-  const d = new Date(r.created_at), today = isoDay(d) === isoDay(new Date()), name = r.nom_client || r.telephone_client || "Inconnu", note = r.resume || r.besoin_detail || r.notes || ""
+  const d = new Date(r.created_at), today = isoDay(d) === isoDay(new Date()), yest = isoDay(d) === isoDay(new Date(Date.now() - 864e5)), name = r.nom_client || r.telephone_client || "Inconnu", note = r.resume || r.besoin_detail || r.notes || ""
   if (r.telephone_client) PHONES.set(name, String(r.telephone_client).replace(/\s/g, ""))
   const u = String(r.urgence || "").toLowerCase(), sec = r.duration || 0
   const tr = typeof r.transcript === "string" ? r.transcript.split("\n").map((l: string) => l.match(/^\s*(Agent|User|Client|Akno)\s*:\s*(.*)$/i)).filter((m: RegExpMatchArray | null): m is RegExpMatchArray => !!m).map((m: RegExpMatchArray) => [/agent|akno/i.test(m[1]) ? "Akno" : "Client", m[2]] as [string, string]) : undefined
   const callback = r.rappel_souhaite === true || (r.rappel_souhaite == null && r.statut === "a_rappeler")
   const rappelAt = typeof r.rappel_creneau === "string" && r.rappel_creneau.trim() ? r.rappel_creneau.trim() : undefined
-  return { id: String(r.id), name, topic: r.motif || r.type_demande || "Appel", tag: r.motif || undefined, time: hm(d), day: today ? undefined : "Hier", urgent: /urg|haut|high/.test(u), callback, rappelAt, note, short: note ? `${name} · ${note}` : undefined, besoin: r.besoin_detail || undefined, urgence: r.urgence || undefined, addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, suite: r.notes || undefined, dur: sec ? `${Math.floor(sec / 60)}:${pad(sec % 60)}` : undefined, transcript: tr?.length ? tr : undefined, phone: r.telephone_client || undefined, recording: r.recording_url || undefined, createdAt: r.created_at || undefined, wantDevis: String(r.type_demande || "").toLowerCase() === "devis" }
+  return { id: String(r.id), name, topic: r.motif || r.type_demande || "Appel", tag: r.motif || undefined, time: hm(d), day: today ? undefined : yest ? "Hier" : d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }), urgent: /urg|haut|high/.test(u), callback, rappelAt, note, short: note ? `${name} · ${note}` : undefined, besoin: r.besoin_detail || undefined, urgence: r.urgence || undefined, addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, suite: r.notes || undefined, dur: sec ? `${Math.floor(sec / 60)}:${pad(sec % 60)}` : undefined, transcript: tr?.length ? tr : undefined, phone: r.telephone_client || undefined, recording: r.recording_url || undefined, createdAt: r.created_at || undefined, wantDevis: String(r.type_demande || "").toLowerCase() === "devis" }
 }
 const toEv = (r: Row): Ev => { const a = new Date(r.start), b = r.end ? new Date(r.end) : new Date(a.getTime() + 3600e3); return { id: r.id, date: isoDay(a), start: a.getHours() + a.getMinutes() / 60, dur: Math.max(.25, (b.getTime() - a.getTime()) / 3600e3), name: r.client || "Client", topic: r.title || "", addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1, ai: r.call_id != null, callId: r.call_id != null ? String(r.call_id) : undefined, phone: r.telephone_client || undefined, notes: r.notes || undefined } }
 const evRow = (e: Ev) => { const a = new Date(`${e.date}T00:00:00`); a.setMinutes(Math.round(e.start * 60)); const b = new Date(a.getTime() + e.dur * 3600e3); return { title: e.topic, client: e.name, start: a.toISOString(), end: b.toISOString(), adresse: e.addr ?? null } }
@@ -126,7 +127,7 @@ const empty = (): St => {
   return { clients: [], calls: [], events: [], rels: [], devis: [], chat: [], lastRel: { client: "", type: "", time: "", canal: "" }, settings: { ...d, ...keep, tarifs: mergeTarifs(keep.tarifs) } }
 }
 const toRel = (r: Row): Rel => ({ id: r.id, client: r.client || "", type: r.type || "", canal: r.canal || "SMS", status: (["prog", "pause", "env", "rep"].includes(r.statut) ? r.statut : "prog") as RelStatus, date: r.date_label || new Date(r.created_at).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" }), at: r.created_at, devisId: r.devis_id || undefined, appointmentId: r.appointment_id || undefined, scheduledFor: r.scheduled_for || undefined, sentAt: r.sent_at || undefined })
-const relRow = (r: Rel) => ({ client: r.client, type: r.type, canal: r.canal, statut: r.status, date_label: r.date, ...(r.devisId ? { devis_id: r.devisId } : {}), ...(r.appointmentId ? { appointment_id: r.appointmentId } : {}) })
+const relRow = (r: Rel) => ({ client: r.client, type: r.type, canal: r.canal, statut: r.status, date_label: r.date, ...(r.devisId ? { devis_id: r.devisId } : {}), ...(r.appointmentId ? { appointment_id: r.appointmentId } : {}), ...(r.scheduledFor ? { scheduled_for: r.scheduledFor } : {}) })
 
 /** Données de l'artisan connecté : appels, rendez-vous, devis et profil viennent de Supabase (RLS = artisan_id = auth.uid()). */
 export function useStore() {
@@ -136,12 +137,14 @@ export function useStore() {
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser(); if (!user) return
     uidRef.current = user.id
+    // update44 : filtre artisan_id explicite en plus de la RLS (défense en profondeur, multi-clients)
+    const since = new Date(Date.now() - 400 * 864e5).toISOString()
     const [c, a, d, p, rl] = await Promise.all([
-      supabase.from("calls").select("*").order("created_at", { ascending: false }).limit(200),
-      supabase.from("appointments").select("*").order("start"),
-      supabase.from("devis").select("*").order("created_at", { ascending: false }),
+      supabase.from("calls").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(200),
+      supabase.from("appointments").select("*").eq("artisan_id", user.id).gte("start", since).order("start").limit(2000),
+      supabase.from("devis").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(1000),
       supabase.from("artisans").select("*").eq("id", user.id).maybeSingle(),
-      supabase.from("relances").select("*").order("created_at", { ascending: false })])
+      supabase.from("relances").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(1000)])
     if (p.data) setCO(p.data)
     if (!p.data && !p.error) await supabase.from("artisans").insert({ id: user.id, email: user.email })
     const dv = d.data || []
@@ -150,13 +153,13 @@ export function useStore() {
     const nextDevis = dv.map((r, i) => toDev(r, i, dv.length))
     const nextRels = (rl.data || []).map(toRel)
     setRaw(x => {
-      const settings = { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email, reviewUrl: p.data?.avis_url || x.settings.reviewUrl || DEFAULT_REVIEW_URL, urgencePhone: typeof p.data?.telephone_urgence === "string" ? p.data.telephone_urgence : x.settings.urgencePhone, tarifs: mergeTarifs(p.data?.tarifs ?? x.settings.tarifs) }
+      const settings = { ...x.settings, name: p.data?.prenom ?? x.settings.name, company: p.data?.nom_entreprise || p.data?.entreprise_nom || x.settings.company, email: user.email, reviewUrl: p.data ? (p.data.avis_url || "") : x.settings.reviewUrl || "", sms: p.data ? !!p.data.sms_enabled : x.settings.sms, urgencePhone: typeof p.data?.telephone_urgence === "string" ? p.data.telephone_urgence : x.settings.urgencePhone, tarifs: mergeTarifs(p.data?.tarifs ?? x.settings.tarifs) }
       if (
         JSON.stringify(x.calls) === JSON.stringify(nextCalls)
         && JSON.stringify(x.events) === JSON.stringify(nextEvents)
         && JSON.stringify(x.devis) === JSON.stringify(nextDevis)
         && JSON.stringify(x.rels) === JSON.stringify(nextRels)
-        && x.settings.name === settings.name && x.settings.company === settings.company && x.settings.email === settings.email && x.settings.reviewUrl === settings.reviewUrl && x.settings.urgencePhone === settings.urgencePhone
+        && x.settings.name === settings.name && x.settings.company === settings.company && x.settings.email === settings.email && x.settings.reviewUrl === settings.reviewUrl && x.settings.sms === settings.sms && x.settings.urgencePhone === settings.urgencePhone
         && tarifsEqual(x.settings.tarifs, settings.tarifs)
       ) return x
       return { ...x, calls: nextCalls, events: nextEvents, devis: nextDevis, rels: nextRels, settings }
@@ -165,17 +168,28 @@ export function useStore() {
   }, [])
   useEffect(() => {
     load()
-    const ch = supabase.channel("akno-live").on("postgres_changes", { event: "*", schema: "public", table: "calls" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "devis" }, () => load()).on("postgres_changes", { event: "*", schema: "public", table: "relances" }, () => load()).subscribe()
+    // Temps réel filtré sur l'artisan connecté + filet de sécurité toutes les 15 s (au lieu de 2 s : 7× moins de requêtes)
+    let ch: ReturnType<typeof supabase.channel> | undefined
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      const f = `artisan_id=eq.${user.id}`
+      ch = supabase.channel(`akno-live-${user.id}`)
+      for (const table of ["calls", "appointments", "devis", "relances"]) ch = ch.on("postgres_changes", { event: "*", schema: "public", table, filter: f }, () => load())
+      ch.subscribe()
+    })
     let timer: ReturnType<typeof setInterval> | undefined
-    const start = () => { if (!timer) timer = setInterval(() => { if (!document.hidden) load() }, 2000) }
+    const start = () => { if (!timer) timer = setInterval(() => { if (!document.hidden) load() }, 15000) }
     const stop = () => { if (timer) { clearInterval(timer); timer = undefined } }
     const vis = () => { if (document.hidden) stop(); else { load(); start() } }
     const onRefresh = () => load()
     document.addEventListener("visibilitychange", vis)
     addEventListener("akno-refresh", onRefresh)
     start()
+    const onFocus = () => load()
+    addEventListener("focus", onFocus)
     return () => {
-      supabase.removeChannel(ch)
+      removeEventListener("focus", onFocus)
+      if (ch) supabase.removeChannel(ch)
       stop()
       document.removeEventListener("visibilitychange", vis)
       removeEventListener("akno-refresh", onRefresh)
@@ -184,7 +198,12 @@ export function useStore() {
   const sync = useCallback(async (p: St, n: St) => {
     const me = uidRef.current; if (!me) return
     const jobs: PromiseLike<unknown>[] = []
-    if (p.calls !== n.calls) for (const c of n.calls) { const o = p.calls.find(x => x.id === c.id); if (o && o.callback !== c.callback) jobs.push(supabase.from("calls").update({ statut: c.callback ? "a_rappeler" : "rappele", rappel_souhaite: c.callback }).eq("id", Number(c.id))) }
+    if (p.calls !== n.calls) for (const c of n.calls) {
+      const o = p.calls.find(x => x.id === c.id)
+      // update44 : une note d'appel saisie à la main est maintenant enregistrée (avant, elle disparaissait au rechargement)
+      if (!o && !/^\d+$/.test(c.id)) jobs.push(supabase.from("calls").insert({ artisan_id: me, nom_client: c.name, motif: c.topic || null, notes: c.note || null, telephone_client: c.phone || null, adresse: c.addr || null, urgence: c.urgent ? "haute" : null, statut: c.callback ? "a_rappeler" : "rappele", rappel_souhaite: c.callback, source: "manuel" }))
+      else if (o && (o.callback !== c.callback || o.suite !== c.suite)) jobs.push(supabase.from("calls").update({ statut: c.callback ? "a_rappeler" : "rappele", rappel_souhaite: c.callback, ...(o.suite !== c.suite ? { notes: c.suite ?? null } : {}) }).eq("id", Number(c.id)))
+    }
     if (p.events !== n.events) {
       for (const e of n.events) { const o = p.events.find(x => x.id === e.id); if (!o) jobs.push(supabase.from("appointments").insert({ ...evRow(e), artisan_id: me })); else if (o !== e && isUuid(e.id)) jobs.push(supabase.from("appointments").update(evRow(e)).eq("id", e.id)) }
       for (const o of p.events) if (isUuid(o.id) && !n.events.some(x => x.id === o.id)) jobs.push(supabase.from("appointments").delete().eq("id", o.id))
@@ -197,6 +216,7 @@ export function useStore() {
       for (const r of n.rels) { const o = p.rels.find(x => x.id === r.id); if (!o) jobs.push(supabase.from("relances").insert({ ...relRow(r), artisan_id: me })); else if (o !== r && isUuid(r.id)) jobs.push(supabase.from("relances").update(relRow(r)).eq("id", r.id)) }
       for (const o of p.rels) if (isUuid(o.id) && !n.rels.some(x => x.id === o.id)) jobs.push(supabase.from("relances").delete().eq("id", o.id))
     }
+    if (p.settings.sms !== n.settings.sms) jobs.push(supabase.from("artisans").update({ sms_enabled: !!n.settings.sms }).eq("id", me))
     if (p.settings.name !== n.settings.name || p.settings.company !== n.settings.company || p.settings.reviewUrl !== n.settings.reviewUrl || p.settings.urgencePhone !== n.settings.urgencePhone || !tarifsEqual(p.settings.tarifs, n.settings.tarifs)) {
       jobs.push(supabase.from("artisans").update({
         ...(p.settings.name !== n.settings.name || p.settings.company !== n.settings.company ? { prenom: n.settings.name ?? null, nom_entreprise: n.settings.company ?? null } : {}),
@@ -208,7 +228,7 @@ export function useStore() {
     const res = await Promise.all(jobs) as { error?: unknown }[]
     if (res.some(r => r?.error)) console.error("Supabase sync", res.filter(r => r?.error))
     // recharge si une ligne a été créée (récupère les vrais identifiants)
-    if (n.events.some(e => !isUuid(e.id)) || n.devis.some(d => !isUuid(d.id)) || n.rels.some(r => !isUuid(r.id))) load()
+    if (n.events.some(e => !isUuid(e.id)) || n.devis.some(d => !isUuid(d.id)) || n.rels.some(r => !isUuid(r.id)) || n.calls.some(c => !/^\d+$/.test(c.id))) load()
   }, [load])
   const setS = useCallback((u: St | ((x: St) => St)) => { const p = cur.current, n = typeof u === "function" ? u(p) : u; cur.current = n; setRaw(n); sync(p, n) }, [sync])
   return [s, setS, loading] as const

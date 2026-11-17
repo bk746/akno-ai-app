@@ -4,7 +4,12 @@ export type Json = Record<string, unknown>
 const TZ = "Europe/Paris"
 
 export const env = (name: string) => (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]
-export const DEFAULT_REVIEW_URL = "https://g.page/r/CUFA_AEl10CzECE/review"
+/** update44 : plus de lien d'avis par défaut. Sans lien propre à l'artisan, aucune demande d'avis ne part. */
+export function reviewUrlOf(raw?: string | null) {
+  const u = (raw || "").trim()
+  if (!u || u === "https://g.page/r/CUFA_AEl10CzECE/review") return ""
+  return /^https?:\/\//i.test(u) ? u : ""
+}
 
 export function looksLikeEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)
@@ -22,8 +27,14 @@ export function appUrl() {
   return ""
 }
 
-export function resendFrom() {
-  return (env("RESEND_FROM") || "Akno <onboarding@resend.dev>").trim()
+export function resendFrom(company?: string | null) {
+  const raw = (env("RESEND_FROM") || "Akno <onboarding@resend.dev>").trim()
+  const name = (company || "").replace(/["<>\r\n]/g, "").trim().slice(0, 60)
+  if (!name) return raw
+  const m = raw.match(/<([^>]+)>/)
+  const addr = m ? m[1] : raw
+  // « Plomberie Martin via Akno » <notifications@akno.ai> : le client reconnaît son artisan
+  return `"${name} via Akno" <${addr}>`
 }
 
 export function devisAcceptUrl(token: string) {
@@ -52,13 +63,14 @@ export async function sendResend(input: {
   subject: string
   html: string
   replyTo?: string
+  company?: string | null
   attachments?: { filename: string; content: string }[]
 }): Promise<{ ok: true } | { ok: false; missingKey?: boolean; error: string }> {
   const key = env("RESEND_API_KEY")
   if (!key) {
     return { ok: false, missingKey: true, error: "L'envoi d'e-mail n'est pas configuré (RESEND_API_KEY manquante)." }
   }
-  const payload: Json = { from: resendFrom(), to: [input.to], subject: input.subject, html: input.html }
+  const payload: Json = { from: resendFrom(input.company), to: [input.to], subject: input.subject, html: input.html }
   if (input.replyTo) payload.reply_to = input.replyTo
   if (input.attachments?.length) payload.attachments = input.attachments
   const res = await fetch("https://api.resend.com/emails", {
@@ -88,9 +100,9 @@ ${ctaBlock(input.acceptUrl, input.company)}
 <p>Cordialement,<br/>${escapeHtml(input.company)}</p>`
 }
 
-export function reminderEmailHtml(input: { client?: string; numero: string; objet?: string; company: string; acceptUrl: string; wave: 3 | 7 }) {
+export function reminderEmailHtml(input: { client?: string; numero: string; objet?: string; company: string; acceptUrl: string; wave?: number; last?: boolean }) {
   const who = input.client ? ` ${escapeHtml(input.client)}` : ""
-  const intro = input.wave === 3
+  const intro = !input.last
     ? `Nous nous permettons de revenir vers vous au sujet du devis n° ${escapeHtml(String(input.numero))}${input.objet ? ` concernant « ${escapeHtml(input.objet)} »` : ""}. Avez-vous pu le consulter ?`
     : `Nous vous envoyons un dernier rappel au sujet du devis n° ${escapeHtml(String(input.numero))}${input.objet ? ` (« ${escapeHtml(input.objet)} »)` : ""}. Il reste à votre disposition si vous souhaitez l'accepter ou l'ajuster.`
   return `<p>Bonjour${who},</p>
@@ -154,20 +166,28 @@ function formatRelLabel(n: number, ymd: string) {
   return `J+${n} · ${label}`
 }
 
+export function reminderDelays(raw?: unknown): number[] {
+  const arr = Array.isArray(raw) ? raw.map(Number).filter(n => Number.isFinite(n) && n >= 1 && n <= 60) : []
+  const uniq = [...new Set(arr)].sort((a, b) => a - b).slice(0, 3)
+  return uniq.length ? uniq : [3, 7]
+}
+
 export async function scheduleDevisReminders(sb: SupabaseClient, input: {
   artisanId: string
   devisId: string
   client: string
   envoyeLe: string
+  delays?: number[]
+  canal?: string
 }) {
   const sentYmd = parisYmd(new Date(input.envoyeLe))
-  const rows = [3, 7].map(n => {
+  const rows = reminderDelays(input.delays).map(n => {
     const ymd = addDaysYmd(sentYmd, n)
     return {
       artisan_id: input.artisanId,
       client: input.client,
       type: `Relance devis J+${n}`,
-      canal: "E-mail",
+      canal: input.canal || "E-mail",
       statut: "prog",
       date_label: formatRelLabel(n, ymd),
       devis_id: input.devisId,
@@ -192,4 +212,79 @@ export function samePhone(a?: string | null, b?: string | null) {
   const x = norm(a), y = norm(b)
   if (!x || !y || x.length < 8 || y.length < 8) return false
   return x === y || x.slice(-9) === y.slice(-9)
+}
+
+const euro = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[\u202f\u00a0]/g, " ")} €`
+export const formatEuro = euro
+export const frDate = (iso?: string | null) => iso ? new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso).toLocaleDateString("fr-FR", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric" }) : ""
+
+export function factureEmailHtml(input: { client?: string; numero: string; objet?: string; company: string; ttc: number; echeance?: string | null; iban?: string | null; avoir?: boolean }) {
+  const who = input.client ? ` ${escapeHtml(input.client)}` : ""
+  const what = input.avoir ? "l'avoir" : "la facture"
+  return `<p>Bonjour${who},</p>
+<p>Veuillez trouver ci-joint ${what} n° ${escapeHtml(input.numero)}${input.objet ? ` concernant « ${escapeHtml(input.objet)} »` : ""}, d'un montant de <strong>${euro(input.ttc)} TTC</strong>.</p>
+${!input.avoir && input.echeance ? `<p>Date d'échéance : <strong>${escapeHtml(frDate(input.echeance))}</strong>.</p>` : ""}
+${!input.avoir && input.iban ? `<p>Règlement par virement : IBAN ${escapeHtml(input.iban)}</p>` : ""}
+<p>Cordialement,<br/>${escapeHtml(input.company)}</p>`
+}
+
+/** Modèles de relance d'impayé. Niveau 1 : rappel courtois · 2 : relance · 3 : relance ferme · 4 : mise en demeure. */
+export function impayeTemplate(input: { niveau: number; client?: string; numero: string; company: string; ttc: number; echeance?: string | null; pro: boolean; iban?: string | null }) {
+  const who = input.client ? ` ${input.client}` : ""
+  const due = frDate(input.echeance)
+  const penal = input.pro
+    ? "\n\nConformément aux articles L441-10 et D441-5 du Code de commerce, tout retard de paiement entraîne des pénalités de retard au taux de trois fois le taux d'intérêt légal ainsi qu'une indemnité forfaitaire pour frais de recouvrement de 40 €."
+    : ""
+  const pay = input.iban ? `\n\nRèglement possible par virement : IBAN ${input.iban}` : ""
+  const sign = `\n\nCordialement,\n${input.company}`
+  const amount = euro(input.ttc)
+  if (input.niveau <= 1) return {
+    sujet: `Rappel — facture n° ${input.numero}`,
+    corps: `Bonjour${who},\n\nSauf erreur de notre part, la facture n° ${input.numero} d'un montant de ${amount} TTC, arrivée à échéance le ${due}, reste à régler.\n\nSi le paiement a été effectué entre-temps, merci de ne pas tenir compte de ce message.${pay}${sign}`,
+  }
+  if (input.niveau === 2) return {
+    sujet: `Relance — facture n° ${input.numero} impayée`,
+    corps: `Bonjour${who},\n\nNous revenons vers vous au sujet de la facture n° ${input.numero} (${amount} TTC), échue depuis le ${due}, qui demeure impayée à ce jour.\n\nMerci de procéder au règlement dans les meilleurs délais ou de nous contacter en cas de difficulté.${pay}${penal}${sign}`,
+  }
+  if (input.niveau === 3) return {
+    sujet: `Dernière relance avant procédure — facture n° ${input.numero}`,
+    corps: `Bonjour${who},\n\nMalgré nos précédentes relances, la facture n° ${input.numero} d'un montant de ${amount} TTC, échue le ${due}, n'a toujours pas été réglée.\n\nNous vous demandons de régulariser cette situation sous 8 jours. À défaut, nous serons contraints d'engager une procédure de recouvrement.${pay}${penal}${sign}`,
+  }
+  return {
+    sujet: `Mise en demeure de payer — facture n° ${input.numero}`,
+    corps: `Bonjour${who},\n\nPar la présente, nous vous mettons en demeure de régler sous 8 jours la somme de ${amount} TTC correspondant à la facture n° ${input.numero}, échue le ${due}.\n\nÀ défaut de paiement dans ce délai, nous saisirons la juridiction compétente (injonction de payer) sans autre avis.${penal}${pay}\n\nPour une mise en demeure ayant valeur de preuve, nous vous recommandons de doubler ce message d'un envoi en recommandé avec accusé de réception.${sign}`,
+  }
+}
+
+export function textToHtml(text: string) {
+  return text.split(/\n{2,}/).map(p => `<p>${escapeHtml(p).replace(/\n/g, "<br/>")}</p>`).join("\n")
+}
+
+export function simpleHtml(title: string, lines: string[], cta?: { label: string; url: string }) {
+  return `<p style="font-size:17px;font-weight:600">${escapeHtml(title)}</p>
+${lines.map(l => `<p>${escapeHtml(l)}</p>`).join("\n")}
+${cta?.url ? `<p style="margin:24px 0"><a href="${escapeHtml(cta.url)}" style="display:inline-block;background:#111;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:600">${escapeHtml(cta.label)}</a></p>` : ""}
+<p style="color:#888;font-size:12px">Akno · message automatique</p>`
+}
+
+export function monthlyReportHtml(input: { company: string; monthLabel: string; stats: Record<string, number>; appUrl: string }) {
+  const s = input.stats
+  const rows: [string, string][] = [
+    ["Appels reçus par la réceptionniste", String(s.calls || 0)],
+    ["Dont urgences", String(s.urgent || 0)],
+    ["Rendez-vous pris", String(s.rdv || 0)],
+    ["Devis envoyés", String(s.devis_sent || 0)],
+    ["Devis acceptés", `${s.devis_accepted || 0} (${euro(s.devis_accepted_ttc || 0)} TTC)`],
+    ["Relances envoyées", String(s.relances || 0)],
+    ["Factures émises", `${s.factures || 0} (${euro(s.factures_ttc || 0)} TTC)`],
+    ["Factures encaissées", euro(s.encaisse_ttc || 0)],
+    ["Demandes d'avis envoyées", String(s.avis || 0)],
+    ["Demandes arrivées par le site", String(s.leads || 0)],
+    ["Minutes de réceptionniste", String(s.minutes || 0)],
+  ]
+  return `<p style="font-size:20px;font-weight:600">Votre mois avec Akno — ${escapeHtml(input.monthLabel)}</p>
+<p>Bonjour ${escapeHtml(input.company)}, voici le résumé de votre activité.</p>
+<table style="border-collapse:collapse;width:100%;max-width:520px;font-size:14px">${rows.map(([a, b]) => `<tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#555">${escapeHtml(a)}</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;font-weight:600">${escapeHtml(b)}</td></tr>`).join("")}</table>
+${input.appUrl ? `<p style="margin:24px 0"><a href="${escapeHtml(input.appUrl)}" style="display:inline-block;background:#111;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:600">Ouvrir Akno</a></p>` : ""}
+<p style="color:#888;font-size:12px">Vous recevez ce rapport car il est activé dans Réglages → Rapport mensuel.</p>`
 }

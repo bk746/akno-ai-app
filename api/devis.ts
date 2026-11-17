@@ -1,6 +1,10 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js"
-import { devisAcceptUrl, devisEmailHtml, env, looksLikeEmail, replyToFor, scheduleDevisReminders, sendResend } from "./_lib/mail.js"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { devisAcceptUrl, devisEmailHtml, env, factureEmailHtml, looksLikeEmail, reminderDelays, replyToFor, scheduleDevisReminders, sendResend, textToHtml } from "./_lib/mail.js"
 import { notifyArtisan } from "./_lib/push.js"
+import { authed as authSession, isResult } from "./_lib/http.js"
+import { can, loadEntitlements, upgradeError, type Entitlements } from "./_lib/plans.js"
+import { consume, monthKey, rateLimit } from "./_lib/limits.js"
+import { reportError } from "./_lib/monitoring.js"
 
 type Json = Record<string, unknown>
 type Line = { l: string; q: number; u: string; pu: number; tv: number }
@@ -10,24 +14,6 @@ const CHAT_MODEL = () => env("XAI_CHAT_MODEL") || "grok-4-latest"
 
 function round2(n: number) {
   return Math.round(n * 100) / 100
-}
-
-async function authed(authorization?: string): Promise<{ supabase: SupabaseClient; userId: string } | { status: number; body: Json }> {
-  const access = authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : ""
-  if (!access) return { status: 401, body: { error: "Non authentifié." } }
-  const supabaseUrl = env("VITE_SUPABASE_URL") || env("SUPABASE_URL")
-  const supabaseKey = env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_ANON_KEY")
-  if (!supabaseUrl || !supabaseKey) return { status: 503, body: { error: "Configuration Supabase manquante." } }
-  const probe = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  })
-  const { data: { user }, error } = await probe.auth.getUser(access)
-  if (error || !user) return { status: 401, body: { error: "Session invalide." } }
-  const supabase = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    global: { headers: { Authorization: `Bearer ${access}` } },
-  })
-  return { supabase, userId: user.id }
 }
 
 function totals(lines: Line[]) {
@@ -62,11 +48,14 @@ function parseModelJson(text: string): { objet?: string; lines: Line[] } {
 }
 
 async function nextNumero(supabase: SupabaseClient) {
-  const { data } = await supabase.from("devis").select("numero").order("created_at", { ascending: false }).limit(40)
+  // update44 : compteur atomique en base (plus de doublon si deux devis partent en même temps)
+  const { data, error } = await supabase.rpc("next_numero", { p_kind: "devis" })
+  if (!error && data) return String(data)
+  const { data: rows } = await supabase.from("devis").select("numero").order("created_at", { ascending: false }).limit(40)
   let max = 9087
-  for (const r of data || []) {
+  for (const r of rows || []) {
     const n = parseInt(String((r as { numero?: string }).numero || "").replace(/\D/g, ""), 10)
-    if (Number.isFinite(n) && n > max) max = n
+    if (Number.isFinite(n) && n > max && n < 1e9) max = n
   }
   return String(max + 1)
 }
@@ -168,9 +157,10 @@ async function draftFromXai(input: {
   return { error: lastError, status: 502 as const }
 }
 
-async function handleDraft(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+async function handleDraft(supabase: SupabaseClient, userId: string, body: Json, ent: Entitlements): Promise<ApiResult> {
   const callId = Number(body.call_id)
   if (!Number.isFinite(callId) || callId <= 0) return { status: 400, body: { error: "call_id manquant." } }
+  if (!can(ent, "devis")) return { status: 402, body: { error: upgradeError("devis", ent), code: "upgrade" } }
 
   const { data: existing } = await supabase.from("devis").select("id, numero, objet, lignes, total_ht, total_ttc, statut").eq("call_id", callId).order("created_at", { ascending: false }).limit(1).maybeSingle()
   if (existing) {
@@ -180,6 +170,10 @@ async function handleDraft(supabase: SupabaseClient, userId: string, body: Json)
   const { data: call, error: cErr } = await supabase.from("calls").select("id, nom_client, telephone_client, email_client, adresse, ville, code_postal, motif, besoin_detail, resume, notes, transcript").eq("id", callId).maybeSingle()
   if (cErr || !call) return { status: 404, body: { error: "Appel introuvable." } }
 
+  if (!await rateLimit(userId, "devis-draft", 6)) return { status: 429, body: { error: "Trop de brouillons d'affilée. Patientez une minute." } }
+  if (!await consume(userId, "devis_drafts", monthKey(), ent.quotas.devis_drafts)) {
+    return { status: 429, body: { error: `Quota de ${ent.quotas.devis_drafts} brouillons IA atteint ce mois-ci.`, code: "quota" } }
+  }
   const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, prenom, tarifs").eq("id", userId).maybeSingle()
   const drafted = await draftFromXai({
     company: artisan?.entreprise_nom || artisan?.nom_entreprise || "",
@@ -256,7 +250,7 @@ async function handleSend(supabase: SupabaseClient, userId: string, body: Json):
   if (!pdf || pdf.length < 80) return { status: 400, body: { error: "PDF manquant." } }
   const filename = String(body.filename || `Devis-${devis.numero}.pdf`).replace(/[^\w.\-À-ÿ ]+/g, "") || `Devis-${devis.numero}.pdf`
 
-  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, prenom, entreprise_email, email").eq("id", userId).maybeSingle()
+  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, prenom, entreprise_email, email, relance_delais").eq("id", userId).maybeSingle()
   const company = artisan?.entreprise_nom || artisan?.nom_entreprise || "votre artisan"
   const token = String(devis.token || "")
   const acceptUrl = token ? devisAcceptUrl(token) : ""
@@ -265,6 +259,7 @@ async function handleSend(supabase: SupabaseClient, userId: string, body: Json):
     subject: `Devis n° ${devis.numero} — ${company}`,
     html: devisEmailHtml({ client: devis.client_nom, numero: String(devis.numero), objet: devis.objet || undefined, company, acceptUrl }),
     replyTo: replyToFor(token, artisan?.entreprise_email || artisan?.email || undefined),
+    company,
     attachments: [{ filename, content: pdf }],
   })
   if (!mailed.ok) {
@@ -278,21 +273,225 @@ async function handleSend(supabase: SupabaseClient, userId: string, body: Json):
     client_email: email,
   }).eq("id", devisId)
   if (uErr) return { status: 500, body: { error: "E-mail envoyé, mais le statut n'a pas pu être mis à jour." } }
-  try { await scheduleDevisReminders(supabase, { artisanId: userId, devisId, client: devis.client_nom, envoyeLe: sentAt }) } catch { /* le devis est déjà parti */ }
+  try { await scheduleDevisReminders(supabase, { artisanId: userId, devisId, client: devis.client_nom, envoyeLe: sentAt, delays: reminderDelays(artisan?.relance_delais) }) } catch { /* le devis est déjà parti */ }
   return { status: 200, body: { ok: true, sent_at: sentAt, email } }
 }
 
 export async function handleDevis(authorization?: string, body?: unknown): Promise<ApiResult> {
-  const session = await authed(authorization)
-  if ("status" in session) return session
+  const session = await authSession(authorization)
+  if (isResult(session)) return session
   const input = (body && typeof body === "object" ? body : {}) as Json
+  const { supabase, userId } = session
   try {
-    if (input.action === "draft") return await handleDraft(session.supabase, session.userId, input)
-    if (input.action === "send") return await handleSend(session.supabase, session.userId, input)
+    const ent = await loadEntitlements(supabase, userId)
+    const action = String(input.action || "")
+    if (action === "draft") return await handleDraft(supabase, userId, input, ent)
+    if (!ent.access) return { status: 402, body: { error: upgradeError("devis", ent), code: "upgrade" } }
+    if (action === "send") return await handleSend(supabase, userId, input)
+    if (action.startsWith("facture_") || action === "avoir") {
+      if (!can(ent, "factures")) return { status: 402, body: { error: upgradeError("factures", ent), code: "upgrade" } }
+      if (action === "facture_from_devis") return await factureFromDevis(supabase, userId, input)
+      if (action === "facture_emit") return await factureEmit(supabase, input)
+      if (action === "facture_send") return await factureSend(supabase, userId, input)
+      if (action === "facture_paid") return await facturePaid(supabase, input)
+      if (action === "facture_relance_send") return await factureRelanceSend(supabase, userId, input)
+      if (action === "avoir") return await factureAvoir(supabase, userId, input)
+    }
     return { status: 400, body: { error: "Action inconnue." } }
-  } catch {
+  } catch (e) {
+    await reportError(e, { route: "devis", action: String(input.action || "") })
     return { status: 500, body: { error: "Erreur serveur." } }
   }
+}
+
+/* ===================== update46 · Factures ===================== */
+
+// TVA à zéro : franchise (art. 293 B) ou autoliquidation (sous-traitance BTP)
+function factureTotals(lines: Line[], zeroTva = false) {
+  const t = totals(lines)
+  return zeroTva ? { total_ht: t.ht, total_tva: 0, total_ttc: t.ht } : { total_ht: t.ht, total_tva: t.tva, total_ttc: t.ttc }
+}
+
+async function factureFromDevis(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+  const devisId = String(body.devis_id || "").trim()
+  if (!devisId) return { status: 400, body: { error: "devis_id manquant." } }
+  const { data: devis } = await supabase.from("devis").select("id, numero, client_nom, client_email, client_telephone, client_adresse, objet, lignes, statut").eq("id", devisId).maybeSingle()
+  if (!devis) return { status: 404, body: { error: "Devis introuvable." } }
+  if (devis.statut !== "val") return { status: 409, body: { error: "Seul un devis accepté peut être facturé." } }
+  const type = body.type === "acompte" ? "acompte" : "facture"
+  const lines = asLines(devis.lignes)
+  if (!lines.length) return { status: 400, body: { error: "Le devis ne contient aucune ligne." } }
+
+  // Acomptes déjà émis sur ce devis (déduits de la facture de solde)
+  const { data: previous } = await supabase.from("factures").select("id, type, statut, total_ttc, numero").eq("devis_id", devisId)
+  const acomptes = (previous || []).filter(f => f.type === "acompte" && f.numero && f.statut !== "annulee")
+  const existingDraft = (previous || []).find(f => !f.numero && f.type === type)
+  if (existingDraft) return { status: 200, body: { ok: true, reused: true, facture_id: existingDraft.id } }
+  if (type === "facture" && (previous || []).some(f => f.type === "facture" && f.numero && f.statut !== "annulee")) {
+    return { status: 409, body: { error: "Ce devis a déjà une facture émise. Pour la corriger, faites un avoir." } }
+  }
+
+  let lignes: Line[] = lines
+  if (type === "acompte") {
+    const pct = Math.min(100, Math.max(1, Number(body.pourcentage) || 30))
+    const t = totals(lines)
+    lignes = [{ l: `Acompte de ${pct} % sur devis n° ${devis.numero}${devis.objet ? ` — ${devis.objet}` : ""}`, q: 1, u: "forfait", pu: round2(t.ht * pct / 100), tv: t.tva_taux }]
+  }
+  const acompteDeduit = type === "facture" ? round2(acomptes.reduce((a, f) => a + Number(f.total_ttc || 0), 0)) : 0
+  const { data: artisan } = await supabase.from("artisans").select("delai_paiement_jours, tva_non_applicable").eq("id", userId).maybeSingle()
+  const franchise = !!(artisan as { tva_non_applicable?: boolean } | null)?.tva_non_applicable
+  const row = {
+    artisan_id: userId,
+    devis_id: devisId,
+    type,
+    statut: "brouillon",
+    client_nom: devis.client_nom || "Client",
+    client_email: devis.client_email || null,
+    client_telephone: devis.client_telephone || null,
+    client_adresse: devis.client_adresse || null,
+    adresse_chantier: devis.client_adresse || null,
+    objet: devis.objet || null,
+    lignes,
+    ...factureTotals(lignes, franchise),
+    acompte_deduit: acompteDeduit,
+    delai_paiement_jours: Number((artisan as { delai_paiement_jours?: number } | null)?.delai_paiement_jours) || 30,
+  }
+  const { data: inserted, error } = await supabase.from("factures").insert(row).select("id").maybeSingle()
+  if (error || !inserted) return { status: 500, body: { error: "Impossible de créer la facture." } }
+  return { status: 200, body: { ok: true, facture_id: inserted.id } }
+}
+
+async function factureEmit(supabase: SupabaseClient, body: Json): Promise<ApiResult> {
+  const id = String(body.facture_id || "").trim()
+  if (!id) return { status: 400, body: { error: "facture_id manquant." } }
+  const { data: f } = await supabase.from("factures").select("id, artisan_id, lignes, numero, type, facture_origine_id, total_ttc, autoliquidation").eq("id", id).maybeSingle()
+  if (!f) return { status: 404, body: { error: "Facture introuvable." } }
+  if (!f.numero) {
+    const lines = asLines(f.lignes)
+    if (!lines.length) return { status: 400, body: { error: "La facture ne contient aucune ligne." } }
+    const { data: a } = await supabase.from("artisans").select("tva_non_applicable").eq("id", f.artisan_id).maybeSingle()
+    const totals = factureTotals(lines, !!f.autoliquidation || !!(a as { tva_non_applicable?: boolean } | null)?.tva_non_applicable)
+    await supabase.from("factures").update({ lignes: lines, ...totals }).eq("id", id)
+    f.total_ttc = totals.total_ttc
+  }
+  const { data: numero, error } = await supabase.rpc("emettre_facture", { p_id: id })
+  if (error || !numero) return { status: 400, body: { error: error?.message || "Émission impossible." } }
+  if (f.type === "avoir" && f.facture_origine_id) {
+    const { data: orig } = await supabase.from("factures").select("total_ttc, statut").eq("id", f.facture_origine_id).maybeSingle()
+    if (orig && orig.statut !== "payee" && Math.abs(Number(orig.total_ttc) - Number(f.total_ttc)) < 0.01) {
+      await supabase.from("factures").update({ statut: "annulee" }).eq("id", f.facture_origine_id)
+      await supabase.from("facture_relances").update({ statut: "ignoree" }).eq("facture_id", f.facture_origine_id).eq("statut", "a_valider")
+    }
+  }
+  const { data: row } = await supabase.from("factures").select("*").eq("id", id).maybeSingle()
+  return { status: 200, body: { ok: true, numero: String(numero), facture: row as Json } }
+}
+
+function cleanPdf(raw: unknown) {
+  return String(raw || "").replace(/^data:application\/pdf;base64,/i, "").trim()
+}
+
+async function factureSend(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+  const id = String(body.facture_id || "").trim()
+  const { data: f } = await supabase.from("factures").select("id, numero, type, statut, client_nom, client_email, objet, total_ttc, acompte_deduit, date_echeance").eq("id", id).maybeSingle()
+  if (!f) return { status: 404, body: { error: "Facture introuvable." } }
+  if (!f.numero) return { status: 409, body: { error: "Émettez la facture avant de l'envoyer." } }
+  const email = String(body.email || f.client_email || "").trim()
+  if (!looksLikeEmail(email)) return { status: 400, body: { error: "Indiquez un e-mail client valide." } }
+  const pdf = cleanPdf(body.pdf_base64)
+  if (!pdf || pdf.length < 80) return { status: 400, body: { error: "PDF manquant." } }
+  if (!env("RESEND_API_KEY")) {
+    return { status: 503, body: { ok: false, download: true, error: "L'envoi d'e-mail n'est pas configuré (RESEND_API_KEY manquante). Téléchargez le PDF et envoyez-le vous-même." } }
+  }
+  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, entreprise_email, email, iban").eq("id", userId).maybeSingle()
+  const company = artisan?.entreprise_nom || artisan?.nom_entreprise || "votre artisan"
+  const avoir = f.type === "avoir"
+  const mailed = await sendResend({
+    to: email,
+    subject: `${avoir ? "Avoir" : "Facture"} n° ${f.numero} — ${company}`,
+    html: factureEmailHtml({ client: f.client_nom || undefined, numero: String(f.numero), objet: f.objet || undefined, company, ttc: Number(f.total_ttc) - Number(f.acompte_deduit || 0), echeance: f.date_echeance, iban: artisan?.iban || null, avoir }),
+    replyTo: artisan?.entreprise_email || artisan?.email || undefined,
+    company,
+    attachments: [{ filename: `${avoir ? "Avoir" : "Facture"}-${f.numero}.pdf`, content: pdf }],
+  })
+  if (!mailed.ok) return { status: mailed.missingKey ? 503 : 502, body: { error: "L'e-mail n'a pas pu être envoyé. Téléchargez le PDF et envoyez-le vous-même.", download: true } }
+  const now = new Date().toISOString()
+  await supabase.from("factures").update({ envoyee_le: now, client_email: email, ...(f.statut === "emise" ? { statut: "envoyee" } : {}) }).eq("id", id)
+  return { status: 200, body: { ok: true, sent_at: now, email } }
+}
+
+async function facturePaid(supabase: SupabaseClient, body: Json): Promise<ApiResult> {
+  const id = String(body.facture_id || "").trim()
+  const { data: f } = await supabase.from("factures").select("id, numero, statut").eq("id", id).maybeSingle()
+  if (!f) return { status: 404, body: { error: "Facture introuvable." } }
+  if (!f.numero) return { status: 409, body: { error: "Émettez la facture avant de la marquer payée." } }
+  const paid = body.paid !== false
+  const { error } = await supabase.from("factures").update(paid
+    ? { statut: "payee", payee_le: new Date().toISOString(), mode_paiement: String(body.mode || "").slice(0, 40) || null }
+    : { statut: "envoyee", payee_le: null }).eq("id", id)
+  if (error) return { status: 500, body: { error: "Mise à jour impossible." } }
+  if (paid) await supabase.from("facture_relances").update({ statut: "ignoree" }).eq("facture_id", id).eq("statut", "a_valider")
+  return { status: 200, body: { ok: true } }
+}
+
+async function factureRelanceSend(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+  const id = String(body.relance_id || "").trim()
+  const { data: rel } = await supabase.from("facture_relances").select("id, facture_id, niveau, statut, sujet, corps").eq("id", id).maybeSingle()
+  if (!rel) return { status: 404, body: { error: "Relance introuvable." } }
+  if (rel.statut === "envoyee") return { status: 409, body: { error: "Cette relance a déjà été envoyée." } }
+  const { data: f } = await supabase.from("factures").select("id, numero, statut, client_email, client_nom").eq("id", rel.facture_id).maybeSingle()
+  if (!f) return { status: 404, body: { error: "Facture introuvable." } }
+  if (f.statut === "payee" || f.statut === "annulee") return { status: 409, body: { error: "Cette facture est réglée ou annulée." } }
+  const email = String(body.email || f.client_email || "").trim()
+  if (!looksLikeEmail(email)) return { status: 400, body: { error: "Indiquez l'e-mail du client sur la facture." } }
+  const sujet = String(body.sujet || rel.sujet || `Facture n° ${f.numero}`).slice(0, 200)
+  const corps = String(body.corps || rel.corps || "").slice(0, 6000)
+  if (!corps.trim()) return { status: 400, body: { error: "Le message est vide." } }
+  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, entreprise_email, email").eq("id", userId).maybeSingle()
+  const company = artisan?.entreprise_nom || artisan?.nom_entreprise || "votre artisan"
+  const pdf = cleanPdf(body.pdf_base64)
+  const mailed = await sendResend({
+    to: email,
+    subject: sujet,
+    html: textToHtml(corps),
+    replyTo: artisan?.entreprise_email || artisan?.email || undefined,
+    company,
+    ...(pdf.length > 80 ? { attachments: [{ filename: `Facture-${f.numero}.pdf`, content: pdf }] } : {}),
+  })
+  if (!mailed.ok) {
+    return { status: mailed.missingKey ? 503 : 502, body: { error: mailed.missingKey ? "L'envoi d'e-mail n'est pas configuré (RESEND_API_KEY manquante). Copiez le texte et envoyez-le vous-même." : "L'e-mail n'a pas pu être envoyé.", copy: true } }
+  }
+  const now = new Date().toISOString()
+  await supabase.from("facture_relances").update({ statut: "envoyee", sent_at: now, sujet, corps }).eq("id", id)
+  return { status: 200, body: { ok: true, sent_at: now } }
+}
+
+async function factureAvoir(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+  const id = String(body.facture_id || "").trim()
+  const { data: f } = await supabase.from("factures").select("*").eq("id", id).maybeSingle()
+  if (!f) return { status: 404, body: { error: "Facture introuvable." } }
+  if (!f.numero || f.type === "avoir") return { status: 409, body: { error: "Un avoir se fait sur une facture émise." } }
+  const { data: existing } = await supabase.from("factures").select("id").eq("facture_origine_id", id).is("numero", null).maybeSingle()
+  if (existing) return { status: 200, body: { ok: true, reused: true, facture_id: existing.id } }
+  const lines = asLines(f.lignes).map(x => ({ ...x, l: x.l }))
+  const row = {
+    artisan_id: userId,
+    devis_id: f.devis_id,
+    type: "avoir",
+    statut: "brouillon",
+    facture_origine_id: id,
+    client_nom: f.client_nom, client_email: f.client_email, client_telephone: f.client_telephone, client_adresse: f.client_adresse,
+    client_pro: f.client_pro, client_siren: f.client_siren, client_tva: f.client_tva, adresse_chantier: f.adresse_chantier,
+    objet: `Avoir sur facture n° ${f.numero}${f.objet ? ` — ${f.objet}` : ""}`,
+    nature: f.nature,
+    lignes: lines,
+    ...factureTotals(lines, !!f.autoliquidation || Number(f.total_tva) === 0),
+    autoliquidation: f.autoliquidation,
+    delai_paiement_jours: 0,
+  }
+  const { data: inserted, error } = await supabase.from("factures").insert(row).select("id").maybeSingle()
+  if (error || !inserted) return { status: 500, body: { error: "Impossible de créer l'avoir." } }
+  return { status: 200, body: { ok: true, facture_id: inserted.id } }
 }
 
 type Res = { status: (n: number) => Res; json: (b: unknown) => void; setHeader: (k: string, v: string) => void; end: () => void }

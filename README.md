@@ -50,3 +50,6 @@ VITE_AKNO_AI_KEY=xxxx        # optionnel, envoyé en "Authorization: Bearer"
 
 En cas d'erreur ou de délai dépassé, l'assistant affiche sa réponse locale.
 ⚠️ Une variable `VITE_*` est visible dans le navigateur. Passez par un proxy serveur pour ne pas exposer de clé secrète.
+
+## Mise à jour 44 → 48
+Voir **UPDATE44-LISEZMOI.md** : multi-comptes (RLS), écran Entreprise, devis conformes, inscription + Stripe, factures/avoirs, relances d'impayés, dossier de conformité, SMS Twilio, formulaire de site (`/api/lead`), rapport mensuel. Migrations : `supabase/migrations/20261116_01…05` dans l'ordre. Variables : `.env.example`.

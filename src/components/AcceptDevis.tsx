@@ -23,6 +23,8 @@ export default function AcceptDevis() {
   const [info, setInfo] = useState<Info | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState("")
+  const [nom, setNom] = useState("")
+  const [ok, setOk] = useState(false)
 
   useEffect(() => {
     let on = true
@@ -35,12 +37,13 @@ export default function AcceptDevis() {
 
   const act = async (action: "accept" | "refuse") => {
     if (action === "refuse" && !confirm("Refuser ce devis ?")) return
+    if (action === "accept" && (nom.trim().length < 2 || !ok)) { setErr("Indiquez vos nom et prénom et cochez « Bon pour accord »."); return }
     setBusy(true); setErr("")
     try {
       const r = await fetch("/api/devis-public", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, action }),
+        body: JSON.stringify({ token, action, nom: nom.trim() }),
       })
       const d = await r.json()
       if (!r.ok) { setErr(d.error || "Impossible d'enregistrer votre réponse."); setBusy(false); return }
@@ -90,10 +93,16 @@ export default function AcceptDevis() {
                 {info.statut === "val" ? `Devis accepté${decided ? ` le ${decided}` : ""}. Merci.` : `Devis refusé${decided ? ` le ${decided}` : ""}.`}
               </div>
             ) : (
-              <div className="mt-6 grid grid-cols-2 gap-2">
+              <>
+              <div className="mt-6 space-y-2">
+                <input value={nom} onChange={e => setNom(e.target.value)} placeholder="Vos nom et prénom" autoComplete="name" className="h-12 w-full rounded-[14px] bg-white/[.06] px-4 text-[15px] outline-none placeholder:text-white/35" />
+                <label className="flex items-start gap-2.5 text-[13px] text-white/65"><input type="checkbox" checked={ok} onChange={e => setOk(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#0E8F8F]" />Bon pour accord : j'accepte ce devis et ses conditions. Mon nom, la date, l'heure et l'adresse IP sont enregistrés comme preuve.</label>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
                 <button disabled={busy} onClick={() => act("refuse")} className="h-12 rounded-full bg-white/[.08] text-[15px] font-medium disabled:opacity-40">Refuser</button>
                 <button disabled={busy} onClick={() => act("accept")} className="h-12 rounded-full bg-[#0E8F8F] text-[15px] font-semibold text-white disabled:opacity-40">{busy ? "Envoi…" : "Accepter le devis"}</button>
               </div>
+              </>
             )}
             {err && <p className="mt-3 text-center text-[13px] text-[#FF9B96]">{err}</p>}
           </div>

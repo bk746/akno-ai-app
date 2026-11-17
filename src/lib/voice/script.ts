@@ -12,6 +12,8 @@ export type VoiceProfile = {
   rayon: string
   tarifs?: Tarifs
   telephoneUrgence?: string
+  /** update48 : message d'accueil personnalisé (Paramètres › Réceptionniste) */
+  accueil?: string
 }
 
 const PLACEHOLDER_COMPANY = /^l['\u2019]entreprise$/i
@@ -54,6 +56,7 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
     rayon: tarifs.zoneKm != null ? `${tarifs.zoneKm} km` : pick(partial.rayon, base.rayon),
     tarifs,
     telephoneUrgence: pick(partial.telephoneUrgence),
+    accueil: pick(partial.accueil),
   }
 }
 
@@ -62,8 +65,18 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
  *  trop lisse comme carina, et sans l'accent britannique d'eve. */
 export const VOICE_ID = "ara"
 
+/** Annonce d'enregistrement (information préalable RGPD) : toujours présente dans l'accueil. */
+export const RECORDING_NOTICE = "Cet appel peut être enregistré pour le suivi de votre demande."
+
 export function welcomeLine(p: VoiceProfile) {
-  return `${companyName(p.company)}, bonjour, je suis l'assistante IA, comment puis-je vous aider ?`
+  const custom = (p.accueil || "").replace(/\s+/g, " ").trim()
+  if (custom) {
+    const hasIa = /\bIA\b|intelligence artificielle|assistante? (virtuel|automatique)/i.test(custom)
+    const hasRec = /enregistr/i.test(custom)
+    const lead = hasIa ? custom : `${custom.replace(/[.!?]?$/, ".")} Je suis l'assistante IA de ${companyName(p.company)}.`
+    return hasRec ? lead : `${lead.replace(/[.!?]?$/, ".")} ${RECORDING_NOTICE}`
+  }
+  return `${companyName(p.company)}, bonjour, je suis l'assistante IA. ${RECORDING_NOTICE} Comment puis-je vous aider ?`
 }
 
 export const KEYTERMS = [

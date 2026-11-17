@@ -1,4 +1,6 @@
 import { createClient } from "@supabase/supabase-js"
+import { can, loadEntitlements, upgradeError } from "./_lib/plans.js"
+import { consume, dayKey, monthKey, rateLimit, usage } from "./_lib/limits.js"
 type Json = Record<string, unknown>
 const env = (name: string) => (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]
 const PLACEHOLDER_COMPANY = /^l['\u2019]entreprise$/i
@@ -38,9 +40,23 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { headers: { Authorization: `Bearer ${access}` } },
   })
+  // update45 : offre (option Réceptionniste), limite de débit, quota de sessions et plafond de minutes
+  const ent = await loadEntitlements(authed, user.id)
+  if (!can(ent, "reception")) return { status: 402, body: { error: upgradeError("reception", ent), code: "upgrade" } }
+  if (!await rateLimit(user.id, "voice-token", 6)) return { status: 429, body: { error: "Trop d'appels d'affilée. Patientez une minute." } }
+  if (ent.quotas.voice_minutes > 0) {
+    const used = await usage(user.id, "voice_seconds", monthKey())
+    if (used >= ent.quotas.voice_minutes * 60) {
+      return { status: 429, body: { error: `Plafond de ${ent.quotas.voice_minutes} minutes de réceptionniste atteint ce mois-ci.`, code: "minutes" } }
+    }
+  }
+  if (!await consume(user.id, "voice_sessions", dayKey(), ent.quotas.voice_sessions_day)) {
+    return { status: 429, body: { error: "Nombre maximum d'appels de test atteint pour aujourd'hui." } }
+  }
+
   const { data: artisan } = await authed
     .from("artisans")
-    .select("prenom, nom_entreprise, entreprise_nom, entreprise_adresse, entreprise_cp_ville, entreprise_email, entreprise_telephone, email, telephone, tarifs, telephone_urgence")
+    .select("*")
     .eq("id", user.id)
     .maybeSingle()
 
@@ -74,7 +90,9 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
         city: artisan?.entreprise_cp_ville || "",
         tarifs: artisan?.tarifs && typeof artisan.tarifs === "object" ? artisan.tarifs : undefined,
         telephoneUrgence: typeof artisan?.telephone_urgence === "string" ? artisan.telephone_urgence : "",
+        accueil: typeof artisan?.message_accueil === "string" ? artisan.message_accueil.slice(0, 300) : "",
       },
+      plan: { status: ent.status, minutes: ent.quotas.voice_minutes },
     },
   }
 }

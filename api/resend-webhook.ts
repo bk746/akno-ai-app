@@ -129,23 +129,18 @@ export async function handleResendWebhook(raw: string, headers: Headers): Promis
   return { status: 200, body: { ok: true, devis_id: devis.id } }
 }
 
-type Res = { status: (n: number) => Res; json: (b: unknown) => void; setHeader: (k: string, v: string) => void; end: () => void }
+/* update44 : la signature Svix est calculée sur le corps BRUT. L'ancien handler Node relisait
+   req.body déjà parsé puis le re-sérialisait (JSON.stringify) : espaces / ordre des clés différents,
+   donc signature invalide. On utilise maintenant le format Web standard de Vercel (Request → Response)
+   qui donne accès au texte exact reçu. */
+export async function POST(request: Request) {
+  const raw = await request.text()
+  const headers: Headers = {}
+  request.headers.forEach((v, k) => { headers[k] = v })
+  const { status, body } = await handleResendWebhook(raw, headers)
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } })
+}
 
-export default async function handler(req: { method?: string; headers: Headers; body?: unknown; on?: (ev: string, cb: (x?: unknown) => void) => void }, res: Res) {
-  res.setHeader("Cache-Control", "no-store")
-  if (req.method === "OPTIONS") { res.status(204).end(); return }
-  if (req.method !== "POST") { res.status(405).json({ error: "Méthode non autorisée." }); return }
-  let raw = ""
-  if (typeof req.body === "string") raw = req.body
-  else if (req.body && typeof req.body === "object") raw = JSON.stringify(req.body)
-  else if (req.on) {
-    raw = await new Promise<string>((resolve, reject) => {
-      const parts: string[] = []
-      req.on!("data", chunk => { parts.push(typeof chunk === "string" ? chunk : String(chunk)) })
-      req.on!("end", () => resolve(parts.join("")))
-      req.on!("error", reject)
-    })
-  }
-  const { status, body } = await handleResendWebhook(raw, req.headers)
-  res.status(status).json(body)
+export function GET() {
+  return new Response(JSON.stringify({ error: "Méthode non autorisée." }), { status: 405, headers: { "Content-Type": "application/json" } })
 }
