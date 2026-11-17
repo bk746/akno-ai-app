@@ -19,14 +19,16 @@ export async function api(path: "/api/account" | "/api/devis" | "/api/booking", 
 
 export type Plan = "bureau" | "clients"
 export type Entitlements = {
-  billingEnabled: boolean; access: boolean; status: "trial" | "active" | "past_due" | "expired" | "free"; plan: Plan | null; reception: boolean
+  billingEnabled: boolean; access: boolean; status: "trial" | "active" | "past_due" | "expired" | "free" | "none"; plan: Plan | null; reception: boolean
   features: string[]; trialEndsAt: string | null; periodEnd: string | null; cancelAtPeriodEnd: boolean; hasStripeCustomer: boolean
+  /** update46 · essai de 30 jours encore possible (jamais abonné) */
+  trialEligible?: boolean
   quotas: { devis_drafts: number; voice_sessions_day: number; voice_minutes: number; sms: number }
 }
 export type AccountStatus = {
   entitlements: Entitlements
   usage: { voice_minutes: number; devis_drafts: number; sms: number; voice_sessions_today: number }
-  billing: { enabled: boolean; prices: { bureau: boolean; clients: boolean; reception: boolean }; trial_days: number }
+  billing: { enabled: boolean; prices: { bureau: boolean; clients: boolean; reception: boolean }; annual?: boolean; trial_days: number }
   integrations: { calcom: boolean; calcom_global: boolean; sms: boolean; resend: boolean; twilio_number: string; forward_to: string }
 }
 

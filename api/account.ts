@@ -2,7 +2,8 @@ import { adminClient, appUrl, env } from "./_lib/mail.js"
 import { authed, header, isResult, parseBody, type ApiResult, type Headers, type Json, type Req, type Res } from "./_lib/http.js"
 import { billingEnabled, loadEntitlements, PLAN_LABEL, TRIAL_DAYS, type PlanId } from "./_lib/plans.js"
 import { dayKey, monthKey, rateLimit } from "./_lib/limits.js"
-import { priceIds, stripe } from "./_lib/stripe.js"
+import { annualAvailable, priceFor, priceIds, stripe, STRIPE_VERSION_ELEMENTS, type Interval } from "./_lib/stripe.js"
+import { syncSubscription } from "./_lib/stripeSync.js"
 import { sendSmsMetered, smsConfigured } from "./_lib/sms.js"
 import { reportError } from "./_lib/monitoring.js"
 
@@ -43,6 +44,8 @@ async function status(sb: import("@supabase/supabase-js").SupabaseClient, userId
       billing: {
         enabled: billingEnabled(),
         prices: { bureau: !!prices.bureau, clients: !!prices.clients, reception: !!prices.reception },
+        // update46 : offre annuelle (-20 %) proposée seulement si les 3 prix annuels sont configurés
+        annual: annualAvailable(),
         trial_days: TRIAL_DAYS(),
       },
       integrations: {
@@ -57,15 +60,23 @@ async function status(sb: import("@supabase/supabase-js").SupabaseClient, userId
   }
 }
 
+/* update46 · Couleurs Akno de la page Stripe hébergée (repli si VITE_STRIPE_PUBLISHABLE_KEY manque).
+   Le paiement intégré (ui_mode "elements") est stylé côté client (appearance, billing/StripePane.tsx). */
+const BRANDING = { display_name: "Akno", background_color: "#0B0B0D", button_color: "#FFFFFF", border_style: "rounded", font_family: "inter" }
+
 async function checkout(sb: import("@supabase/supabase-js").SupabaseClient, userId: string, email: string | undefined, body: Json, headers?: Headers): Promise<ApiResult> {
   if (!billingEnabled()) return { status: 503, body: { error: "Le paiement en ligne n'est pas encore activé (STRIPE_SECRET_KEY manquante)." } }
   const plan = body.plan === "bureau" ? "bureau" : body.plan === "clients" ? "clients" : null
   if (!plan) return { status: 400, body: { error: "Offre inconnue." } }
-  const prices = priceIds()
-  const price = prices[plan]
-  if (!price) return { status: 503, body: { error: `Prix Stripe manquant pour ${PLAN_LABEL[plan]} (STRIPE_PRICE_${plan.toUpperCase()}).` } }
+  const interval: Interval = body.interval === "year" ? "year" : "month"
+  if (interval === "year" && !annualAvailable()) return { status: 503, body: { error: "L'offre annuelle n'est pas encore disponible. Choisissez le paiement mensuel." } }
+  const suffix = interval === "year" ? "_ANNUAL" : ""
+  const price = priceFor(plan, interval)
+  if (!price) return { status: 503, body: { error: `Prix Stripe manquant pour ${PLAN_LABEL[plan]} (STRIPE_PRICE_${plan.toUpperCase()}${suffix}).` } }
   const reception = body.reception === true
-  if (reception && !prices.reception) return { status: 503, body: { error: "Prix Stripe de l'option Réceptionniste manquant (STRIPE_PRICE_RECEPTION)." } }
+  const receptionPrice = priceFor("reception", interval)
+  if (reception && !receptionPrice) return { status: 503, body: { error: `Prix Stripe de l'option Réceptionniste manquant (STRIPE_PRICE_RECEPTION${suffix}).` } }
+  const embedded = body.embedded === true
   const base = origin(headers)
   if (!base) return { status: 503, body: { error: "APP_URL manquante." } }
 
@@ -89,39 +100,70 @@ async function checkout(sb: import("@supabase/supabase-js").SupabaseClient, user
     await admin.from("subscriptions").upsert({ artisan_id: userId, stripe_customer_id: customer, updated_at: new Date().toISOString() }, { onConflict: "artisan_id" })
   }
 
-  // Essai : le reste des 30 jours gratuits (jamais d'essai si un abonnement a déjà existé)
-  const created = artisan?.created_at ? new Date(artisan.created_at).getTime() : Date.now()
-  const left = Math.ceil((created + TRIAL_DAYS() * 86400e3 - Date.now()) / 86400e3)
-  const trialDays = !sub?.stripe_subscription_id && left >= 1 ? Math.min(left, TRIAL_DAYS()) : 0
-  const taxRate = (env("STRIPE_TAX_RATE_ID") || "").trim()
-  const auto = env("STRIPE_AUTOMATIC_TAX") === "1"
-  const line = (p: string) => ({ price: p, quantity: 1, ...(taxRate && !auto ? { tax_rates: [taxRate] } : {}) })
-  const params: Record<string, unknown> = {
+  // update46 · 30 jours d'essai sur toutes les offres, une seule fois par compte :
+  // pas d'essai si un abonnement a déjà existé (ligne subscriptions ou historique Stripe du client).
+  let trialEligible = !sub?.stripe_subscription_id && !sub?.status
+  if (trialEligible) {
+    const past = await stripe("GET", "/subscriptions", { customer, status: "all", limit: 1 })
+    if (past.ok && Array.isArray(past.data.data) && past.data.data.length) trialEligible = false
+  }
+  const params = checkoutParams({
+    userId, customer, plan, interval, price, receptionPrice: reception ? receptionPrice : "", embedded, base,
+    trialDays: trialEligible ? TRIAL_DAYS() : 0,
+    taxRate: (env("STRIPE_TAX_RATE_ID") || "").trim(), autoTax: env("STRIPE_AUTOMATIC_TAX") === "1",
+  })
+  const s = await stripe("POST", "/checkout/sessions", params, embedded ? STRIPE_VERSION_ELEMENTS : undefined)
+  if (!s.ok || !(embedded ? s.data.client_secret : s.data.url)) {
+    const msg = (s.data.error as { message?: string } | undefined)?.message
+    return { status: 502, body: { error: `Stripe : impossible d'ouvrir le paiement${msg ? ` (${msg})` : ""}.` } }
+  }
+  return { status: 200, body: { ok: true, session_id: String(s.data.id), trial_days: trialEligible ? TRIAL_DAYS() : 0, ...(embedded ? { client_secret: String(s.data.client_secret) } : { url: String(s.data.url) }) } }
+}
+
+/** Paramètres de la session Stripe Checkout (exporté pour le test local scripts/test-checkout.ts). */
+export function checkoutParams(o: { userId: string; customer: string; plan: PlanId; interval: Interval; price: string; receptionPrice: string; embedded: boolean; base: string; trialDays: number; taxRate: string; autoTax: boolean }) {
+  const line = (p: string) => ({ price: p, quantity: 1, ...(o.taxRate && !o.autoTax ? { tax_rates: [o.taxRate] } : {}) })
+  const back = `${o.base}/reception?billing=ok&session_id={CHECKOUT_SESSION_ID}`
+  const first = o.trialDays ? new Date(Date.now() + o.trialDays * 86400e3).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : ""
+  return {
     mode: "subscription",
-    customer,
-    client_reference_id: userId,
-    line_items: [line(price), ...(reception ? [line(prices.reception)] : [])],
-    success_url: `${base}/reception?billing=ok`,
-    cancel_url: `${base}/reception?billing=cancel`,
+    customer: o.customer,
+    client_reference_id: o.userId,
+    line_items: [line(o.price), ...(o.receptionPrice ? [line(o.receptionPrice)] : [])],
+    ...(o.embedded
+      // Paiement intégré dans l'écran Akno (Checkout Sessions + Elements). Carte uniquement, pour un formulaire épuré.
+      ? { ui_mode: "elements", return_url: back, allowed_payment_method_types: ["card"] }
+      : { success_url: back, cancel_url: `${o.base}/reception?billing=cancel`, payment_method_types: ["card"], branding_settings: BRANDING,
+          ...(first ? { custom_text: { submit: { message: `0 € aujourd'hui. Premier prélèvement le ${first}, sauf résiliation avant cette date depuis Akno.` } } } : {}) }),
     locale: "fr",
     allow_promotion_codes: true,
     billing_address_collection: "required",
     tax_id_collection: { enabled: true },
     customer_update: { name: "auto", address: "auto" },
-    metadata: { artisan_id: userId, plan, reception: reception ? "1" : "0" },
+    metadata: { artisan_id: o.userId, plan: o.plan, interval: o.interval, reception: o.receptionPrice ? "1" : "0" },
     subscription_data: {
-      metadata: { artisan_id: userId },
-      ...(trialDays ? { trial_period_days: trialDays, trial_settings: { end_behavior: { missing_payment_method: "cancel" } } } : {}),
+      metadata: { artisan_id: o.userId, plan: o.plan, interval: o.interval },
+      ...(o.trialDays ? { trial_period_days: o.trialDays, trial_settings: { end_behavior: { missing_payment_method: "cancel" } } } : {}),
     },
-    ...(trialDays ? { payment_method_collection: "if_required" } : {}),
-    ...(auto ? { automatic_tax: { enabled: true } } : {}),
+    ...(o.autoTax ? { automatic_tax: { enabled: true } } : {}),
   }
-  const s = await stripe("POST", "/checkout/sessions", params)
-  if (!s.ok || !s.data.url) {
-    const msg = (s.data.error as { message?: string } | undefined)?.message
-    return { status: 502, body: { error: `Stripe : impossible d'ouvrir le paiement${msg ? ` (${msg})` : ""}.` } }
+}
+
+/** update46 · Retour de paiement : relit la session chez Stripe (côté serveur) et met à jour l'abonnement tout de suite,
+    sans attendre le webhook. Le navigateur ne transmet que l'identifiant de session. */
+async function checkoutSync(sb: import("@supabase/supabase-js").SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+  if (!billingEnabled()) return { status: 503, body: { error: "Paiement non activé." } }
+  const id = String(body.session_id || "")
+  if (!/^cs_(test|live)_[A-Za-z0-9]+$/.test(id)) return { status: 400, body: { error: "Session de paiement invalide." } }
+  const s = await stripe("GET", `/checkout/sessions/${id}`)
+  if (!s.ok) return { status: 404, body: { error: "Session de paiement introuvable." } }
+  if (String(s.data.client_reference_id || "") !== userId) return { status: 403, body: { error: "Cette session ne correspond pas à votre compte." } }
+  const done = s.data.status === "complete"
+  if (done && s.data.subscription) {
+    try { await syncSubscription(String(s.data.subscription), userId) } catch (e) { await reportError(e, { route: "account", action: "checkout_sync" }) }
   }
-  return { status: 200, body: { ok: true, url: String(s.data.url) } }
+  const ent = await loadEntitlements(sb, userId)
+  return { status: 200, body: { ok: true, complete: done, entitlements: ent as unknown as Json } }
 }
 
 async function portal(userId: string, headers?: Headers): Promise<ApiResult> {
@@ -131,7 +173,7 @@ async function portal(userId: string, headers?: Headers): Promise<ApiResult> {
   const { data: sub } = await admin.from("subscriptions").select("stripe_customer_id").eq("artisan_id", userId).maybeSingle()
   if (!sub?.stripe_customer_id) return { status: 404, body: { error: "Aucun abonnement Stripe pour ce compte." } }
   const base = origin(headers)
-  const s = await stripe("POST", "/billing_portal/sessions", { customer: sub.stripe_customer_id, return_url: `${base}/reception`, locale: "fr" })
+  const s = await stripe("POST", "/billing_portal/sessions", { customer: sub.stripe_customer_id, return_url: `${base}/reception?billing=portal`, locale: "fr" })
   if (!s.ok || !s.data.url) return { status: 502, body: { error: "Stripe : portail client indisponible (activez-le dans Stripe → Paramètres → Portail client)." } }
   return { status: 200, body: { ok: true, url: String(s.data.url) } }
 }
@@ -206,6 +248,7 @@ export async function handleAccount(authorization?: string, body?: unknown, head
     if (action === "status") return await status(supabase, userId)
     if (!await rateLimit(userId, "account", 20)) return { status: 429, body: { error: "Trop de requêtes. Patientez une minute." } }
     if (action === "checkout") return await checkout(supabase, userId, session.email, input, headers)
+    if (action === "checkout_sync") return await checkoutSync(supabase, userId, input)
     if (action === "portal") return await portal(userId, headers)
     if (action === "save_calcom") return await saveCalcom(userId, input)
     if (action === "siret_lookup") return await siretLookup(input)

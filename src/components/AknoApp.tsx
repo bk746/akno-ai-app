@@ -506,7 +506,7 @@ function SetP() {
       : { ok: false, text: res.error || "Le test a échoué." })
   }
   const acc = useAccount(), ent = acc?.entitlements
-  const planL = !ent ? "…" : ent.status === "free" ? "Accès ouvert" : ent.status === "trial" ? `Essai · ${Math.max(0, Math.ceil((new Date(ent.trialEndsAt || Date.now()).getTime() - Date.now()) / 864e5))} j` : ent.status === "active" ? (ent.plan === "clients" ? "Clients + Bureau" : "Bureau") + (ent.reception ? " + Récept." : "") : ent.status === "past_due" ? "Paiement en échec" : "Essai terminé"
+  const planL = !ent ? "…" : ent.status === "free" ? "Accès ouvert" : ent.status === "trial" ? `Essai · ${Math.max(0, Math.ceil((new Date(ent.trialEndsAt || Date.now()).getTime() - Date.now()) / 864e5))} j` : ent.status === "active" ? (ent.plan === "clients" ? "Clients + Bureau" : "Bureau") + (ent.reception ? " + Récept." : "") : ent.status === "past_due" ? "Paiement en échec" : ent.status === "none" ? "Choisir une offre" : "Essai terminé"
   const support = (import.meta.env.VITE_SUPPORT_URL as string | undefined) || ((import.meta.env.VITE_SUPPORT_EMAIL as string | undefined) ? `mailto:${import.meta.env.VITE_SUPPORT_EMAIL}` : "")
   const help = () => { if (support) window.open(support, "_blank", "noopener") }
   const { p: prof, save: saveProf } = useProfile()

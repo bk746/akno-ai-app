@@ -27,7 +27,8 @@ export const TRIAL_DAYS = () => Math.max(1, Number(env("STRIPE_TRIAL_DAYS") || 3
 export type Entitlements = {
   billingEnabled: boolean
   access: boolean
-  status: "trial" | "active" | "past_due" | "expired" | "free"
+  /** update46 · "none" = aucune offre choisie (nouvel inscrit) : écran « Choisissez votre offre » avant l'app. */
+  status: "trial" | "active" | "past_due" | "expired" | "free" | "none"
   plan: PlanId | null
   reception: boolean
   features: Feature[]
@@ -35,6 +36,8 @@ export type Entitlements = {
   periodEnd: string | null
   cancelAtPeriodEnd: boolean
   hasStripeCustomer: boolean
+  /** update46 · essai de 30 jours possible (jamais eu d'abonnement Stripe). */
+  trialEligible: boolean
   quotas: { devis_drafts: number; voice_sessions_day: number; voice_minutes: number; sms: number }
 }
 
@@ -57,7 +60,7 @@ function asPlan(x?: string | null): PlanId | null {
 /** Droits d'un artisan. Tant que Stripe n'est pas configuré, tout est ouvert (comportement d'avant l'update44). */
 export function computeEntitlements(sub: SubRow | null, artisanCreatedAt?: string | null, now = new Date()): Entitlements {
   const enabled = billingEnabled()
-  const base = { billingEnabled: enabled, hasStripeCustomer: !!sub?.stripe_customer_id, cancelAtPeriodEnd: !!sub?.cancel_at_period_end, periodEnd: sub?.current_period_end || null }
+  const base = { billingEnabled: enabled, hasStripeCustomer: !!sub?.stripe_customer_id, trialEligible: !sub?.status, cancelAtPeriodEnd: !!sub?.cancel_at_period_end, periodEnd: sub?.current_period_end || null }
   const override = asPlan(sub?.plan_override)
   if (!enabled) {
     return { ...base, access: true, status: "free", plan: override || "clients", reception: true, features: ALL, trialEndsAt: null, quotas: { ...QUOTAS.clients, voice_minutes: QUOTAS.reception.voice_minutes, voice_sessions_day: QUOTAS.reception.voice_sessions_day } }
@@ -77,13 +80,10 @@ export function computeEntitlements(sub: SubRow | null, artisanCreatedAt?: strin
       quotas: quotasFor(plan, reception),
     }
   }
-  // Essai interne de 30 jours sans carte, compté depuis la création du compte
-  const created = artisanCreatedAt ? new Date(artisanCreatedAt) : now
-  const end = new Date(created.getTime() + TRIAL_DAYS() * 86400e3)
-  if (end > now && !st) {
-    return { ...base, access: true, status: "trial", plan: "clients", reception: true, features: ALL, trialEndsAt: end.toISOString(), quotas: { ...QUOTAS.trial } }
-  }
-  return { ...base, access: false, status: "expired", plan: plan || null, reception: false, features: [], trialEndsAt: end.toISOString(), quotas: { devis_drafts: 0, voice_sessions_day: 0, voice_minutes: 0, sms: 0 } }
+  // update46 · plus d'essai interne sans carte : l'essai de 30 jours démarre chez Stripe quand l'artisan choisit son offre.
+  // Sans abonnement actif ou en essai (et sans plan_override), l'accès est fermé et l'app affiche le choix d'offre.
+  void artisanCreatedAt; void now
+  return { ...base, access: false, status: st ? "expired" : "none", plan: plan || null, reception: false, features: [], trialEndsAt: null, quotas: { devis_drafts: 0, voice_sessions_day: 0, voice_minutes: 0, sms: 0 } }
 }
 
 function quotasFor(plan: PlanId, reception: boolean) {
@@ -110,7 +110,7 @@ export function can(e: Entitlements, f: Feature) {
 }
 
 export function upgradeError(f: Feature, e: Entitlements) {
-  if (!e.access) return "Votre période d'essai est terminée. Choisissez une offre dans Réglages → Abonnement pour continuer."
+  if (!e.access) return e.status === "none" ? "Choisissez votre offre (30 jours d'essai gratuit) pour commencer à utiliser Akno." : "Votre période d'essai est terminée. Choisissez une offre dans Réglages → Abonnement pour continuer."
   const need = f === "reception" ? "l'option Réceptionniste IA" : PLAN_FEATURES.bureau.includes(f) ? "l'offre Akno Bureau" : "l'offre Akno Clients + Bureau"
   return `Cette fonctionnalité est incluse dans ${need}. Rendez-vous dans Réglages → Abonnement.`
 }

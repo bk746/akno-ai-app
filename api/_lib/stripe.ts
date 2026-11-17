@@ -17,26 +17,58 @@ function flatten(obj: Record<string, unknown>, prefix = "", out: [string, string
   return out
 }
 
-export async function stripe(method: "GET" | "POST", path: string, params?: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: StripeObj }> {
+/** update46 · version d'API récente, utilisée seulement pour créer la session de paiement intégré (ui_mode "elements"). */
+export const STRIPE_VERSION_ELEMENTS = "2026-10-28.endive"
+
+export async function stripe(method: "GET" | "POST", path: string, params?: Record<string, unknown>, version = "2024-06-20"): Promise<{ ok: boolean; status: number; data: StripeObj }> {
   const key = (env("STRIPE_SECRET_KEY") || "").trim()
   if (!key) return { ok: false, status: 503, data: { error: { message: "STRIPE_SECRET_KEY manquante." } } }
   const qs = params ? new URLSearchParams(flatten(params)).toString() : ""
   const url = `https://api.stripe.com/v1${path}${method === "GET" && qs ? `?${qs}` : ""}`
   const r = await fetch(url, {
     method,
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/x-www-form-urlencoded", "Stripe-Version": "2024-06-20" },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/x-www-form-urlencoded", "Stripe-Version": version },
     body: method === "POST" ? qs : undefined,
   })
   const data = await r.json().catch(() => ({})) as StripeObj
   return { ok: r.ok, status: r.status, data }
 }
 
+export type Interval = "month" | "year"
+
+/** update46 · prix mensuels + annuels (-20 %). Un prix annuel absent => l'offre annuelle est simplement masquée. */
 export function priceIds() {
+  const v = (k: string) => (env(k) || "").trim()
   return {
-    bureau: (env("STRIPE_PRICE_BUREAU") || "").trim(),
-    clients: (env("STRIPE_PRICE_CLIENTS") || "").trim(),
-    reception: (env("STRIPE_PRICE_RECEPTION") || "").trim(),
+    bureau: v("STRIPE_PRICE_BUREAU"),
+    clients: v("STRIPE_PRICE_CLIENTS"),
+    reception: v("STRIPE_PRICE_RECEPTION"),
+    bureau_annual: v("STRIPE_PRICE_BUREAU_ANNUAL"),
+    clients_annual: v("STRIPE_PRICE_CLIENTS_ANNUAL"),
+    reception_annual: v("STRIPE_PRICE_RECEPTION_ANNUAL"),
   }
+}
+
+/** Prix Stripe d'une offre pour un intervalle donné ("" si non configuré). */
+export function priceFor(item: "bureau" | "clients" | "reception", interval: Interval) {
+  const p = priceIds()
+  return interval === "year" ? p[`${item}_annual`] : p[item]
+}
+
+/** Annuel disponible seulement si les 3 prix annuels sont configurés (sinon l'option Réception serait bancale). */
+export function annualAvailable() {
+  const p = priceIds()
+  return !!(p.bureau_annual && p.clients_annual && p.reception_annual)
+}
+
+/** Déduit l'offre, l'option Réception et l'intervalle des price IDs d'un abonnement (mensuels ET annuels). */
+export function planFromPrices(items: string[]) {
+  const p = priceIds()
+  const has = (...ids: string[]) => ids.some(id => !!id && items.includes(id))
+  const plan = has(p.clients, p.clients_annual) ? "clients" as const : has(p.bureau, p.bureau_annual) ? "bureau" as const : null
+  const reception = has(p.reception, p.reception_annual)
+  const interval: Interval | null = has(p.bureau_annual, p.clients_annual, p.reception_annual) ? "year" : plan ? "month" : null
+  return { plan, reception, interval }
 }
 
 /** Vérifie l'en-tête Stripe-Signature (t=…,v1=…) sur le corps BRUT. Tolérance 5 minutes. */

@@ -21,7 +21,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const RESEND_S = 45
 
 const head: Record<View, [string, string]> = {
-  signup1: ["Créez votre espace Akno", "30 jours d'essai gratuit, sans carte bancaire."],
+  signup1: ["Créez votre espace Akno", "30 jours d'essai gratuit, 0 € aujourd'hui."],
   signup2: ["Parlez-nous de votre entreprise", "Akno s'en sert pour vous présenter au téléphone et sur vos devis."],
   sentSignup: ["Vérifiez votre boîte mail", ""],
 }
@@ -162,7 +162,7 @@ export default function Signup({ onLogin }: { onLogin: () => void }) {
                       </div> : <Submit busy={busy}>Continuer</Submit>}
                     </div>
 
-                    {view === "signup1" && <ul className="flex flex-wrap gap-x-4 gap-y-1.5 pt-1 text-[12.5px] text-white/40">{["30 jours offerts", "Sans carte bancaire", "Sans engagement"].map(t => <li key={t} className="flex items-center gap-1.5"><Check size={13} strokeWidth={2.2} className="text-white/55" />{t}</li>)}</ul>}
+                    {view === "signup1" && <ul className="flex flex-wrap gap-x-4 gap-y-1.5 pt-1 text-[12.5px] text-white/40">{["30 jours offerts", "0 € aujourd'hui", "Sans engagement"].map(t => <li key={t} className="flex items-center gap-1.5"><Check size={13} strokeWidth={2.2} className="text-white/55" />{t}</li>)}</ul>}
                   </form>
                 </>}
               </motion.div>
