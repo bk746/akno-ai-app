@@ -14,7 +14,7 @@ export const A = {
   dev: { n: "Devis", c: "#2F6BFF", tab: "Devis", I: Receipt, slug: "devis", d: "Chiffre en direct" },
 } as const
 
-export type Modal = { kind: "entreprise" | "abonnement" | "factures" | "conformite" | "leads" | "agendaCal" | "reception" | "sms" | "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "urgencePhone" | "clientReply" | "prestations" | "devisEditor"; data?: any } | null
+export type Modal = { kind: "entreprise" | "abonnement" | "factures" | "conformite" | "leads" | "agendaCal" | "reception" | "sms" | "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "urgencePhone" | "clientReply" | "prestations" | "devisEditor" | "studio"; data?: any } | null
 export type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void; put?: (f: (s: St) => St) => void }
 export const C = createContext<Ctx>(null as any)
 export const useC = () => useContext(C)

@@ -1,7 +1,7 @@
 import { adminClient, appUrl, env } from "./_lib/mail.js"
 import { authed, header, isResult, parseBody, type ApiResult, type Headers, type Json, type Req, type Res } from "./_lib/http.js"
-import { billingEnabled, loadEntitlements, PLAN_LABEL, TRIAL_DAYS, type PlanId } from "./_lib/plans.js"
-import { dayKey, monthKey, rateLimit } from "./_lib/limits.js"
+import { billingEnabled, can, loadEntitlements, PLAN_LABEL, TRIAL_DAYS, upgradeError, type PlanId } from "./_lib/plans.js"
+import { consume, dayKey, monthKey, rateLimit } from "./_lib/limits.js"
 import { annualAvailable, priceFor, priceIds, stripe, STRIPE_VERSION_ELEMENTS, type Interval } from "./_lib/stripe.js"
 import { ensureDefaultPaymentMethod, syncSubscription } from "./_lib/stripeSync.js"
 import { upgradeSubscription } from "./_lib/upgrade.js"
@@ -272,6 +272,40 @@ async function siretLookup(body: Json): Promise<ApiResult> {
   }
 }
 
+/* update57 · « Ma réceptionniste » : aperçu d'une voix Grok (API Text to Speech xAI, POST /v1/tts, même liste de voix
+   que le temps réel — https://docs.x.ai/developers/model-capabilities/audio/text-to-speech). Réservé à l'option
+   Réceptionniste, 40 aperçus / jour / artisan (~0,004 $ l'aperçu : 15 $ / 1 M caractères). Rien n'est stocké. */
+const TTS_VOICES = new Set(["altair", "ara", "atlas", "aurora", "carina", "castor", "celeste", "cosmo", "eve", "helios", "helix", "iris", "kepler", "leo", "liora", "lumen", "luna", "lux", "naksh", "orion", "perseus", "rex", "rigel", "sal", "sirius", "ursa", "zagan", "zenith"])
+async function voicePreview(sb: import("@supabase/supabase-js").SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
+  const key = env("XAI_API_KEY")
+  if (!key) return { status: 503, body: { error: "La clé XAI_API_KEY n'est pas configurée sur le serveur." } }
+  const ent = await loadEntitlements(sb, userId)
+  if (!can(ent, "reception")) return { status: 402, body: { error: upgradeError("reception", ent), code: "upgrade" } }
+  const voice = String(body.voice || "").toLowerCase()
+  if (!TTS_VOICES.has(voice)) return { status: 400, body: { error: "Voix inconnue." } }
+  const text = String(body.text || "").replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 320)
+  if (text.length < 4) return { status: 400, body: { error: "Texte d'aperçu manquant." } }
+  const phone = body.quality === "phone"
+  const speed = Math.min(1.2, Math.max(0.85, Number(body.speed) || 1))
+  if (!await consume(userId, "voice_previews", dayKey(), 40)) return { status: 429, body: { error: "Limite d'aperçus atteinte pour aujourd'hui. Utilisez « Tester ma réceptionniste »." } }
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 15000)
+  try {
+    const r = await fetch("https://api.x.ai/v1/tts", {
+      method: "POST", signal: ctl.signal,
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      // « Son téléphone » : WAV 8 kHz, la bande passante d'une vraie ligne (Twilio G.711) ; sinon MP3 24 kHz.
+      body: JSON.stringify({ text, voice_id: voice, language: "fr", speed, output_format: phone ? { codec: "wav", sample_rate: 8000 } : { codec: "mp3", sample_rate: 24000, bit_rate: 64000 } }),
+    })
+    if (!r.ok) return { status: 502, body: { error: `Aperçu indisponible (xAI ${r.status}).` } }
+    const bytes = new Uint8Array(await r.arrayBuffer())
+    let bin = ""
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    return { status: 200, body: { ok: true, mime: phone ? "audio/wav" : "audio/mpeg", audio: btoa(bin) } }
+  } catch {
+    return { status: 504, body: { error: "xAI met trop de temps à répondre. Réessayez." } }
+  } finally { clearTimeout(t) }
+}
+
 export async function handleAccount(authorization?: string, body?: unknown, headers?: Headers): Promise<ApiResult> {
   const session = await authed(authorization)
   if (isResult(session)) return session
@@ -287,6 +321,7 @@ export async function handleAccount(authorization?: string, body?: unknown, head
     if (action === "portal") return await portal(userId, headers)
     if (action === "save_calcom") return await saveCalcom(userId, input)
     if (action === "siret_lookup") return await siretLookup(input)
+    if (action === "voice_preview") return await voicePreview(supabase, userId, input)
     if (action === "accept_cgv") {
       const version = String(input.version || "").slice(0, 20)
       if (!version) return { status: 400, body: { error: "Version manquante." } }

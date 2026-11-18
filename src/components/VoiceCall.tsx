@@ -27,9 +27,12 @@ function mmss(sec: number) {
 
 export default function VoiceCall({
   fallback,
+  override,
   onDone,
 }: {
   fallback?: Partial<VoiceProfile>
+  /** update57 : config en cours d'édition (« Ma réceptionniste » › Tester), appliquée par-dessus le profil serveur */
+  override?: Partial<VoiceProfile>
   onDone: (message?: string) => void
 }) {
   const [status, setStatus] = useState<VoiceStatus>("connecting")
@@ -60,7 +63,7 @@ export default function VoiceCall({
       try {
         const token = await fetchVoiceToken()
         if (!alive) return
-        const profile = mergeProfile({ ...fallback, ...token.profile })
+        const profile = mergeProfile({ ...fallback, ...token.profile, ...override })
         const session = await startVoiceSession({
           token: token.value!,
           profile,

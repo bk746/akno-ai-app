@@ -384,13 +384,13 @@ export async function startVoiceSession(opts: {
   logVoice("out", "slots.prefetch", { n: prefetched.length, hint: slotsHint ? "yes" : "no" })
   const session = buildSessionConfig(profile, sampleRate, slotsHint)
   const simpleSession = {
-    voice: VOICE_ID,
+    voice: session.voice || VOICE_ID,
     instructions: session.instructions,
     turn_detection: TURN_DETECTION,
     tools: session.tools,
     audio: {
       input: { format: { type: "audio/pcm", rate: sampleRate }, transcription: { language_hint: "fr" } },
-      output: { format: { type: "audio/pcm", rate: OUTPUT_RATE }, speed: 1.0 },
+      output: { format: { type: "audio/pcm", rate: OUTPUT_RATE }, speed: session.audio.output.speed || 1.0 },
     },
   }
   let usedSimple = false

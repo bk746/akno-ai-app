@@ -239,3 +239,12 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 @keyframes orb-b{0%{transform:translate(0,0) scale(1)}50%{transform:translate(-26%,18%) scale(.9)}100%{transform:translate(-10%,34%) scale(1.12)}}
 @keyframes orb-c{0%{transform:translate(0,0) scale(1)}50%{transform:translate(30%,-22%) scale(1.2)}100%{transform:translate(-18%,-40%) scale(.95)}}
 @media (prefers-reduced-motion: reduce){.orb-rot,.orb-rot i{animation:none!important}}
+
+/* update57 · Ma réceptionniste : curseur de débit + barre de sections sans ascenseur */
+.no-scrollbar{scrollbar-width:none}.no-scrollbar::-webkit-scrollbar{display:none}
+.akno-range{-webkit-appearance:none;appearance:none;height:28px;background:transparent;cursor:pointer}
+.akno-range::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:linear-gradient(90deg,rgba(255,255,255,.55),rgba(255,255,255,.12))}
+.akno-range::-moz-range-track{height:6px;border-radius:999px;background:linear-gradient(90deg,rgba(255,255,255,.55),rgba(255,255,255,.12))}
+.akno-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 4px rgba(255,255,255,.08)}
+.akno-range::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.akno-range:focus-visible{outline:none}.akno-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(47,123,255,.5)}

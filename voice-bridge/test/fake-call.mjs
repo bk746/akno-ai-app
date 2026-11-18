@@ -18,6 +18,7 @@ xai.on("connection", (ws, req) => {
     const m = JSON.parse(raw.toString())
     if (m.type === "session.update") { seen.session = m.session; ws.send(JSON.stringify({ type: "session.updated" })) }
     if (m.type === "conversation.item.create" && m.item?.type === "force_message") {
+      seen.greeting = m.item.content[0].text
       ws.send(JSON.stringify({ type: "response.output_audio.delta", delta: Buffer.alloc(160, 0xff).toString("base64") }))
       ws.send(JSON.stringify({ type: "response.output_audio_transcript.done", transcript: m.item.content[0].text }))
       ws.send(JSON.stringify({ type: "response.done" }))
@@ -43,7 +44,20 @@ const app = http.createServer((req, res) => {
   })
 }).listen(18902)
 
-const bridge = spawn("node", ["build/server.mjs"], { env: { PATH: process.env.PATH, PORT: "18900", BRIDGE_SECRET: SECRET, XAI_API_KEY: "fake-key", XAI_REALTIME_URL: "ws://127.0.0.1:18901", APP_URL: "http://127.0.0.1:18902" }, stdio: ["ignore", "pipe", "pipe"] })
+// Faux Supabase (REST) : fiche artisan avec la config « Ma réceptionniste » (update57)
+const sbSeen = { artisanAuth: "" }
+const ARTISAN_ROW = { id: ARTISAN, nom_entreprise: "Plomberie Test", entreprise_cp_ville: "69001 Lyon", entreprise_metier: "Plombier", message_accueil: "Plomberie Test, bonjour !",
+  horaires: { lun: ["08:00", "18:00"], mar: ["08:00", "18:00"], mer: ["08:00", "18:00"], jeu: ["08:00", "18:00"], ven: ["08:00", "18:00"], sam: null, dim: null },
+  reception_config: { v: 1, voice: "aurora", speed: 1.1, services: [{ nom: "Recherche de fuite", prix: "dès 89 €" }], faq: [{ q: "Le devis est-il gratuit ?", r: "Oui, toujours." }], prononciations: [{ mot: "Bouzerda", dit: "Bou-zèr-da" }] } }
+const supa = http.createServer((req, res) => {
+  let b = ""; req.on("data", c => b += c); req.on("end", () => {
+    res.setHeader("Content-Type", "application/json")
+    if (req.url.startsWith("/rest/v1/artisans")) { sbSeen.artisanAuth = req.headers.authorization || ""; res.end(JSON.stringify([ARTISAN_ROW])); return }
+    res.end("[]")
+  })
+}).listen(18903)
+
+const bridge = spawn("node", ["build/server.mjs"], { env: { PATH: process.env.PATH, PORT: "18900", BRIDGE_SECRET: SECRET, XAI_API_KEY: "fake-key", XAI_REALTIME_URL: "ws://127.0.0.1:18901", APP_URL: "http://127.0.0.1:18902", SUPABASE_URL: "http://127.0.0.1:18903", SUPABASE_SERVICE_ROLE_KEY: "fake-service-role" }, stdio: ["ignore", "pipe", "pipe"] })
 let logs = ""; bridge.stdout.on("data", d => logs += d); bridge.stderr.on("data", d => logs += d)
 await wait(600)
 
@@ -77,11 +91,18 @@ check("audio IA → Twilio (accueil)", g.media >= 1)
 check("outil get_available_slots via /api/booking", seen.toolOutput?.ok === true && api.calls.includes("/api/booking"))
 check("auth serveur x-akno-bridge / x-akno-artisan", api.headers?.["x-akno-bridge"] === SECRET && api.headers?.["x-akno-artisan"] === ARTISAN)
 
+check("update57 · config artisan chargée au début de l'appel (service_role)", sbSeen.artisanAuth === "Bearer fake-service-role")
+check("update57 · voix choisie passée à xAI", seen.session?.voice === "aurora")
+check("update57 · débit choisi (audio.output.speed)", seen.session?.audio?.output?.speed === 1.1 && seen.session?.audio?.output?.format?.type === "audio/pcmu")
+check("update57 · prononciation (session.replace)", seen.session?.replace?.Bouzerda === "Bou-zèr-da")
+check("update57 · prestations, FAQ, métier et horaires dans le prompt", /Recherche de fuite — prix indicatif : dès 89 €/.test(seen.session?.instructions || "") && /Le devis est-il gratuit/.test(seen.session.instructions) && /entreprise de plomberie/.test(seen.session.instructions) && /du lundi au vendredi de 8 h à 18 h/.test(seen.session.instructions))
+check("update57 · accueil personnalisé joué (IA + RGPD ajoutés)", seen.greeting?.startsWith("Plomberie Test, bonjour ! Je suis l'assistante IA de Plomberie Test.") && /enregistré/.test(seen.greeting || ""))
+
 const before = seen.appends
 const bad = await fakeCall(() => "0".repeat(64))
 check("jeton invalide refusé (aucun audio relayé)", bad.media === 0 && seen.appends === before)
 
-bridge.kill(); xai.close(); app.close()
+bridge.kill(); xai.close(); app.close(); supa.close()
 console.log(`\n${ok} OK, ${ko} KO`)
 if (ko) { console.log(logs); process.exit(1) }
 process.exit(0)

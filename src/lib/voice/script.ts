@@ -1,5 +1,6 @@
 import { formatTarifsForPrompt, mergeTarifs, type Tarifs } from "../tarifs"
 import { formatPhonePairs, hasEmergencyPhone } from "../phone"
+import { DEFAULT_VOICE, formatConfigForPrompt, formatHoraires, hasPricedService, metierActivite, normalizeConfig, replaceMap, type ReceptionConfig } from "./receptionist"
 
 export type VoiceProfile = {
   prenom: string
@@ -14,6 +15,10 @@ export type VoiceProfile = {
   telephoneUrgence?: string
   /** update48 : message d'accueil personnalisé (Paramètres › Réceptionniste) */
   accueil?: string
+  /** update57 : configuration « Ma réceptionniste » (artisans.reception_config) */
+  reception?: ReceptionConfig
+  /** update57 : horaires d'ouverture (artisans.horaires, update48) */
+  horaires?: unknown
 }
 
 const PLACEHOLDER_COMPANY = /^l['\u2019]entreprise$/i
@@ -52,18 +57,19 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
     phone: pick(partial.phone),
     address: pick(partial.address),
     city: pick(partial.city, base.city),
-    metier: pick(partial.metier, base.metier),
+    metier: pick(metierActivite(partial.metier), base.metier),
     rayon: tarifs.zoneKm != null ? `${tarifs.zoneKm} km` : pick(partial.rayon, base.rayon),
     tarifs,
     telephoneUrgence: pick(partial.telephoneUrgence),
     accueil: pick(partial.accueil),
+    reception: normalizeConfig(partial.reception),
+    horaires: partial.horaires && typeof partial.horaires === "object" ? partial.horaires : undefined,
   }
 }
 
-/** Voix xAI (session.update.voice). Toutes parlent français.
- *  ara : originale retravaillée (rythme plus naturel), chaleureuse — mieux qu'une voix « flagship »
- *  trop lisse comme carina, et sans l'accent britannique d'eve. */
-export const VOICE_ID = "ara"
+/** Voix xAI par défaut (session.update.voice). update57 : choisie par l'artisan dans « Ma réceptionniste »
+ *  (liste et justification dans ./receptionist.ts). Avant l'update57 : « ara ». */
+export const VOICE_ID = DEFAULT_VOICE
 
 /** Annonce d'enregistrement (information préalable RGPD) : toujours présente dans l'accueil. */
 export const RECORDING_NOTICE = "Cet appel peut être enregistré pour le suivi de votre demande."
@@ -73,10 +79,12 @@ export function welcomeLine(p: VoiceProfile) {
   if (custom) {
     const hasIa = /\bIA\b|intelligence artificielle|assistante? (virtuel|automatique)/i.test(custom)
     const hasRec = /enregistr/i.test(custom)
-    const lead = hasIa ? custom : `${custom.replace(/[.!?]?$/, ".")} Je suis l'assistante IA de ${companyName(p.company)}.`
-    return hasRec ? lead : `${lead.replace(/[.!?]?$/, ".")} ${RECORDING_NOTICE}`
+    // update57 : garde « ! » / « ? » de l'artisan (avant : « bonjour ! » devenait « bonjour . »)
+    const end = (t: string) => /[.!?…]$/.test(t) ? t : `${t}.`
+    const lead = hasIa ? custom : `${end(custom)} Je suis l'assistante IA de ${companyName(p.company)}.`
+    return hasRec ? lead : `${end(lead)} ${RECORDING_NOTICE}`
   }
-  return `${companyName(p.company)}, bonjour, je suis l'assistante IA. ${RECORDING_NOTICE} Comment puis-je vous aider ?`
+  return `${companyName(p.company)}, bonjour, je suis l'assistante IA. ${RECORDING_NOTICE} Comment puis-je ${p.reception?.tutoiement ? "t'aider" : "vous aider"} ?`
 }
 
 export const KEYTERMS = [
@@ -138,10 +146,17 @@ export function buildInstructions(p: VoiceProfile) {
   const champMetier = metierLarge
     ? "le multi-services BTP courant (plomberie, chauffage, électricité, rénovation, entretien des équipements du bâtiment)"
     : metier
-  return `Tu es la réceptionniste de ${p.company}, entreprise de ${metier} à ${p.city}, rayon ${p.rayon}. Champ : ${champMetier}.
+  const cfg = p.reception
+  const services = cfg?.services.map(x => x.nom).join(", ") || ""
+  const champ = services ? `${champMetier} — prestations listées par l'artisan : ${services}` : champMetier
+  const zone = cfg?.zone || `rayon ${p.rayon} autour de ${p.city}`
+  const horaires = formatHoraires(p.horaires)
+  const priced = hasPricedService(cfg)
+  const extra = formatConfigForPrompt(cfg)
+  return `Tu es la réceptionniste de ${p.company}, entreprise de ${metier} à ${p.city}, rayon ${p.rayon}. Champ : ${champ}.
 
 IDENTITÉ ET TON
-Tu parles comme la réceptionniste d'une entreprise artisanale : naturelle, calme, efficace, jamais mécanique. Français, vouvoiement, phrases courtes. Accuse réception en variant : « D'accord », « Je comprends », « Très bien », « C'est noté », « Oui, je vois ». Reformule en quelques mots ce qu'il vient de dire, puis pose UNE question — sans demander si c'est bien ça. Interdit : « C'est bien ça ? », « Je relis », et toute confirmation après chaque réponse — sauf une seule relecture brève de l'e-mail après l'épellation (sans « C'est bien ça ? »). Un seul récapitulatif, à la toute fin de l'appel. Pas de listes, puces, markdown ni énumérations à voix haute. Numéros et heures au naturel.
+Tu parles comme la réceptionniste d'une entreprise artisanale : naturelle, calme, efficace, jamais mécanique. Français, ${cfg?.tutoiement ? "tutoiement (choix de l'artisan)" : "vouvoiement"}, phrases courtes. Accuse réception en variant : « D'accord », « Je comprends », « Très bien », « C'est noté », « Oui, je vois ». Reformule en quelques mots ce qu'il vient de dire, puis pose UNE question — sans demander si c'est bien ça. Interdit : « C'est bien ça ? », « Je relis », et toute confirmation après chaque réponse — sauf une seule relecture brève de l'e-mail après l'épellation (sans « C'est bien ça ? »). Un seul récapitulatif, à la toute fin de l'appel. Pas de listes, puces, markdown ni énumérations à voix haute. Numéros et heures au naturel.
 Si le client pose une question, même au milieu du parcours, réponds d'abord clairement et brièvement, puis seulement ensuite reprends le fil A/B/C/D. Une consigne utile, une question, tu avances : pas de monologue.
 Ne prononce jamais le prénom de l'artisan : dis « l'artisan », « notre technicien » ou « ${p.company} ». Ne redemande jamais une information déjà donnée — sauf l'épellation de l'e-mail, toujours demandée après la question groupée.
 Si on te demande si tu es une personne réelle : ne prétends jamais être humaine. Dis : « Je suis l'assistante IA de ${p.company}, je prends vos informations et l'artisan vous rappelle. » Ne le précise pas sinon.
@@ -196,11 +211,11 @@ Infiltration toiture : protéger les meubles, où ça goutte ? A. C si dégât d
 Moisissure / VMC : la VMC tourne-t-elle, quelle pièce ? A.
 Clim / PAC qui ne chauffe pas : mode, voyants, code erreur ? A. C si plus de chauffage en hiver.
 Délais / disponibilités : d'abord « Quand êtes-vous disponible ? » puis de vrais créneaux, jamais inventés.
-Zone : rayon ${p.rayon} autour de ${p.city}. Hors zone : le dire poliment, prendre le numéro.
-Prix : uniquement les frais fixes listés plus bas. Jamais le prix des travaux.
+Zone : ${zone}. Hors zone : le dire poliment, prendre le numéro.
+Prix : uniquement les frais fixes listés plus bas${priced ? " et les prix indicatifs des prestations de l'artisan" : ""}. Jamais le prix des travaux.
 Garanties / décennale : l'artisan est assuré ; le détail se confirme après la visite. N'invente pas de numéro de police.
 Paiement : l'artisan rappelle pour les modalités. Jamais d'IBAN, de RIB ni de carte au téléphone.
-Horaires : semaine, 8 h–18 h, selon les créneaux réels. Urgence : rappel au plus vite.
+Horaires : ${horaires || "semaine, 8 h–18 h"}, selon les créneaux réels. Urgence : rappel au plus vite.
 
 AUTRES APPELS
 - Suivi, modification ou annulation de RDV : nom et date si connue, noter la demande ; l'artisan confirme. Pas de nouveau devis.
@@ -210,13 +225,13 @@ AUTRES APPELS
 - Recrutement / candidature : nom et numéro, transmettre, ne rien promettre.
 - Hors zone : le dire poliment, prendre le numéro au cas où.
 - Parler à l'artisan : « L'artisan est actuellement sur un chantier. Je prends votre message et il vous rappelle dès que possible. »
-- Prix au téléphone : uniquement les frais fixes listés ci-dessous (déplacement, taux horaire, entretien chaudière s'il est renseigné). Jamais le prix des travaux.
+- Prix au téléphone : uniquement les frais fixes listés ci-dessous (déplacement, taux horaire, entretien chaudière s'il est renseigné)${priced ? " et les prix indicatifs des prestations de l'artisan" : ""}. Jamais le prix des travaux.
 - Anglais ou autre langue : en français très simple, l'artisan rappellera ; prendre un nom et un numéro si possible.
 - Silence ou mauvaise ligne : « Je ne vous entends pas bien, pouvez-vous répéter ? » Trois essais puis conclure poliment.
 - Hors prestation (piscine, jardinage, déménagement, hors de ${champMetier}) : « Ce n'est malheureusement pas une prestation que nous réalisons. » Proposer de laisser un message. Pas de RDV, pas de devis, devis_demande false.
 
 ${formatTarifsForPrompt(p.tarifs)}
-
+${extra ? `\n${extra}\n` : ""}
 FIN D'APPEL
 Un seul récapitulatif, à la toute fin, en une phrase : « Je récapitule : [prénom nom], [besoin], [créneau si pris], [téléphone], [e-mail], [adresse], [devis si B], [rappel si déjà dit]. » Enchaîne ensuite (D si elle s'applique, puis la conclusion) sans demander « C'est bien ça ? » et sans attendre une validation.
 save_call avec tout. email_client = l'e-mail collecté. rdv_pris true si un créneau est réservé. a_rappeler = rappel_souhaite.
@@ -311,9 +326,12 @@ export const TURN_DETECTION = {
 export function buildSessionConfig(p: VoiceProfile, sampleRate: number, slotsNote?: string) {
   const keyterms = [...KEYTERMS]
   if (p.company && !keyterms.includes(p.company)) keyterms.push(p.company.slice(0, 50))
+  const cfg = p.reception || normalizeConfig(null)
+  const replace = replaceMap(cfg)
   return {
-    voice: VOICE_ID,
+    voice: cfg.voice || VOICE_ID,
     instructions: buildInstructions(p) + (slotsNote || ""),
+    ...(replace ? { replace } : {}),
     reasoning: { effort: "none" as const },
     turn_detection: TURN_DETECTION,
     tools: VOICE_TOOLS,
@@ -324,7 +342,7 @@ export function buildSessionConfig(p: VoiceProfile, sampleRate: number, slotsNot
       },
       output: {
         format: { type: "audio/pcm", rate: 24000 },
-        speed: 1.0,
+        speed: cfg.speed || 1.0,
       },
     },
   }

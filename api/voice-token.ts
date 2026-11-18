@@ -91,6 +91,10 @@ export async function mintVoiceToken(authorization?: string): Promise<{ status: 
         tarifs: artisan?.tarifs && typeof artisan.tarifs === "object" ? artisan.tarifs : undefined,
         telephoneUrgence: typeof artisan?.telephone_urgence === "string" ? artisan.telephone_urgence : "",
         accueil: typeof artisan?.message_accueil === "string" ? artisan.message_accueil.slice(0, 300) : "",
+        // update57 : configurateur « Ma réceptionniste » (normalisé côté client par mergeProfile), métier et horaires
+        metier: typeof artisan?.entreprise_metier === "string" ? artisan.entreprise_metier.slice(0, 80) : "",
+        horaires: artisan?.horaires && typeof artisan.horaires === "object" ? artisan.horaires : undefined,
+        reception: artisan?.reception_config && typeof artisan.reception_config === "object" ? artisan.reception_config : undefined,
       },
       plan: { status: ent.status, minutes: ent.quotas.voice_minutes },
     },

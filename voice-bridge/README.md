@@ -54,8 +54,17 @@ le premier appel attendrait 30 à 60 s.
 ```
 cd voice-bridge && npm install && npm test
 ```
-Simule un appel Twilio, un faux xAI et une fausse API Akno (aucun appel réel, aucune écriture en base).
+Simule un appel Twilio, un faux xAI, une fausse API Akno et un faux Supabase (aucun appel réel, aucune écriture en base).
 
-## Après une modification du prompt (`src/lib/voice/script.ts`)
+## Après une modification du prompt (`src/lib/voice/script.ts` ou `src/lib/voice/receptionist.ts`)
 
-Le relais embarque le prompt au moment du build : relancer `fly deploy …` (étape 4).
+Le relais embarque le prompt au moment du build : relancer le déploiement (étape 4). Sur le Mac de Keryan, `fly` n'est pas dans le PATH :
+```
+~/.fly/bin/flyctl deploy . --config voice-bridge/fly.toml --dockerfile voice-bridge/Dockerfile
+```
+
+## Configuration par artisan (update57)
+
+Au début de chaque appel, le relais lit la fiche `artisans` (clé service_role) : `reception_config` (voix, débit, prestations,
+FAQ, consignes, prononciation), `message_accueil`, `entreprise_metier`, `horaires`. La voix choisie et le débit sont envoyés
+dans `session.update` (`voice`, `audio.output.speed`), la prononciation dans `session.replace`. Sans config : voix `celeste`.

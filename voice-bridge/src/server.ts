@@ -1,4 +1,4 @@
-/* Akno voice-bridge (update56)
+/* Akno voice-bridge (update56, config par artisan update57)
    Pont temps réel : appel Twilio (Media Streams, μ-law 8 kHz) ⇄ réceptionniste xAI Grok Voice (realtime, « audio/pcmu »).
    Même prompt / mêmes outils que l'appel vocal de l'app (src/lib/voice/script.ts, importé tel quel au build).
    - prise de RDV : POST {APP_URL}/api/booking (auth serveur BRIDGE_SECRET) + ligne « appointments »
@@ -44,6 +44,10 @@ async function loadProfile(artisanId: string): Promise<VoiceProfile> {
     tarifs: a.tarifs && typeof a.tarifs === "object" ? a.tarifs : undefined,
     telephoneUrgence: typeof a.telephone_urgence === "string" ? a.telephone_urgence : "",
     accueil: typeof a.message_accueil === "string" ? a.message_accueil.slice(0, 300) : "",
+    // update57 : configurateur « Ma réceptionniste » (voix, débit, prestations, FAQ…), métier et horaires
+    metier: typeof a.entreprise_metier === "string" ? a.entreprise_metier.slice(0, 80) : "",
+    horaires: a.horaires && typeof a.horaires === "object" ? a.horaires : undefined,
+    reception: a.reception_config && typeof a.reception_config === "object" ? a.reception_config : undefined,
   })
 }
 
@@ -189,6 +193,7 @@ function handleCall(tw: WebSocket) {
     const slotsP = akno("/api/booking", artisanId, { action: "slots" }, 1500).then(b => (Array.isArray(b.slots) ? b.slots : []) as SlotHint[]).catch(() => [] as SlotHint[])
     const [p, slots] = await Promise.all([loadProfile(artisanId), slotsP])
     profile = p
+    log("[call] voix", profile.reception?.voice || "défaut", "débit", profile.reception?.speed || 1)
     const phoneNote = `\n\nCONTEXTE TÉLÉPHONE : vrai appel sur la ligne de ${profile.company} (l'artisan n'a pas pu décrocher, l'appel t'a été renvoyé). Numéro de l'appelant : ${from || "masqué"}. Si ce numéro est connu, demande simplement si l'on peut le rappeler sur ce numéro au lieu de le faire dicter. Quand tout est noté et que le client a dit au revoir, conclus en une phrase courte.`
     const session = buildSessionConfig(profile, 8000, formatSlotsHint(slots) + phoneNote) as Json
     // Téléphone : G.711 μ-law 8 kHz des deux côtés, sans transcodage.
