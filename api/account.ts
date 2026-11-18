@@ -3,7 +3,7 @@ import { authed, header, isResult, parseBody, type ApiResult, type Headers, type
 import { billingEnabled, loadEntitlements, PLAN_LABEL, TRIAL_DAYS, type PlanId } from "./_lib/plans.js"
 import { dayKey, monthKey, rateLimit } from "./_lib/limits.js"
 import { annualAvailable, priceFor, priceIds, stripe, STRIPE_VERSION_ELEMENTS, type Interval } from "./_lib/stripe.js"
-import { syncSubscription } from "./_lib/stripeSync.js"
+import { ensureDefaultPaymentMethod, syncSubscription } from "./_lib/stripeSync.js"
 import { upgradeSubscription } from "./_lib/upgrade.js"
 import { sendSmsMetered, smsConfigured } from "./_lib/sms.js"
 import { reportError } from "./_lib/monitoring.js"
@@ -113,7 +113,13 @@ async function checkout(sb: import("@supabase/supabase-js").SupabaseClient, user
     trialDays: trialEligible ? TRIAL_DAYS() : 0,
     taxRate: (env("STRIPE_TAX_RATE_ID") || "").trim(), autoTax: env("STRIPE_AUTOMATIC_TAX") === "1",
   })
-  const s = await stripe("POST", "/checkout/sessions", params, embedded ? STRIPE_VERSION_ELEMENTS : undefined)
+  let s = await stripe("POST", "/checkout/sessions", params, embedded ? STRIPE_VERSION_ELEMENTS : undefined)
+  // update55 · PayPal pas (encore) activé sur le compte Stripe (ex. passage en live) : on retombe sur carte + Apple Pay / Google Pay
+  if (!s.ok && /paypal/i.test(String((s.data.error as { message?: string } | undefined)?.message || ""))) {
+    await reportError(new Error("Stripe : PayPal indisponible, repli sur la carte"), { route: "account", action: "checkout_paypal_fallback" })
+    const cardOnly = embedded ? { ...params, allowed_payment_method_types: ["card"] } : { ...params, payment_method_types: ["card"] }
+    s = await stripe("POST", "/checkout/sessions", cardOnly, embedded ? STRIPE_VERSION_ELEMENTS : undefined)
+  }
   if (!s.ok || !(embedded ? s.data.client_secret : s.data.url)) {
     const msg = (s.data.error as { message?: string } | undefined)?.message
     return { status: 502, body: { error: `Stripe : impossible d'ouvrir le paiement${msg ? ` (${msg})` : ""}.` } }
@@ -121,8 +127,11 @@ async function checkout(sb: import("@supabase/supabase-js").SupabaseClient, user
   return { status: 200, body: { ok: true, session_id: String(s.data.id), trial_days: trialEligible ? TRIAL_DAYS() : 0, ...(embedded ? { client_secret: String(s.data.client_secret) } : { url: String(s.data.url) }) } }
 }
 
+/** update55 · Moyens de paiement proposés (ordre d'affichage géré côté Payment Element). */
+const PAY_METHODS = ["card", "paypal"]
+
 /** Paramètres de la session Stripe Checkout (exporté pour le test local scripts/test-checkout.ts). */
-export function checkoutParams(o: { userId: string; customer: string; plan: PlanId; interval: Interval; price: string; receptionPrice: string; embedded: boolean; base: string; trialDays: number; taxRate: string; autoTax: boolean }) {
+export function checkoutParams(o: { methods?: string[]; userId: string; customer: string; plan: PlanId; interval: Interval; price: string; receptionPrice: string; embedded: boolean; base: string; trialDays: number; taxRate: string; autoTax: boolean }) {
   const line = (p: string) => ({ price: p, quantity: 1, ...(o.taxRate && !o.autoTax ? { tax_rates: [o.taxRate] } : {}) })
   const back = `${o.base}/reception?billing=ok&session_id={CHECKOUT_SESSION_ID}`
   const first = o.trialDays ? new Date(Date.now() + o.trialDays * 86400e3).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : ""
@@ -132,9 +141,11 @@ export function checkoutParams(o: { userId: string; customer: string; plan: Plan
     client_reference_id: o.userId,
     line_items: [line(o.price), ...(o.receptionPrice ? [line(o.receptionPrice)] : [])],
     ...(o.embedded
-      // Paiement intégré dans l'écran Akno (Checkout Sessions + Elements). Carte uniquement, pour un formulaire épuré.
-      ? { ui_mode: "elements", return_url: back, allowed_payment_method_types: ["card"] }
-      : { success_url: back, cancel_url: `${o.base}/reception?billing=cancel`, payment_method_types: ["card"], branding_settings: BRANDING,
+      // Paiement intégré dans l'écran Akno (Checkout Sessions + Elements).
+      // update55 · carte + PayPal. Apple Pay et Google Pay passent par « card » (portefeuilles, domaine enregistré chez Stripe).
+      // Liste explicite plutôt que la config Dashboard, qui ajouterait Klarna, Amazon Pay… PayPal revient sur return_url.
+      ? { ui_mode: "elements", return_url: back, allowed_payment_method_types: o.methods || PAY_METHODS }
+      : { success_url: back, cancel_url: `${o.base}/reception?billing=cancel`, payment_method_types: o.methods || PAY_METHODS, branding_settings: BRANDING,
           ...(first ? { custom_text: { submit: { message: `0 € aujourd'hui. Premier prélèvement le ${first}, sauf résiliation avant cette date depuis Akno.` } } } : {}) }),
     locale: "fr",
     allow_promotion_codes: true,
@@ -162,6 +173,7 @@ async function checkoutSync(sb: import("@supabase/supabase-js").SupabaseClient, 
   const done = s.data.status === "complete"
   if (done && s.data.subscription) {
     try { await syncSubscription(String(s.data.subscription), userId) } catch (e) { await reportError(e, { route: "account", action: "checkout_sync" }) }
+    try { await ensureDefaultPaymentMethod(String(s.data.subscription)) } catch (e) { await reportError(e, { route: "account", action: "default_pm" }) }
   }
   const ent = await loadEntitlements(sb, userId)
   return { status: 200, body: { ok: true, complete: done, entitlements: ent as unknown as Json } }

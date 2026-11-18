@@ -1,5 +1,5 @@
 /* update46 · Paiement intégré dans l'écran Akno : Stripe Checkout Sessions + Elements (ui_mode "elements").
-   Les champs carte / adresse / TVA sont des iframes Stripe (Akno ne voit jamais le numéro de carte),
+   Les champs de paiement (Apple Pay, Google Pay, PayPal, carte) / adresse / TVA sont des iframes Stripe (Akno ne voit jamais le numéro de carte),
    stylés dans la DA Akno via l'API Appearance (fond carbone, Geist, rayons 12 px, focus blanc).
    Chargé à la demande (lazy) pour ne pas alourdir l'app. */
 import { useState, type FormEvent, type ReactNode } from "react"
@@ -41,7 +41,13 @@ const appearance: Appearance = {
     ".Input--invalid": { border: "1px solid rgba(255,69,58,.7)", boxShadow: "none" },
     ".Error": { fontSize: "12.5px", color: "#FF6B61" },
     ".Tab": { backgroundColor: "#0E0E10", border: "1px solid rgba(255,255,255,.09)", boxShadow: "none" },
-    ".Tab--selected": { border: "1px solid rgba(255,255,255,.6)", boxShadow: "0 0 0 4px rgba(255,255,255,.05)" },
+    ".Tab--selected": { backgroundColor: "#151517", border: "1px solid rgba(255,255,255,.6)", boxShadow: "0 0 0 4px rgba(255,255,255,.05)" },
+    // update55 · onglets Apple Pay / Google Pay / PayPal / Carte : sélection sombre façon Akno (pas de fond blanc)
+    ".Tab:hover": { border: "1px solid rgba(255,255,255,.16)" },
+    ".TabLabel": { color: "rgba(255,255,255,.6)" },
+    ".TabLabel--selected": { color: "#FFFFFF" },
+    ".TabIcon": { fill: "rgba(255,255,255,.6)" },
+    ".TabIcon--selected": { fill: "#FFFFFF" },
     ".CheckboxInput": { backgroundColor: "#0E0E10", border: "1px solid rgba(255,255,255,.25)" },
     ".CheckboxLabel": { color: "rgba(255,255,255,.7)", fontSize: "13.5px" },
     ".TermsText": { color: "rgba(255,255,255,.4)", fontSize: "12px" },
@@ -75,7 +81,8 @@ function PayForm({ onComplete, cta }: { onComplete: () => void; cta: string }) {
     if (!checkout || busy) return
     setBusy(true); setErr("")
     const res = await checkout.confirm({ redirect: "if_required" })
-    if (res.type === "error") { setErr(res.error.message || "Paiement refusé. Vérifiez votre carte."); setBusy(false); return }
+    // PayPal : Stripe redirige vers PayPal puis revient sur return_url (?billing=ok&session_id=…), repris par Flow / Gate.
+    if (res.type === "error") { setErr(res.error.message || "Paiement refusé. Vérifiez votre moyen de paiement."); setBusy(false); return }
     onComplete()
   }
   const applyPromo = async () => {
@@ -88,8 +95,8 @@ function PayForm({ onComplete, cta }: { onComplete: () => void; cta: string }) {
   }
 
   return <form onSubmit={submit} noValidate className={`relative min-h-[520px] bg-[#0B0B0D] transition-opacity duration-500 ${ready ? "opacity-100" : "opacity-0"}`}>
-    <Block t="Carte bancaire" aside={<span className="flex items-center gap-1.5 text-[12px] text-white/40"><Lock size={12} strokeWidth={2.2} />Chiffré par Stripe</span>}>
-      <PaymentElement onReady={() => setReady(true)} onLoadError={e => { console.error("[Akno paiement]", e.error); setReady(true); setErr(e.error?.message || "Le formulaire de carte n'a pas pu se charger. Rechargez la page.") }} options={{ layout: "tabs", wallets: { link: "never" }, fields: { billingDetails: { address: "never" } }, terms: { card: "auto" } }} />
+    <Block t="Moyen de paiement" aside={<span className="flex items-center gap-1.5 text-[12px] text-white/40"><Lock size={12} strokeWidth={2.2} />Chiffré par Stripe</span>}>
+      <PaymentElement onReady={() => setReady(true)} onLoadError={e => { console.error("[Akno paiement]", e.error); setReady(true); setErr(e.error?.message || "Le formulaire de paiement n'a pas pu se charger. Rechargez la page.") }} options={{ layout: "tabs", paymentMethodOrder: ["apple_pay", "google_pay", "paypal", "card"], wallets: { applePay: "auto", googlePay: "auto", link: "never" }, fields: { billingDetails: { address: "never" } }, terms: { card: "auto", paypal: "auto", applePay: "auto", googlePay: "auto" } }} />
     </Block>
     <Block t="Adresse de facturation"><BillingAddressElement /></Block>
     <Block t="Entreprise" aside={<span className="text-[12px] text-white/40">facultatif</span>}><TaxIdElement options={{ visibility: "always" }} /></Block>

@@ -133,20 +133,21 @@ export default function Offres({ mode, onClose, onDone, returnSession, flow }: {
               <section className="min-w-0">
                 <button type="button" onClick={() => go("choose", -1)} className="group mb-5 inline-flex items-center gap-1.5 rounded-md text-[14px] font-medium text-white/55 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/50"><ArrowLeft size={16} className="transition-transform group-hover:-translate-x-0.5" />Modifier l'offre</button>
                 <h1 className="text-[28px] font-semibold leading-[1.1] tracking-[-0.035em] text-balance sm:text-[32px]">Votre moyen de paiement</h1>
-                <p className="mt-2.5 max-w-[540px] text-[15px] leading-[1.55] text-white/55 text-pretty">{trial ? <>Aucun prélèvement aujourd'hui. Votre carte sera débitée le <span className="text-white">{dateFr(trialEnd)}</span> si vous gardez Akno.</> : <>Le premier prélèvement a lieu aujourd'hui.</>}</p>
+                <p className="mt-2.5 max-w-[540px] text-[15px] leading-[1.55] text-white/55 text-pretty">{trial ? <>Aucun prélèvement aujourd'hui. Votre moyen de paiement sera débité le <span className="text-white">{dateFr(trialEnd)}</span> si vous gardez Akno.</> : <>Le premier prélèvement a lieu aujourd'hui.</>}</p>
                 <div className="mt-5 lg:hidden"><MiniSummary offerName={offer.full} interval={interval} reception={reception} totalHT={totalHT} trial={trial} trialEnd={trialEnd} /></div>
                 <div className="relative mt-6 min-h-[520px] overflow-hidden rounded-[24px] border border-white/[.07] bg-[#0B0B0D] shadow-[inset_0_1px_0_rgba(255,255,255,.05),0_24px_60px_-30px_rgba(0,0,0,1)]">
                   <PaneSkeleton />
                   <div className="relative">{secret && PK && <Suspense fallback={null}><StripePane pk={PK} clientSecret={secret} onComplete={complete} cta={trial ? "Démarrer mon essai gratuit" : "Payer et activer Akno"} /></Suspense>}</div>
                 </div>
-                <p className="mt-4 flex items-center gap-2 px-1 text-[12.5px] text-white/40"><Lock size={13} strokeWidth={2} />Paiement traité par Stripe. Akno ne voit jamais votre numéro de carte.</p>
+                <p className="mt-4 flex items-center gap-2 px-1 text-[12.5px] text-white/40"><Lock size={13} strokeWidth={2} />Paiement traité par Stripe. Akno ne voit jamais vos données bancaires.</p>
               </section>
               <aside className="hidden lg:block"><div className="lg:sticky lg:top-6">
                 <Summary compact offerName={offer.full} plan={plan} interval={interval} reception={reception} totalHT={totalHT} trial={trial} trialDays={trialDays} trialEnd={trialEnd} />
               </div></aside>
             </div>}
 
-            {step === "done" && <Done session={session} pick={{ plan, interval, reception }} offerName={offer.full} trial={trial} trialDays={trialDays} onEnter={onDone} enterLabel={flow ? "Continuer" : undefined} />}
+            {step === "done" && <Done session={session} pick={{ plan, interval, reception }} offerName={offer.full} trial={trial} trialDays={trialDays} onEnter={onDone} enterLabel={flow ? "Continuer" : undefined}
+              onIncomplete={() => { setSecret(""); setSession(""); go("choose", -1); setErr("Paiement non finalisé (PayPal annulé ou refusé). Rien n'a été débité : vous pouvez réessayer.") }} />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -288,7 +289,7 @@ function PaneSkeleton() {
 }
 
 /** Activation : relit l'abonnement chez Stripe côté serveur jusqu'à ce que l'accès soit ouvert. */
-function Done({ session, pick, offerName, trial, trialDays, onEnter, enterLabel = "Entrer dans Akno" }: { session: string; pick: Pick; offerName: string; trial: boolean; trialDays: number; onEnter: () => void; enterLabel?: string }) {
+function Done({ session, pick, offerName, trial, trialDays, onEnter, onIncomplete, enterLabel = "Entrer dans Akno" }: { session: string; pick: Pick; offerName: string; trial: boolean; trialDays: number; onEnter: () => void; onIncomplete?: () => void; enterLabel?: string }) {
   const reduce = useReducedMotion()
   const [ok, setOk] = useState(false), [slow, setSlow] = useState(false), [run, setRun] = useState(0), [end, setEnd] = useState<string | null>(null)
   const [inTrial, setInTrial] = useState(trial)
@@ -299,6 +300,8 @@ function Done({ session, pick, offerName, trial, trialDays, onEnter, enterLabel 
       for (let i = 0; i < 14 && alive; i++) {
         const r = session && i % 3 === 0 ? await api("/api/account", { action: "checkout_sync", session_id: session }) : await api("/api/account", { action: "status" })
         const e = r.entitlements as { access?: boolean; status?: string; trialEndsAt?: string | null } | undefined
+        // update55 · retour de PayPal sans validation : la session Stripe n'est toujours pas payée après ~7 s → retour au choix
+        if (session && i >= 3 && i % 3 === 0 && r.ok && r.complete === false && !e?.access && onIncomplete) { if (alive) onIncomplete(); return }
         if (r.ok && e?.access && e.status !== "none") {
           try { sessionStorage.removeItem(PICK) } catch { /* ignore */ }
           await reloadAccount()

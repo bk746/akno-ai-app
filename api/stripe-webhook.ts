@@ -1,7 +1,7 @@
 import { adminClient, env } from "./_lib/mail.js"
 import { jsonResponse, type ApiResult, type Headers } from "./_lib/http.js"
 import { verifyStripeSignature, type StripeObj } from "./_lib/stripe.js"
-import { syncSubscription } from "./_lib/stripeSync.js"
+import { ensureDefaultPaymentMethod, syncSubscription } from "./_lib/stripeSync.js"
 import { notifyArtisan } from "./_lib/push.js"
 import { reportError } from "./_lib/monitoring.js"
 
@@ -31,7 +31,11 @@ export async function handleStripeWebhook(raw: string, headers: Headers): Promis
         if (artisan && obj.customer) {
           await adminClient().from("subscriptions").upsert({ artisan_id: artisan, stripe_customer_id: String(obj.customer), updated_at: new Date().toISOString() }, { onConflict: "artisan_id" })
         }
-        if (obj.subscription) return { status: 200, body: { ok: true, ...(await syncSubscription(String(obj.subscription), artisan)) } }
+        if (obj.subscription) {
+          const res = await syncSubscription(String(obj.subscription), artisan)
+          await ensureDefaultPaymentMethod(String(obj.subscription)) // update55 · PayPal / Apple Pay restent le moyen par défaut
+          return { status: 200, body: { ok: true, ...res } }
+        }
         return { status: 200, body: { ok: true } }
       }
       case "customer.subscription.created":

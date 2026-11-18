@@ -80,7 +80,7 @@ export async function upgradeSubscription(subId: string, kind: UpgradeKind, opts
   })
   if (!u.ok) {
     const e = (u.data as any)?.error
-    if (e?.type === "card_error" || u.status === 402) return fail(402, "Le paiement du prorata a échoué : mettez à jour votre carte dans le portail de facturation. Rien n'a été modifié.")
+    if (e?.type === "card_error" || u.status === 402) return fail(402, "Le paiement du prorata a échoué : mettez à jour votre moyen de paiement (carte, PayPal…) dans le portail de facturation. Rien n'a été modifié.")
     return fail(502, String(e?.message || "Stripe a refusé la modification."))
   }
   return { ok: true as const, preview, subscription: u.data }

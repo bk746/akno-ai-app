@@ -41,3 +41,23 @@ export async function syncSubscription(subId: string, hintArtisan?: string) {
   if (error) throw new Error(error.message)
   return { artisanId, plan, status, interval }
 }
+
+/** update55 · Le moyen de paiement choisi au paiement (carte, Apple Pay, Google Pay ou PayPal) doit rester celui
+    de l'abonnement après l'essai, pour les montées en gamme et dans le portail. Checkout le pose déjà sur
+    l'abonnement ; on le reporte aussi sur le client Stripe (invoice_settings) et sur l'abonnement s'il manque. */
+export async function ensureDefaultPaymentMethod(subId: string) {
+  const r = await stripe("GET", `/subscriptions/${subId}`)
+  if (!r.ok) return
+  const sub = r.data as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+  const customer = String(sub.customer || "")
+  let pm = typeof sub.default_payment_method === "string" ? sub.default_payment_method : String(sub.default_payment_method?.id || "")
+  if (!pm && sub.pending_setup_intent) {
+    const si = await stripe("GET", `/setup_intents/${typeof sub.pending_setup_intent === "string" ? sub.pending_setup_intent : sub.pending_setup_intent.id}`)
+    if (si.ok && (si.data as any).status === "succeeded") pm = String((si.data as any).payment_method || "") // eslint-disable-line @typescript-eslint/no-explicit-any
+  }
+  if (!pm || !customer) return
+  if (!sub.default_payment_method) await stripe("POST", `/subscriptions/${subId}`, { default_payment_method: pm })
+  const c = await stripe("GET", `/customers/${customer}`)
+  if (c.ok && !(c.data as any).invoice_settings?.default_payment_method) // eslint-disable-line @typescript-eslint/no-explicit-any
+    await stripe("POST", `/customers/${customer}`, { invoice_settings: { default_payment_method: pm } })
+}
