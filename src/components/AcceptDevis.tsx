@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 
-type Line = { l?: string; q?: number; pu?: number; u?: string; tv?: number }
+type Line = { l?: string; q?: number; pu?: number; u?: string; tv?: number; k?: string; d?: string }
 type Info = {
   numero?: string
   objet?: string
@@ -52,7 +52,8 @@ export default function AcceptDevis() {
     setBusy(false)
   }
 
-  const lines = Array.isArray(info?.lignes) ? info!.lignes! : []
+  // update52 : la ligne « meta » (réglages de l'éditeur) n'est pas affichée ; sections, descriptions et remises le sont
+  const lines = (Array.isArray(info?.lignes) ? info!.lignes! : []).filter(x => x && x.k !== "meta")
   const done = info?.statut === "val" || info?.statut === "ref"
   const decided = info?.decided_at ? new Date(info.decided_at).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", year: "numeric" }) : ""
 
@@ -72,11 +73,14 @@ export default function AcceptDevis() {
             {info.client_nom && <div className="mt-1 text-[14px] text-white/55">Pour {info.client_nom}</div>}
             {lines.length > 0 && (
               <div className="mt-5 divide-y divide-white/[.06] rounded-[16px] bg-white/[.03]">
-                {lines.map((x, i) => (
+                {lines.map((x, i) => x.k === "sec" ? (
+                  <div key={i} className="px-3 pb-1.5 pt-4 text-[12.5px] font-semibold text-[#3FD0C9]">{x.l}</div>
+                ) : (
                   <div key={i} className="flex items-start justify-between gap-3 px-3 py-3 text-[13.5px]">
                     <div className="min-w-0">
-                      <div>{x.l}</div>
-                      <div className="text-[12px] text-white/40">{x.q} {x.u || "u"} × {eur(Number(x.pu) || 0)}</div>
+                      <div className={x.k === "rem" ? "italic" : ""}>{x.l}</div>
+                      {x.d && <div className="mt-0.5 whitespace-pre-line text-[12px] leading-[1.45] text-white/45">{x.d}</div>}
+                      {x.k !== "rem" && <div className="text-[12px] text-white/40">{String(x.q ?? "").replace(".", ",")} {x.u || "u"} × {eur(Number(x.pu) || 0)}</div>}
                     </div>
                     <div className="shrink-0 text-white/80">{eur((Number(x.q) || 0) * (Number(x.pu) || 0))}</div>
                   </div>

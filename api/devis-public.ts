@@ -1,3 +1,4 @@
+import { normStatut, withStatut } from "./_lib/devisStatut.js"
 import { adminClient, stopDevisReminders } from "./_lib/mail.js"
 import { notifyArtisan } from "./_lib/push.js"
 import { clientIp, header, sha256Hex, type Headers } from "./_lib/http.js"
@@ -27,7 +28,7 @@ function publicBody(devis: Record<string, unknown>, company: string) {
     total_ht: devis.total_ht,
     total_ttc: devis.total_ttc,
     tva_taux: devis.tva_taux,
-    statut: devis.statut,
+    statut: normStatut(devis.statut),
     decided_at: devis.repondu_le,
     company,
   }
@@ -74,6 +75,7 @@ export async function handleDevisPublic(method?: string, url?: string, body?: un
 
   const { data: devis, error } = await sb.from("devis").select("id, numero, client_nom, objet, lignes, total_ht, total_ttc, tva_taux, statut, artisan_id, repondu_le, token_expire_le").eq("token", token).maybeSingle()
   if (error || !devis) return { status: 404, body: { error: "Ce devis est introuvable ou le lien a expiré." } }
+  devis.statut = normStatut(devis.statut)
   if (devis.token_expire_le && new Date(devis.token_expire_le).getTime() < Date.now() && devis.statut !== "val" && devis.statut !== "ref") {
     return { status: 410, body: { error: "Ce lien a expiré. Contactez votre artisan pour recevoir un devis à jour." } }
   }
@@ -99,7 +101,7 @@ export async function handleDevisPublic(method?: string, url?: string, body?: un
   const nom = body && typeof body === "object" ? String((body as { nom?: string }).nom || "").trim().slice(0, 120) : ""
   if (action === "accept" && nom.length < 2) return { status: 400, body: { error: "Indiquez vos nom et prénom pour valider le « Bon pour accord »." } }
   const proof = action === "accept" ? { accepte_nom: nom, accepte_ip: ip.slice(0, 64) || null, accepte_ua: header(headers, "user-agent").slice(0, 300) || null } : {}
-  const { error: uErr } = await sb.from("devis").update({ statut, repondu_le: now, ...proof }).eq("id", devis.id).not("statut", "in", "(val,ref)")
+  const { error: uErr } = await withStatut(statut, st => sb.from("devis").update({ statut: st, repondu_le: now, ...proof }).eq("id", devis.id).not("statut", "in", "(val,ref,accepte,refuse)"))
   if (uErr) return { status: 500, body: { error: "Impossible d'enregistrer votre réponse." } }
   await stopDevisReminders(sb, devis.id, { markResponded: true })
   await notifyArtisan(devis.artisan_id, {

@@ -1,3 +1,4 @@
+import { normStatut, withStatut } from "./_lib/devisStatut.js"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   addDaysYmd, adminClient, appUrl, devisAcceptUrl, env, formatEuro, frDate, impayeTemplate, monthlyReportHtml,
@@ -94,7 +95,9 @@ async function shouldStop(sb: SupabaseClient, d: DevisRow): Promise<string | nul
 
 async function loadDevis(sb: SupabaseClient, id: string) {
   const { data } = await sb.from("devis").select("id, artisan_id, numero, client_nom, client_email, client_telephone, objet, statut, token, envoye_le, relances, relances_off, reponse_client, repondu_le").eq("id", id).maybeSingle()
-  return (data || null) as DevisRow | null
+  const row = (data || null) as DevisRow | null
+  if (row) row.statut = normStatut(row.statut)
+  return row
 }
 
 async function processDueReminders(sb: SupabaseClient, ctx: Ctx, now: Date) {
@@ -165,7 +168,7 @@ async function processDueReminders(sb: SupabaseClient, ctx: Ctx, now: Date) {
     if (last && wave) {
       const again = await loadDevis(sb, devis.id)
       if (again && !await shouldStop(sb, again) && again.statut === "env") {
-        await sb.from("devis").update({ statut: "sans_reponse" }).eq("id", devis.id)
+        await withStatut("sans_reponse", st => sb.from("devis").update({ statut: st }).eq("id", devis.id))
         marked.push(devis.id)
       }
     }
@@ -393,7 +396,7 @@ async function monthlyReports(sb: SupabaseClient, ctx: Ctx, now: Date, force = f
       sb.from("calls").select("id", { count: "exact", head: true }).eq("artisan_id", id).gte("created_at", from).lt("created_at", to).in("urgence", ["urgent", "Urgent", "haute", "oui"]),
       sb.from("appointments").select("id", { count: "exact", head: true }).eq("artisan_id", id).gte("created_at", from).lt("created_at", to),
       sb.from("devis").select("id", { count: "exact", head: true }).eq("artisan_id", id).gte("envoye_le", from).lt("envoye_le", to),
-      sb.from("devis").select("total_ttc").eq("artisan_id", id).eq("statut", "val").gte("repondu_le", from).lt("repondu_le", to),
+      sb.from("devis").select("total_ttc").eq("artisan_id", id).in("statut", ["val", "accepte"]).gte("repondu_le", from).lt("repondu_le", to),
       sb.from("relances").select("id", { count: "exact", head: true }).eq("artisan_id", id).eq("statut", "env").gte("sent_at", from).lt("sent_at", to),
       sb.from("factures").select("total_ttc, type").eq("artisan_id", id).not("numero", "is", null).gte("date_emission", `${period}-01`).lt("date_emission", firstThis),
       sb.from("factures").select("total_ttc, acompte_deduit").eq("artisan_id", id).eq("statut", "payee").gte("payee_le", from).lt("payee_le", to),

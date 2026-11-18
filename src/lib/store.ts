@@ -7,8 +7,9 @@ export type Ev = { id: string; date: string; start: number; dur: number; name: s
 export type RelStatus = "prog" | "pause" | "env" | "rep"
 export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string; at?: string; devisId?: string; appointmentId?: string; scheduledFor?: string; sentAt?: string }
 export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref" | "sans"
-export type DevisLine = { l: string; q: number; pu: number; u?: string; tv?: number }
-export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string; token?: string; remindersOff?: boolean; reply?: string; repliedAt?: string; reminderCount?: number; phone?: string }
+/** update52 : champs facultatifs de l'éditeur pro (voir src/lib/devisCalc.ts) — rétrocompatible avec { l, q, pu, u, tv }. */
+export type DevisLine = { l: string; q: number; pu: number; u?: string; tv?: number; k?: string; d?: string; pid?: string; ca?: number; m?: import("./devisCalc").DevisMeta }
+export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string; token?: string; remindersOff?: boolean; reply?: string; repliedAt?: string; reminderCount?: number; phone?: string; addr?: string }
 export type Msg = { id: string; from: "me" | "ai"; text: string; devisId?: string; action?: string; card?: { num: number; client: string; objet: string; amount: number }; items?: import("./assistant").RItem[]; acts?: import("./assistant").RAct[]; chips?: string[]; done?: string[] }
 /** update44 : plus de lien d'avis par défaut (il appartenait à une autre entreprise). Chaque artisan saisit le sien. */
 export const DEFAULT_REVIEW_URL = ""
@@ -101,12 +102,31 @@ const toCall = (r: Row): Call => {
 }
 const toEv = (r: Row): Ev => { const a = new Date(r.start), b = r.end ? new Date(r.end) : new Date(a.getTime() + 3600e3); return { id: r.id, date: isoDay(a), start: a.getHours() + a.getMinutes() / 60, dur: Math.max(.25, (b.getTime() - a.getTime()) / 3600e3), name: r.client || "Client", topic: r.title || "", addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1, ai: r.call_id != null, callId: r.call_id != null ? String(r.call_id) : undefined, phone: r.telephone_client || undefined, notes: r.notes || undefined } }
 const evRow = (e: Ev) => { const a = new Date(`${e.date}T00:00:00`); a.setMinutes(Math.round(e.start * 60)); const b = new Date(a.getTime() + e.dur * 3600e3); return { title: e.topic, client: e.name, start: a.toISOString(), end: b.toISOString(), adresse: e.addr ?? null } }
-const mapStatut = (st: string): DevStatus => {
-  if (st === "envoyé") return "env"
+export const mapStatut = (st: string): DevStatus => {
+  // update52 : anciennes valeurs de la contrainte devis_statut_check (envoye / accepte / refuse)
+  if (st === "envoyé" || st === "envoye") return "env"
+  if (st === "accepte" || st === "accepté") return "val"
+  if (st === "refuse" || st === "refusé") return "ref"
   if (st === "sans_reponse" || st === "sans réponse" || st === "sans") return "sans"
   return DEV_ST.includes(st as DevStatus) ? st as DevStatus : "brouillon"
 }
-const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: mapStatut(String(r.statut || "")), amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at, email: r.client_email || undefined, callId: r.call_id != null ? String(r.call_id) : undefined, ai: r.call_id != null, sentAt: r.envoye_le || undefined, token: r.token || undefined, remindersOff: !!r.relances_off, reply: r.reponse_client || undefined, repliedAt: r.repondu_le || undefined, reminderCount: Number(r.relances || 0), phone: r.client_telephone || undefined })
+const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: mapStatut(String(r.statut || "")), amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at, email: r.client_email || undefined, callId: r.call_id != null ? String(r.call_id) : undefined, ai: r.call_id != null, sentAt: r.envoye_le || undefined, token: r.token || undefined, remindersOff: !!r.relances_off, reply: r.reponse_client || undefined, repliedAt: r.repondu_le || undefined, reminderCount: Number(r.relances || 0), phone: r.client_telephone || undefined, addr: r.client_adresse || undefined })
+/** update52 : repli si la base n'a pas encore la migration 20261118_07 (contrainte de statut d'origine). */
+export const legacyStatut = (st: DevStatus) => st === "env" || st === "sans" ? "envoye" : st === "val" ? "accepte" : st === "ref" ? "refuse" : "brouillon"
+/** Message d'erreur Supabase → français, pour l'artisan. */
+export function dbErrorFr(e: { code?: string; message?: string } | null | undefined, what = "l'enregistrement") {
+  const code = String(e?.code || ""), msg = String(e?.message || "")
+  if (/Failed to fetch|NetworkError|Load failed|fetch/i.test(msg) && !code) return `Pas de connexion : ${what} n'a pas pu se faire. Vérifiez votre réseau, puis réessayez.`
+  if (code === "42501" || /row-level security/i.test(msg)) return `Accès refusé pour ${what}. Déconnectez-vous puis reconnectez-vous.`
+  if (code === "23502") {
+    const col = (msg.match(/column "([a-z_]+)"/) || [])[1] || ""
+    const lab: Record<string, string> = { client_email: "l'e-mail du client", client_nom: "le nom du client", numero: "le numéro", artisan_id: "le compte artisan" }
+    return `Une information obligatoire manque pour ${what}${lab[col] ? ` : ${lab[col]}` : ""}. Vos saisies restent sur cet appareil.`
+  }
+  if (code === "23514") return `Une valeur n'est pas acceptée par la base pour ${what}.`
+  if (code === "PGRST301" || /JWT/i.test(msg)) return "Votre session a expiré. Reconnectez-vous pour enregistrer."
+  return `Erreur pendant ${what}. Réessayez dans un instant.`
+}
 const devRow = (d: Devis, tva: number) => {
   const lines = d.lines ?? []
   const ht = lines.length ? lines.reduce((t, l) => t + Number(l.q) * Number(l.pu), 0) : d.amount / (1 + tva / 100)
@@ -114,7 +134,10 @@ const devRow = (d: Devis, tva: number) => {
   return {
     numero: String(d.num), client_nom: d.client, objet: d.objet, statut: d.status === "sans" ? "sans_reponse" : d.status, lignes: lines,
     total_ttc: Math.round((ht + tax) * 100) / 100, total_ht: Math.round(ht * 100) / 100, tva_taux: tva,
-    ...(d.email != null ? { client_email: d.email } : {}),
+    // update52 : client_email est NOT NULL en base → chaîne vide quand le client n'a pas d'e-mail (sinon l'insertion échouait et le devis disparaissait)
+    client_email: (d.email ?? "").trim(),
+    ...(d.phone != null ? { client_telephone: d.phone || null } : {}),
+    ...(d.addr != null ? { client_adresse: d.addr || null } : {}),
     ...(d.status === "env" ? { envoye_le: d.sentAt || new Date().toISOString() } : {}),
     ...(typeof d.remindersOff === "boolean" ? { relances_off: d.remindersOff } : {}),
   }
@@ -197,6 +220,8 @@ export function useStore() {
   }, [load])
   const sync = useCallback(async (p: St, n: St) => {
     const me = uidRef.current; if (!me) return
+    // update52 : plus aucune erreur d'enregistrement silencieuse → message affiché dans l'app (événement « akno-sync-error »)
+    const fail = (message: string, err?: unknown) => { console.error("Supabase sync", err); try { dispatchEvent(new CustomEvent("akno-sync-error", { detail: message })) } catch { /* */ } }
     const jobs: PromiseLike<unknown>[] = []
     if (p.calls !== n.calls) for (const c of n.calls) {
       const o = p.calls.find(x => x.id === c.id)
@@ -209,8 +234,17 @@ export function useStore() {
       for (const o of p.events) if (isUuid(o.id) && !n.events.some(x => x.id === o.id)) jobs.push(supabase.from("appointments").delete().eq("id", o.id))
     }
     if (p.devis !== n.devis) {
-      for (const d of n.devis) { const o = p.devis.find(x => x.id === d.id); if (!o) jobs.push(isUuid(d.id) ? supabase.from("devis").update(devRow(d, n.settings.tva)).eq("id", d.id) : supabase.from("devis").insert({ ...devRow(d, n.settings.tva), artisan_id: me })); else if (o !== d && isUuid(d.id)) jobs.push(supabase.from("devis").update(devRow(d, n.settings.tva)).eq("id", d.id)) }
-      for (const o of p.devis) if (isUuid(o.id) && !n.devis.some(x => x.id === o.id)) jobs.push(supabase.from("devis").delete().eq("id", o.id))
+      // update52 : chaque écriture de devis est vérifiée ; en cas de refus de la contrainte de statut d'origine, on réessaie avec l'ancienne valeur
+      const write = async (d: Devis, insert: boolean) => {
+        const row = devRow(d, n.settings.tva)
+        const run = (r: typeof row | (Omit<typeof row, "statut"> & { statut: string })) => insert ? supabase.from("devis").insert({ ...r, artisan_id: me }) : supabase.from("devis").update(r).eq("id", d.id)
+        let res = await run(row)
+        if (res.error?.code === "23514") res = await run({ ...row, statut: legacyStatut(d.status) })
+        if (res.error) fail(dbErrorFr(res.error, `l'enregistrement du devis ${d.num || ""}`.trim()), res.error)
+        return res
+      }
+      for (const d of n.devis) { const o = p.devis.find(x => x.id === d.id); if (!o) jobs.push(write(d, !isUuid(d.id))); else if (o !== d && isUuid(d.id)) jobs.push(write(d, false)) }
+      for (const o of p.devis) if (isUuid(o.id) && !n.devis.some(x => x.id === o.id)) jobs.push(supabase.from("devis").delete().eq("id", o.id).then(r => { if (r.error) fail(dbErrorFr(r.error, "la suppression du devis"), r.error); return r }))
     }
     if (p.rels !== n.rels) {
       for (const r of n.rels) { const o = p.rels.find(x => x.id === r.id); if (!o) jobs.push(supabase.from("relances").insert({ ...relRow(r), artisan_id: me })); else if (o !== r && isUuid(r.id)) jobs.push(supabase.from("relances").update(relRow(r)).eq("id", r.id)) }
@@ -231,6 +265,8 @@ export function useStore() {
     if (n.events.some(e => !isUuid(e.id)) || n.devis.some(d => !isUuid(d.id)) || n.rels.some(r => !isUuid(r.id)) || n.calls.some(c => !/^\d+$/.test(c.id))) load()
   }, [load])
   const setS = useCallback((u: St | ((x: St) => St)) => { const p = cur.current, n = typeof u === "function" ? u(p) : u; cur.current = n; setRaw(n); sync(p, n) }, [sync])
-  return [s, setS, loading] as const
+  /** update52 : met à jour l'état local SANS réécrire en base (données déjà enregistrées par l'éditeur de devis). */
+  const put = useCallback((u: (x: St) => St) => { const n = u(cur.current); cur.current = n; setRaw(n) }, [])
+  return [s, setS, loading, put] as const
 }
 export const eur = (n: number) => n.toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, " ") + " €"

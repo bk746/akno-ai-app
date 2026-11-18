@@ -5,6 +5,7 @@ import { authed as authSession, isResult } from "./_lib/http.js"
 import { can, loadEntitlements, upgradeError, type Entitlements } from "./_lib/plans.js"
 import { consume, monthKey, rateLimit } from "./_lib/limits.js"
 import { reportError } from "./_lib/monitoring.js"
+import { normStatut, withStatut } from "./_lib/devisStatut.js"
 
 type Json = Record<string, unknown>
 type Line = { l: string; q: number; u: string; pu: number; tv: number }
@@ -39,6 +40,23 @@ function asLines(raw: unknown): Line[] {
     out.push({ l: l.slice(0, 280), q: round2(q), u: u.slice(0, 12), pu: round2(pu), tv: rate })
   }
   return out.slice(0, 16)
+}
+
+/** update52 : lignes d'un devis pour la facture — garde les remises (prix négatif), ignore titres de section et réglages, ajoute la description. */
+function devisLines(raw: unknown): Line[] {
+  if (!Array.isArray(raw)) return []
+  const out: Line[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const o = item as Record<string, unknown>
+    if (o.k === "sec" || o.k === "meta") continue
+    const base = String(o.l ?? o.designation ?? o.libelle ?? "").trim()
+    const d = typeof o.d === "string" ? o.d.trim() : ""
+    const q = Number(o.q ?? o.qty ?? o.quantite), pu = Number(o.pu ?? o.prix ?? o.prix_ht), tv = Number(o.tv ?? o.tva ?? o.tva_taux)
+    if (!base || !Number.isFinite(q) || q <= 0 || !Number.isFinite(pu) || (pu < 0 && o.k !== "rem")) continue
+    out.push({ l: (d ? `${base}\n${d}` : base).slice(0, 1200), q: round2(q), u: String(o.u ?? o.unite ?? "u").trim().slice(0, 12) || "u", pu: round2(pu), tv: tv === 5.5 || tv === 10 || tv === 20 || tv === 0 ? tv : 20 })
+  }
+  return out.slice(0, 200)
 }
 
 function parseModelJson(text: string): { objet?: string; lines: Line[] } {
@@ -225,7 +243,7 @@ async function handleSend(supabase: SupabaseClient, userId: string, body: Json):
   if (!devisId) return { status: 400, body: { error: "devis_id manquant." } }
   const { data: devis, error } = await supabase.from("devis").select("id, numero, client_nom, client_email, objet, statut, token").eq("id", devisId).maybeSingle()
   if (error || !devis) return { status: 404, body: { error: "Devis introuvable." } }
-  if (devis.statut === "env" || devis.statut === "envoyé") {
+  if (normStatut(devis.statut) === "env") {
     return { status: 409, body: { error: "Ce devis a déjà été envoyé." } }
   }
 
@@ -267,11 +285,11 @@ async function handleSend(supabase: SupabaseClient, userId: string, body: Json):
   }
 
   const sentAt = new Date().toISOString()
-  const { error: uErr } = await supabase.from("devis").update({
-    statut: "env",
+  const { error: uErr } = await withStatut("env", statut => supabase.from("devis").update({
+    statut,
     envoye_le: sentAt,
     client_email: email,
-  }).eq("id", devisId)
+  }).eq("id", devisId))
   if (uErr) return { status: 500, body: { error: "E-mail envoyé, mais le statut n'a pas pu être mis à jour." } }
   try { await scheduleDevisReminders(supabase, { artisanId: userId, devisId, client: devis.client_nom, envoyeLe: sentAt, delays: reminderDelays(artisan?.relance_delais) }) } catch { /* le devis est déjà parti */ }
   return { status: 200, body: { ok: true, sent_at: sentAt, email } }
@@ -317,9 +335,9 @@ async function factureFromDevis(supabase: SupabaseClient, userId: string, body: 
   if (!devisId) return { status: 400, body: { error: "devis_id manquant." } }
   const { data: devis } = await supabase.from("devis").select("id, numero, client_nom, client_email, client_telephone, client_adresse, objet, lignes, statut").eq("id", devisId).maybeSingle()
   if (!devis) return { status: 404, body: { error: "Devis introuvable." } }
-  if (devis.statut !== "val") return { status: 409, body: { error: "Seul un devis accepté peut être facturé." } }
+  if (normStatut(devis.statut) !== "val") return { status: 409, body: { error: "Seul un devis accepté peut être facturé." } }
   const type = body.type === "acompte" ? "acompte" : "facture"
-  const lines = asLines(devis.lignes)
+  const lines = devisLines(devis.lignes)
   if (!lines.length) return { status: 400, body: { error: "Le devis ne contient aucune ligne." } }
 
   // Acomptes déjà émis sur ce devis (déduits de la facture de solde)

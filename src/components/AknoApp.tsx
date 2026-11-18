@@ -2,7 +2,7 @@ import DevisPaper from "./DevisPaper"
 import VoiceCall from "./VoiceCall"
 import { formatVoiceTimings, isVoiceDebugEnabled, setVoiceDebugEnabled, subscribeVoiceTimings } from "../lib/voice/timing"
 import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
-import { buildDoc, missingLegal } from "../lib/devisDoc"
+import { CO, buildDoc, e2, missingLegal } from "../lib/devisDoc"
 import { openUpgrade, useAccount, useRights } from "../lib/accountApi"
 import { LockTag, ReceptionLocked, UpgradeHost } from "./billing/Upgrade"
 import { Lock as LockIco } from "lucide-react"
@@ -14,12 +14,15 @@ import LeadsSheet from "./sheets/LeadsSheet"
 import { AgendaCalSheet, ReceptionSheet, SmsSheet } from "./sheets/ReglagesSheets"
 import Gate from "./sheets/Gate"
 import SetupGate from "./setup/SetupGate"
+import DevisEditor, { type EditorReq, type CtInfo } from "./devis/DevisEditor"
+import { PrestationsSheet } from "./devis/Prestations"
+import { usePrestations } from "../lib/prestations"
 import { isPageLocked, openSetup } from "../lib/setup"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Component, Suspense, lazy, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
-import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck } from "lucide-react"
+import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck, Package, FilePen } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
 import { mergeTarifs, tarifsSummary } from "../lib/tarifs"
@@ -237,6 +240,16 @@ function contacts(s: St): Ct[] {
   s.events.forEach(x => !/^Chantier/.test(x.name) || findC(x.name) ? up(x.name, x.date <= TODAY ? x.date : undefined) : null)
   s.devis.forEach(x => up(x.client))
   return [...m.values()]
+}
+/* update52 : contacts pour le choix du client dans l'éditeur de devis (nom, téléphone, e-mail, adresse) */
+function ctInfos(s: St): CtInfo[] {
+  const m = new Map<string, CtInfo>()
+  const up = (name?: string, p: Partial<CtInfo> = {}) => { const n = (name || "").trim(); if (!n || /^Inconnu$/i.test(n)) return; const k = n.toLowerCase(), c = m.get(k) || { name: n }; m.set(k, { name: c.name, phone: c.phone || p.phone || undefined, email: c.email || p.email || undefined, addr: c.addr || p.addr || undefined }) }
+  ;(s.clients || []).forEach(x => up(x.name, { phone: x.phone, email: x.email, addr: x.addr }))
+  s.devis.forEach(x => up(x.client, { phone: x.phone, email: x.email, addr: x.addr }))
+  s.calls.forEach(x => up(x.name, { phone: x.phone, addr: x.addr }))
+  s.events.forEach(x => !/^Chantier/.test(x.name) && up(x.name, { phone: x.phone, addr: x.addr }))
+  return [...m.values()].sort((a, b) => sortN(a.name).localeCompare(sortN(b.name)))
 }
 const lastL = (d: string) => !d ? "—" : d === TODAY ? "aujourd'hui" : d === addDays(TODAY, -1) ? "hier" : dd(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short", ...(d.slice(0, 4) !== TODAY.slice(0, 4) ? { year: "numeric" } : {}) })
 const CtRow = ({ x, first, onOpen }: { x: Ct; first?: boolean; onOpen: () => void }) => <Row first={first} label={`Fiche ${x.name}`} onClick={onOpen} lead={<Av n={x.name} />} t={x.name} s={<>{x.phone}<br />{x.calls} appel{x.calls > 1 ? "s" : ""} · dernier contact {lastL(x.last)}</>} r={<TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${x.phone.replace(/ /g, "")}`} />} />
@@ -471,14 +484,25 @@ function Dev() {
     {avalS && (desk ? <div className="col-span-2">{avalS}</div> : avalS)}
     {replyS && (desk ? <div className="col-span-2">{replyS}</div> : replyS)}
     <Col><Section t="À suivre" aside={todo.length ? `${todo.length} devis` : undefined}><List I={Check} empty="Aucun devis en attente.">{todo.map(FRow)}</List></Section>
+      <PrestaCard />
       <Section t="Montant validé" aside="6 derniers mois"><Chart c={c} label="Total" value={eur(tot)} v={m} l={mL} sel={5} /></Section></Col>
     <Col><Section t="Tous les devis" more={() => modal({ kind: "devisList" })}><List>{ds.map(DRow)}</List></Section></Col>
   </Shell>
 }
 
+/* update52 : accès à la bibliothèque de prestations depuis la page Devis */
+function PrestaCard() {
+  const { modal } = useC(), lib = usePrestations(), c = A.dev.c
+  const cats = [...new Set(lib.items.map(x => x.categorie).filter(Boolean))]
+  return <Section t="Mes prestations" aside={lib.ready ? `${lib.items.length}` : undefined}><button type="button" onClick={() => modal({ kind: "prestations" })} className="block w-full text-left"><Card className="flex items-center gap-4 p-4 transition-colors hover:bg-white/[.02]">
+    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full" style={{ background: c + "26", color: "#3FD0C9" }}><Package size={19} strokeWidth={1.6} /></span>
+    <span className="min-w-0 flex-1"><span className="block text-[15px] font-medium">{lib.items.length ? `${lib.items.length} prestation${lib.items.length > 1 ? "s" : ""} prête${lib.items.length > 1 ? "s" : ""} à chiffrer` : "Enregistrez vos prestations"}</span><span className="block truncate text-[13px] text-white/45">{lib.items.length ? cats.slice(0, 3).join(" · ") || "Heures, fournitures et forfaits" : "Heures, taux et prix réutilisables dans chaque devis"}</span></span>
+    <Chev /></Card></button></Section>
+}
+
 /* ---------------- Paramètres ---------------- */
 function SetP() {
-  const { s, set, desk, toast, modal } = useC(), st = s.settings
+  const { s, set, desk, toast, modal } = useC(), st = s.settings, presta = usePrestations()
   const uidL: string = (window as any).__aknoUid || "", lk = hasLock(uidL), [bio, setBio] = useState(() => !!getLock(uidL)?.cred), [canBio, setCanBio] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [testBusy, setTestBusy] = useState(false)
@@ -541,7 +565,7 @@ function SetP() {
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><S first I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
-      <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={ImageIcon} l="Logo" v={prof?.logo_path ? "Ajouté" : "À ajouter"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
+      <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={Package} l="Mes prestations" v={presta.ready ? String(presta.items.length) : "…"} onClick={() => modal({ kind: "prestations" })} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={ImageIcon} l="Logo" v={prof?.logo_path ? "Ajouté" : "À ajouter"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /></List></Section>
       <Section t="Avis clients"><List>{cliLock ? <Row first label="Demandes d'avis Google" onClick={() => openUpgrade("clients")} lead={<Ic I={Sparkles} />} t="Demandes d'avis Google" s="Automatiques après chaque chantier" r={<LockTag />} /> : <S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} />}</List></Section>
@@ -688,20 +712,13 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
   const dv = s.devis.find(x => x.id === initial.id) || initial
   const tv = s.settings.tva
   const cl = findC(dv.client)
-  const draft = dv.status === "aval" || dv.status === "brouillon"
+  const draft = dv.status === "aval" || dv.status === "brouillon" || dv.status === "att"
   const [email, setEmail] = useState(dv.email || cl?.email || "")
   const [busy, setBusy] = useState(false)
   const [mailErr, setMailErr] = useState("")
   const lines: DevisLine[] = dv.lines?.length ? dv.lines : [{ l: dv.objet, q: 1, pu: dv.amount, u: "u", tv }]
   const ht = lines.reduce((a, x) => a + Number(x.q) * Number(x.pu), 0)
-  const tax = lines.reduce((a, x) => a + Number(x.q) * Number(x.pu) * (Number(x.tv ?? tv) / 100), 0)
-  const setLines = (next: DevisLine[]) => {
-    const nht = next.reduce((a, x) => a + Number(x.q) * Number(x.pu), 0)
-    const ntax = next.reduce((a, x) => a + Number(x.q) * Number(x.pu) * (Number(x.tv ?? tv) / 100), 0)
-    const amount = Math.round((nht + ntax) * 100) / 100
-    set(x => ({ ...x, devis: x.devis.some(y => y.id === dv.id) ? x.devis.map(y => y.id === dv.id ? { ...y, lines: next, amount } : y) : [{ ...dv, lines: next, amount }, ...x.devis] }))
-  }
-  const patch = (i: number, p: Partial<DevisLine>) => setLines(lines.map((x, j) => j === i ? { ...x, ...p } : x))
+  const tax = CO.tvaNA ? 0 : lines.reduce((a, x) => a + Number(x.q) * Number(x.pu) * (Number(x.tv ?? tv) / 100), 0)
   const doc = buildDoc({ ...dv, lines }, cl, tv, TODAY)
   const download = () => import("../lib/devisPdf").then(x => { x.downloadPdf(doc); toast(`Devis-${dv.num}.pdf téléchargé`) })
   const send = async () => {
@@ -733,27 +750,10 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     </div>}
     {draft && <>
       <div className="mb-4 rounded-[16px] border border-[#0E8F8F]/35 bg-[#0E8F8F]/10 px-4 py-3 text-[13.5px] text-white/80">Brouillon — à valider. Rien n'est envoyé au client tant que vous n'avez pas cliqué sur « Valider et envoyer ».</div>
-      <div className="mb-4 rounded-[20px] bg-white/[.04] p-4">
-        <div className={tx.cap}>Lignes du devis</div>
-        {lines.map((x, i) => <div key={i} className={`mt-3 space-y-2 ${i ? "border-t border-white/[.08] pt-3" : ""}`}>
-          <input className={inp} value={x.l} placeholder="Désignation" onChange={e => patch(i, { l: e.target.value })} />
-          <div className="grid grid-cols-4 gap-2">
-            <input className={inp} type="number" min={0} step="0.01" value={x.q} aria-label="Quantité" onChange={e => patch(i, { q: Number(e.target.value) })} />
-            <input className={inp} value={x.u || "u"} aria-label="Unité" onChange={e => patch(i, { u: e.target.value })} />
-            <input className={inp} type="number" min={0} step="0.01" value={x.pu} aria-label="Prix unitaire HT" onChange={e => patch(i, { pu: Number(e.target.value) })} />
-            <select className={inp} value={x.tv ?? tv} aria-label="TVA" onChange={e => patch(i, { tv: Number(e.target.value) })}>
-              <option value={5.5}>5,5 %</option><option value={10}>10 %</option><option value={20}>20 %</option>
-            </select>
-          </div>
-          {lines.length > 1 && <button type="button" className="text-[12.5px] text-white/45" onClick={() => setLines(lines.filter((_, j) => j !== i))}>Supprimer la ligne</button>}
-        </div>)}
-        <button type="button" className="mt-3 text-[13px] font-medium text-white/70" onClick={() => setLines([...lines, { l: "", q: 1, pu: 0, u: "u", tv }])}>+ Ajouter une ligne</button>
-        <div className="mt-4 space-y-1 text-[13.5px] text-white/60">
-          <div className="flex justify-between"><span>Total HT</span><span>{eur(Math.round(ht * 100) / 100)}</span></div>
-          <div className="flex justify-between"><span>TVA</span><span>{eur(Math.round(tax * 100) / 100)}</span></div>
-          <div className="flex justify-between font-medium text-white"><span>Total TTC</span><span>{eur(Math.round((ht + tax) * 100) / 100)}</span></div>
-        </div>
-        <div className="mt-4"><F l="E-mail du client"><input className={inp} type="email" value={email} placeholder="kevin.m@example.com" onChange={e => { setEmail(e.target.value); setMailErr("") }} /></F></div>
+      <div className="mb-4 grid grid-cols-[1fr_auto] items-center gap-3 rounded-[20px] bg-white/[.04] p-4">
+        <div className="min-w-0"><div className={tx.cap}>Total TTC</div><div className="mt-1 text-[24px] font-semibold tabular-nums tracking-[-0.02em]">{e2(Math.round((ht + tax) * 100) / 100)}</div><div className="text-[12.5px] text-white/45">{e2(Math.round(ht * 100) / 100)} HT · {lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length} ligne{lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length > 1 ? "s" : ""}</div></div>
+        <Btn c={A.dev.c} onClick={() => { onClose(); modal({ kind: "devisEditor", data: dv }) }}><FilePen size={16} strokeWidth={1.6} />Modifier</Btn>
+        <div className="col-span-2"><F l="E-mail du client"><input className={inp} type="email" value={email} placeholder="kevin.m@example.com" onChange={e => { setEmail(e.target.value); setMailErr("") }} /></F></div>
       </div>
     </>}
     {draft && missingLegal("devis").length > 0 && <button type="button" onClick={() => modal({ kind: "entreprise" })} className="mb-3 block w-full rounded-[14px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-4 py-3 text-left text-[13px] text-white/80">Mentions obligatoires manquantes : {missingLegal("devis").join(", ")}. <span className="font-medium text-white">Compléter</span></button>}
@@ -895,8 +895,6 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     const stopAll = () => { if (!r.devisId) return; set(x => ({ ...x, devis: x.devis.map(dv => dv.id === r.devisId ? { ...dv, remindersOff: true } : dv), rels: x.rels.map(y => y.devisId === r.devisId && y.status === "prog" ? { ...y, status: "pause" } : y) })); toast("Relances de ce devis arrêtées"); close() }
     return <Sheet title={r.client} sub={`${r.type} · ${r.canal}`} c={A.rel.c} onClose={close}><div className="space-y-2"><Sub dot={RS[r.status][1]}>{RS[r.status][0]} · {r.date}</Sub>{!on && <Sub>Agent Relance en pause : envoi manuel désactivé</Sub>}{r.devisId && <Sub>Relance automatique liée au devis</Sub>}</div>
       <div className="mt-6 grid grid-cols-2 gap-2">{r.devisId && (r.status === "prog" || r.status === "pause") ? <Btn className="col-span-2" onClick={stopAll} disabled={!!s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause"}>{s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause" ? "Relances arrêtées" : "Arrêter les relances de ce devis"}</Btn> : (r.status === "prog" || r.status === "pause") ? <><Btn primary disabled={!on} aria-label={`Envoyer ${r.client}`} onClick={() => { relUpd(r.id, "env", `Relance marquée comme faite · ${r.client}`, "Faite"); close() }}><Check size={14} strokeWidth={1.5} />Marquer faite</Btn><Btn onClick={() => { relUpd(r.id, r.status === "pause" ? "prog" : "pause", r.status === "pause" ? "Relance reprise" : "Relance en pause"); close() }}>{r.status === "pause" ? <><Play size={13} strokeWidth={1.5} />Reprendre</> : <><Pause size={13} strokeWidth={1.5} />Mettre en pause</>}</Btn></> : <Btn className="col-span-2" onClick={() => { relUpd(r.id, "prog", "Relance reprogrammée", "Demain 9:00"); close() }}><RotateCcw size={14} strokeWidth={1.5} />Reprogrammer</Btn>}</div></Sheet> }
-  if (m.kind === "devis") return <Sheet title="Nouveau devis" c={A.dev.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><F l={`Montant HT (€) · TVA ${String(s.settings.tva).replace(".", ",")} %`}><input type="number" min={0} className={inp} {...v("amount")} /></F></div>
-    {foot("Créer le brouillon", !!f.name.trim() && Number(f.amount) > 0, () => { set(x => ({ ...x, devis: [{ id: uid(), num: Math.max(...x.devis.map(y => y.num), 9087) + 1, client: f.name.trim(), objet: f.topic || "Travaux", amount: Number(f.amount), status: "brouillon", created: Date.now() }, ...x.devis] })); toast("Brouillon de devis créé"); go("dev") }, A.dev.c, "Indiquez le client et un montant")}</Sheet>
   if (m.kind === "devisList") return <Sheet title="Devis" sub={`${s.devis.length} devis`} c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <Row key={x.id} first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisPrev", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} />)}</div></Sheet>
   if (m.kind === "aiPop") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, n = s.devis.filter(toValidate).length
     if (!toValidate(dv)) return null
@@ -907,9 +905,10 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
       {n > 1 && <div className={`mt-2 ${tx.cap}`}>+ {n - 1} autre{n > 2 ? "s" : ""} devis à valider</div>}
       <div className="mt-6"><Btn primary c={A.dev.c} className="w-full" onClick={() => modal({ kind: "devisPrev", data: dv })}>Regarder le devis</Btn></div></Sheet> }
   if (m.kind === "devisPrev") return <DevisPrevSheet initial={d as Devis} onClose={close} />
+  if (m.kind === "prestations") return <PrestationsSheet close={close} />
   if (m.kind === "devisEdit") { const dv = s.devis.find(x => x.id === d.id) || d as Devis; const setS = (st: DevStatus) => { set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: st } : y) })); toast(`Devis ${dv.num} : ${ST[st][0]}`) }
     return <Sheet title={`Devis N° ${dv.num}`} sub={`${dv.client} · ${dv.objet}`} c={A.dev.c} onClose={close}><div className={`text-[40px] ${tx.fig}`}>{eur(dv.amount)}</div><div className="mt-2"><Sub>HT · {eur(Math.round(dv.amount * (1 + s.settings.tva / 100)))} TTC (TVA {String(s.settings.tva).replace(".", ",")} %)</Sub></div>
-      <Btn primary c={A.dev.c} className="mt-5 w-full" onClick={() => modal({ kind: "devisPrev", data: dv })}><FileText size={16} strokeWidth={1.6} />Voir le devis</Btn>
+      <div className="mt-5 grid grid-cols-2 gap-2"><Btn primary c={A.dev.c} onClick={() => modal({ kind: "devisPrev", data: dv })}><FileText size={16} strokeWidth={1.6} />Voir le devis</Btn><Btn onClick={() => modal({ kind: "devisEditor", data: dv })}><FilePen size={16} strokeWidth={1.6} />Modifier</Btn></div>
       <div className={`mb-3 mt-6 px-1 ${tx.cap}`}>Statut</div><div className="flex flex-wrap gap-1.5">{(Object.keys(ST) as DevStatus[]).map(k => <button key={k} onClick={() => setS(k)} className={`flex h-10 items-center gap-2 rounded-full px-4 text-[13px] font-medium ${dv.status === k ? "bg-white/[.16] text-white" : "bg-white/[.06] text-white/60"}`}><Dot c={ST[k][1]} />{ST[k][0]}</button>)}</div>
       <div className="mt-6 flex gap-2"><Btn className="flex-1" onClick={() => { if (confirm(`Supprimer le devis ${dv.num} ?`)) { set(x => ({ ...x, devis: x.devis.filter(y => y.id !== dv.id) })); toast("Devis supprimé"); close() } }}><Trash2 size={15} strokeWidth={1.5} />Supprimer</Btn><Btn primary className="flex-1" onClick={close}>Fermer</Btn></div></Sheet> }
   return null
@@ -986,11 +985,13 @@ const font = (desk: boolean) => ({ fontFamily: "'Geist Variable', -apple-system,
 const ORD: P[] = ["rec", "ag", "rel", "dev", "set"]
 function AknoApp() {
   const pathname = useLocation().pathname, navigate = useNavigate()
-  const [s, setS, loading] = useStore(), desk = useDesk()
+  const [s, setS, loading, put] = useStore(), desk = useDesk()
+  // update52 : éditeur de devis pro (plein écran, au-dessus des pages, sous les fiches)
+  const [ed, setEd] = useState<EditorReq | null>(null)
   CL = s.clients || []
   const page: P = SLUG[(pathname || "").split("/")[1] || ""] || "rec"
   const [m, setM] = useState<Modal>(null), [chat, setChatS] = useState(() => new URLSearchParams(location.search).has("chat"))
-  const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void } | null>(null), [q, setQ] = useState("")
+  const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void; err?: boolean } | null>(null), [q, setQ] = useState("")
   const [pushNote, setPushNote] = useState<{ title: string; body: string; url: string; k: number } | null>(null)
   // update48 · page d'arrivée : sans l'option Réceptionniste IA, on arrive sur l'Agenda (et non sur /reception).
   const rr = useRights(), landed = useRef(false)
@@ -1000,7 +1001,9 @@ function AknoApp() {
     if (!rr.reception && page === "rec") navigate(`/${slugOf("ag")}${location.search}`, { replace: true })
   }, [rr.ready, rr.reception, page, navigate])
   useEffect(() => { document.title = `Akno · ${page === "set" ? "Paramètres" : A[page].tab}` }, [page])
-  useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo ? 5000 : 2600); return () => clearTimeout(t) }, [toastT])
+  useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo || toastT.err ? 6000 : 2600); return () => clearTimeout(t) }, [toastT])
+  // update52 : toute écriture refusée par la base est signalée (fini les devis qui disparaissent sans explication)
+  useEffect(() => { const f = (e: Event) => setToastT({ t: String((e as CustomEvent).detail || "Enregistrement impossible."), k: Date.now(), err: true }); addEventListener("akno-sync-error", f); return () => removeEventListener("akno-sync-error", f) }, [])
   useEffect(() => { if (!pushNote) return; const t = setTimeout(() => setPushNote(null), 10000); return () => clearTimeout(t) }, [pushNote])
   useEffect(() => { void registerPushWorker() }, [])
   useEffect(() => { if (s.settings.push) void ensurePush() }, [s.settings.push])
@@ -1033,16 +1036,22 @@ function AknoApp() {
   }, [navigate])
   const go = (p: P) => { setQ(""); setM(null); if (p !== page) navigate(`/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`); if (!desk) setChatS(false) }
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }
-  const ctx: Ctx = { s, set: setS, desk, page, go, modal: setM, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ }
+  const modal = (x: Modal) => {
+    if (x?.kind === "devis") { setM(null); setEd({ prefill: x.data }); return }
+    if (x?.kind === "devisEditor") { setM(null); setEd({ initial: x.data }); return }
+    setM(x)
+  }
+  const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
   const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP }[page]
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
       : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+    <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} />}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />
     <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
-    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span><span className="truncate">{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
+    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
 }
 
