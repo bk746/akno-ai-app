@@ -5,9 +5,9 @@ import { useProfile } from "../../lib/profile"
 import { api, reloadAccount, useAccount } from "../../lib/accountApi"
 
 /* update48 · Réglages Réceptionniste (horaires, accueil, conservation), Agenda (Cal.com par artisan), SMS. */
-const DAYS: [string, string][] = [["lun", "Lundi"], ["mar", "Mardi"], ["mer", "Mercredi"], ["jeu", "Jeudi"], ["ven", "Vendredi"], ["sam", "Samedi"], ["dim", "Dimanche"]]
-type H = Record<string, [string, string] | null>
-const DEF_H: H = { lun: ["08:00", "18:00"], mar: ["08:00", "18:00"], mer: ["08:00", "18:00"], jeu: ["08:00", "18:00"], ven: ["08:00", "18:00"], sam: null, dim: null }
+export const DAYS: [string, string][] = [["lun", "Lundi"], ["mar", "Mardi"], ["mer", "Mercredi"], ["jeu", "Jeudi"], ["ven", "Vendredi"], ["sam", "Samedi"], ["dim", "Dimanche"]]
+export type H = Record<string, [string, string] | null>
+export const DEF_H: H = { lun: ["08:00", "18:00"], mar: ["08:00", "18:00"], mer: ["08:00", "18:00"], jeu: ["08:00", "18:00"], ven: ["08:00", "18:00"], sam: null, dim: null }
 const Err = ({ e }: { e: string }) => e ? <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{e}</p> : null
 
 export function ReceptionSheet({ close }: { close: () => void }) {

@@ -13,6 +13,8 @@ import ConformiteSheet from "./sheets/ConformiteSheet"
 import LeadsSheet from "./sheets/LeadsSheet"
 import { AgendaCalSheet, ReceptionSheet, SmsSheet } from "./sheets/ReglagesSheets"
 import Gate from "./sheets/Gate"
+import SetupGate from "./setup/SetupGate"
+import { isPageLocked, openSetup } from "../lib/setup"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Component, Suspense, lazy, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -79,13 +81,13 @@ const PLUS: Record<K, string> = { rec: "Nouvelle note d'appel", ag: "Nouveau ren
 const plusKind: Record<K, any> = { rec: "call", ag: "rdv", rel: "rel", dev: "devis" }
 function Capsule({ k, sm }: { k: K; sm?: boolean }) {
   const { modal, setChat, chat } = useC()
-  return <div className={`flex items-center ${sm ? "gap-2" : "gap-4"}`}><button data-hit aria-label={`Discuter avec l'IA ${A[k].n}`} title="Assistant" onClick={() => setChat(!chat)} className={`relative flex ${sm ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-[10px] bg-[#141416] text-white/55 hover:text-white`}><Sparkles size={sm ? 16 : 18} strokeWidth={1.5} /><span className="absolute right-[5px] top-[5px] h-[6px] w-[6px] rounded-full" style={{ background: A[k].c }} /></button>{!sm && <button aria-label={PLUS[k]} title={`${PLUS[k]} (N)`} onClick={() => modal({ kind: plusKind[k] })} className={`${sm ? "flex h-8 w-8 rounded-[10px]" : "-mx-[11px] flex h-11 w-11"} items-center justify-center text-white hover:text-white/80`}><Plus size={sm ? 20 : 22} strokeWidth={1.5} /></button>}</div>
+  return <div className={`flex items-center ${sm ? "gap-2" : "gap-4"}`}><button data-hit aria-label={`Discuter avec l'IA ${A[k].n}`} title="Assistant" onClick={() => setChat(!chat)} className={`relative flex ${sm ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-[10px] bg-[#141416] text-white/55 hover:text-white`}><Sparkles size={sm ? 16 : 18} strokeWidth={1.5} /><span className="absolute right-[5px] top-[5px] h-[6px] w-[6px] rounded-full" style={{ background: A[k].c }} /></button>{!sm && <button aria-label={PLUS[k]} title={`${PLUS[k]} (N)`} onClick={() => isPageLocked(k) ? openSetup() : modal({ kind: plusKind[k] })} className={`${sm ? "flex h-8 w-8 rounded-[10px]" : "-mx-[11px] flex h-11 w-11"} items-center justify-center text-white hover:text-white/80`}><Plus size={sm ? 20 : 22} strokeWidth={1.5} /></button>}</div>
 }
 function Top() {
   const { page, q, setQ, modal } = useC(), ref = useRef<HTMLInputElement>(null), rr = useRights()
   useEffect(() => { const f = (e: KeyboardEvent) => { const t = e.target as HTMLElement, typing = /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable
     if (((e.metaKey || e.ctrlKey) && e.key === "k") || (!typing && e.key === "/")) { e.preventDefault(); ref.current?.focus() }
-    else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === "n" || e.key === "N") && page !== "set" && !document.querySelector("[role=dialog]")) { e.preventDefault(); modal({ kind: plusKind[page] }) } }
+    else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === "n" || e.key === "N") && page !== "set" && !document.querySelector("[role=dialog]")) { e.preventDefault(); if (isPageLocked(page)) openSetup(); else modal({ kind: plusKind[page] }) } }
     addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [page, modal])
   return <div className="flex h-16 shrink-0 items-center border-b border-white/[.07] bg-black px-8"><span className={tx.title}>{page === "set" ? "Paramètres" : A[page].n}</span>
     <div className="ml-auto flex items-center gap-4"><label className="flex h-9 w-[240px] items-center gap-2 rounded-full bg-white/[.07] px-3 text-[13px] text-white/50"><Search size={16} strokeWidth={SW} className="shrink-0" /><input ref={ref} value={q} onChange={e => setQ(e.target.value)} placeholder="Rechercher" className="w-full min-w-0 bg-transparent text-white outline-none placeholder:text-white/40" />{q ? <button aria-label="Effacer" onClick={() => setQ("")}><X size={14} /></button> : <kbd className="ml-auto rounded-[6px] bg-white/[.08] px-1.5 font-sans text-[11px] text-white/50">/</kbd>}</label>
@@ -984,7 +986,7 @@ const font = (desk: boolean) => ({ fontFamily: "'Geist Variable', -apple-system,
 const ORD: P[] = ["rec", "ag", "rel", "dev", "set"]
 function AknoApp() {
   const pathname = useLocation().pathname, navigate = useNavigate()
-  const [s, setS] = useStore(), desk = useDesk()
+  const [s, setS, loading] = useStore(), desk = useDesk()
   CL = s.clients || []
   const page: P = SLUG[(pathname || "").split("/")[1] || ""] || "rec"
   const [m, setM] = useState<Modal>(null), [chat, setChatS] = useState(() => new URLSearchParams(location.search).has("chat"))
@@ -1034,8 +1036,8 @@ function AknoApp() {
   const ctx: Ctx = { s, set: setS, desk, page, go, modal: setM, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ }
   const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP }[page]
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
-    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><Pg /></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
+      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />
