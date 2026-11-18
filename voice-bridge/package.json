@@ -1,0 +1,12 @@
+{
+  "name": "akno-voice-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=build/server.mjs",
+    "start": "node build/server.mjs",
+    "test": "npm run build && node test/fake-call.mjs"
+  },
+  "dependencies": { "ws": "^8.18.0" },
+  "devDependencies": { "esbuild": "^0.25.0", "@types/ws": "^8.5.12", "@types/node": "^22.0.0" }
+}

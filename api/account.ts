@@ -29,6 +29,9 @@ async function status(sb: import("@supabase/supabase-js").SupabaseClient, userId
     calcom = !!(data as { calcom_api_key?: string } | null)?.calcom_api_key
     twilioNumber = String((data as { twilio_number?: string } | null)?.twilio_number || "")
     forwardTo = String((data as { forward_to?: string } | null)?.forward_to || "")
+    // update56 : numéro Akno de la réceptionniste IA (table artisan_phone_numbers) en priorité
+    const { data: num } = await adminClient().from("artisan_phone_numbers").select("phone_number").eq("artisan_id", userId).eq("active", true).limit(1).maybeSingle()
+    if (num?.phone_number) { twilioNumber = String(num.phone_number); forwardTo = "" }
   } catch { /* pas de service role en local */ }
   const prices = priceIds()
   return {

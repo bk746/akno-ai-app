@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { adminClient } from "./_lib/mail.js"
+import { bridgeArtisan } from "./_lib/twilioVoice.js"
 
 type Json = Record<string, unknown>
 const TZ = "Europe/Paris"
@@ -423,8 +424,9 @@ async function internalBook(db: SupabaseClient, userId: string, input: BookInput
   }
 }
 
-export async function handleBooking(authorization: string | undefined, body: unknown): Promise<{ status: number; body: Json }> {
-  const auth = await verifyUser(authorization)
+export async function handleBooking(authorization: string | undefined, body: unknown, bridgeId?: string | null): Promise<{ status: number; body: Json }> {
+  // update56 : le relais téléphonique (voice-bridge) agit pour l'artisan appelé, authentifié par BRIDGE_SECRET.
+  const auth = bridgeId ? { user: { id: bridgeId }, db: adminClient() } : await verifyUser(authorization)
   if ("error" in auth && auth.error) return auth.error
   const { user, db } = auth as { user: { id: string }; db: SupabaseClient }
 
@@ -463,6 +465,6 @@ export default async function handler(req: { method?: string; headers: Record<st
   const auth = Array.isArray(raw) ? raw[0] : raw
   let body = req.body
   if (typeof body === "string") { try { body = JSON.parse(body) } catch { body = {} } }
-  const { status, body: payload } = await handleBooking(auth, body)
+  const { status, body: payload } = await handleBooking(auth, body, bridgeArtisan(req.headers))
   res.status(status).json(payload)
 }

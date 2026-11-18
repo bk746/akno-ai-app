@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { env } from "./_lib/mail.js"
 import { sendPushToArtisan, type PushPayload } from "./_lib/push.js"
+import { bridgeArtisan } from "./_lib/twilioVoice.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
@@ -61,8 +62,9 @@ function payloadFrom(body: Json): PushPayload | null {
   return null
 }
 
-export async function handleNotify(authorization?: string, body?: unknown): Promise<ApiResult> {
-  const session = await authed(authorization)
+export async function handleNotify(authorization?: string, body?: unknown, bridgeId?: string | null): Promise<ApiResult> {
+  // update56 : notifications envoyées par le relais téléphonique (BRIDGE_SECRET) pour l'artisan appelé.
+  const session = bridgeId ? { userId: bridgeId } : await authed(authorization)
   if ("status" in session) return session
   const input = (body && typeof body === "object" ? body : {}) as Json
   const payload = payloadFrom(input)
@@ -85,6 +87,6 @@ export default async function handler(req: { method?: string; headers: Record<st
   const auth = Array.isArray(raw) ? raw[0] : raw
   let body = req.body
   if (typeof body === "string") { try { body = JSON.parse(body) } catch { body = {} } }
-  const { status, body: payload } = await handleNotify(auth, body)
+  const { status, body: payload } = await handleNotify(auth, body, bridgeArtisan(req.headers))
   res.status(status).json(payload)
 }

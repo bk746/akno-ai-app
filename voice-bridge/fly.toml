@@ -1,0 +1,27 @@
+# Fly.io — lancer depuis la racine du projet :
+#   fly deploy . --config voice-bridge/fly.toml --dockerfile voice-bridge/Dockerfile
+app = "akno-voice-bridge"
+primary_region = "cdg"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"     # toujours allumé : un appel ne doit jamais attendre un démarrage à froid
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 40
+    hard_limit = 60
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

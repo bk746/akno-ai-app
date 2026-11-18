@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:assistant": "esbuild scripts/test-assistant.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test.mjs --log-level=warning && node /tmp/akno-test.mjs"
+    "test:assistant": "esbuild scripts/test-assistant.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test.mjs --log-level=warning && node /tmp/akno-test.mjs",
+    "test:twilio": "esbuild scripts/test-twilio.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-twilio.mjs --log-level=warning && node /tmp/akno-test-twilio.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

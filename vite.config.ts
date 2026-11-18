@@ -41,12 +41,13 @@ function json(res: Res, status: number, body: unknown) {
   res.end(JSON.stringify(body))
 }
 
-const API = new Set(["/api/voice-token", "/api/booking", "/api/devis", "/api/relances", "/api/devis-public", "/api/resend-webhook", "/api/notify", "/api/account", "/api/stripe-webhook", "/api/lead", "/api/twilio"])
+const API = new Set(["/api/voice-token", "/api/booking", "/api/devis", "/api/relances", "/api/devis-public", "/api/resend-webhook", "/api/notify", "/api/account", "/api/stripe-webhook", "/api/lead", "/api/twilio", "/api/twilio-voice"])
 const WEB_STANDARD: Record<string, () => Promise<{ POST?: (r: Request) => Promise<Response> | Response; OPTIONS?: () => Response }>> = {
   "/api/resend-webhook": () => import("./api/resend-webhook"),
   "/api/stripe-webhook": () => import("./api/stripe-webhook"),
   "/api/lead": () => import("./api/lead"),
   "/api/twilio": () => import("./api/twilio"),
+  "/api/twilio-voice": () => import("./api/twilio-voice"),
 }
 
 function apiDev(): Plugin {

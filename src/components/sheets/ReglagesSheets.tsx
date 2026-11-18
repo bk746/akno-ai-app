@@ -27,12 +27,35 @@ export function ReceptionSheet({ close }: { close: () => void }) {
   const num = a?.integrations.twilio_number
   return <Sheet title="Réceptionniste" sub="Horaires, accueil et enregistrements" c="#FFFFFF" onClose={close} footer={<Btn primary className="w-full" disabled={busy} onClick={submit}>{busy ? "Enregistrement…" : "Enregistrer"}</Btn>}>
     <Card className="flex items-center gap-3 p-4"><PhoneForwarded size={20} className="text-white/60" /><div className="min-w-0 flex-1"><div className="text-[15px] font-medium">Numéro Akno</div><div className={tx.cap}>{num ? `${num}${a?.integrations.forward_to ? ` · renvoi vers ${a.integrations.forward_to}` : ""}` : "Pas encore attribué : votre numéro sera activé avec l'option téléphonie."}</div></div><Chip c={num ? GREEN : GREY}>{num ? "Actif" : "À venir"}</Chip></Card>
+    {num && <RenvoiGuide num={num} />}
     <div className={`mt-5 mb-2 px-1 ${tx.cap}`}>Horaires d'ouverture (prise de RDV et message hors horaires)</div>
     <Card className="divide-y divide-white/[.06] px-4">{DAYS.map(([k, l]) => { const v = h[k]; return <div key={k} className="flex h-14 items-center gap-3"><Tg on={!!v} onClick={() => setH({ ...h, [k]: v ? null : ["08:00", "18:00"] })} label={`${l} ouvert`} /><span className="w-24 text-[14.5px]">{l}</span>{v ? <div className="ml-auto flex items-center gap-1.5"><input type="time" className={`${inp} h-10 w-[104px] px-2`} value={v[0]} onChange={e => setH({ ...h, [k]: [e.target.value, v[1]] })} aria-label={`${l} ouverture`} /><span className="text-white/40">–</span><input type="time" className={`${inp} h-10 w-[104px] px-2`} value={v[1]} onChange={e => setH({ ...h, [k]: [v[0], e.target.value] })} aria-label={`${l} fermeture`} /></div> : <span className="ml-auto text-[14px] text-white/40">Fermé</span>}</div> })}</Card>
     <div className="mt-5"><F l="Message d'accueil (facultatif)"><textarea className={`${inp} h-24 py-3`} maxLength={400} placeholder={`${p?.entreprise_nom || p?.nom_entreprise || "Votre entreprise"}, bonjour, je suis l'assistante IA. Cet appel peut être enregistré pour le suivi de votre demande. Comment puis-je vous aider ?`} value={msg} onChange={e => setMsg(e.target.value)} /></F><p className={`mt-1.5 px-1 ${tx.cap}`}>L'annonce d'enregistrement est toujours ajoutée (obligation d'information RGPD).</p></div>
     <div className="mt-4"><F l="Conservation des enregistrements"><select className={inp} value={keep} onChange={e => setKeep(Number(e.target.value))}>{[30, 90, 180, 365].map(d => <option key={d} value={d}>{d === 365 ? "1 an" : `${d} jours`}</option>)}</select></F></div>
     <Err e={err} />
   </Sheet>
+}
+
+/* update56 · Guide de renvoi d'appel CONDITIONNEL vers le numéro Akno (l'IA ne décroche que si l'artisan ne répond pas). */
+function RenvoiGuide({ num }: { num: string }) {
+  const d = num.replace(/[^\d+]/g, "").replace(/^\+33/, "0")
+  const codes: [string, string][] = [
+    ["Si vous ne décrochez pas", `**61*${d}**20#`],
+    ["Si vous êtes déjà en ligne", `**67*${d}#`],
+    ["Si votre téléphone est éteint ou sans réseau", `**62*${d}#`],
+  ]
+  const off: [string, string][] = [["Non-réponse", "##61#"], ["Occupé", "##67#"], ["Injoignable", "##62#"], ["Tous les renvois", "##004#"]]
+  return <>
+    <div className={`mt-5 mb-2 px-1 ${tx.cap}`}>Activer la réceptionniste sur votre portable</div>
+    <Card className="p-4">
+      <p className="text-[14px] leading-snug">Votre téléphone sonne normalement, Akno prend le relais seulement si vous ne décrochez pas.</p>
+      <p className={`mt-2 ${tx.cap}`}>Sur votre portable, composez chaque code puis appuyez sur Appeler :</p>
+      <div className="mt-3 divide-y divide-white/[.06]">{codes.map(([l, c]) => <div key={c} className="flex items-center justify-between gap-3 py-2.5"><span className="text-[13.5px] text-white/70">{l}</span><span className="select-all font-mono text-[14px]">{c}</span></div>)}</div>
+      <p className={`mt-2 ${tx.cap}`}>« 20 » = secondes de sonnerie avant le relais (de 5 à 30, par pas de 5).</p>
+      <div className={`mt-4 ${tx.cap}`}>Pour désactiver :</div>
+      <div className="mt-1 divide-y divide-white/[.06]">{off.map(([l, c]) => <div key={c} className="flex items-center justify-between gap-3 py-2"><span className="text-[13.5px] text-white/70">{l}</span><span className="select-all font-mono text-[14px]">{c}</span></div>)}</div>
+    </Card>
+  </>
 }
 
 export function AgendaCalSheet({ close }: { close: () => void }) {

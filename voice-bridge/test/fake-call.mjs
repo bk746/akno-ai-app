@@ -1,0 +1,87 @@
+// Test local du relais avec un faux flux Twilio, un faux xAI et une fausse API Akno (aucun appel réel).
+import http from "node:http"
+import { spawn } from "node:child_process"
+import { createHmac } from "node:crypto"
+import { WebSocketServer, WebSocket } from "ws"
+
+const SECRET = "test-secret", ARTISAN = "11111111-2222-3333-4444-555555555555", CALL = "CA123"
+let ok = 0, ko = 0
+const check = (name, cond) => { cond ? ok++ : ko++; console.log(`${cond ? "✔" : "✘"} ${name}`) }
+const wait = ms => new Promise(r => setTimeout(r, ms))
+
+// Faux xAI realtime
+const seen = { session: null, appends: 0, toolOutput: null, auth: "" }
+const xai = new WebSocketServer({ port: 18901 })
+xai.on("connection", (ws, req) => {
+  seen.auth = req.headers.authorization || ""
+  ws.on("message", raw => {
+    const m = JSON.parse(raw.toString())
+    if (m.type === "session.update") { seen.session = m.session; ws.send(JSON.stringify({ type: "session.updated" })) }
+    if (m.type === "conversation.item.create" && m.item?.type === "force_message") {
+      ws.send(JSON.stringify({ type: "response.output_audio.delta", delta: Buffer.alloc(160, 0xff).toString("base64") }))
+      ws.send(JSON.stringify({ type: "response.output_audio_transcript.done", transcript: m.item.content[0].text }))
+      ws.send(JSON.stringify({ type: "response.done" }))
+    }
+    if (m.type === "input_audio_buffer.append") {
+      seen.appends++
+      if (seen.appends === 5) {
+        ws.send(JSON.stringify({ type: "conversation.item.input_audio_transcription.completed", transcript: "J'ai une fuite sous l'évier." }))
+        ws.send(JSON.stringify({ type: "response.function_call_arguments.done", name: "get_available_slots", call_id: "fc1", arguments: "{}" }))
+      }
+    }
+    if (m.type === "conversation.item.create" && m.item?.type === "function_call_output") seen.toolOutput = JSON.parse(m.item.output)
+  })
+})
+
+// Fausse API Akno (Vercel)
+const api = { headers: null, calls: [] }
+const app = http.createServer((req, res) => {
+  let b = ""; req.on("data", c => b += c); req.on("end", () => {
+    api.calls.push(req.url); api.headers = req.headers
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify(req.url === "/api/booking" ? { ok: true, slots: [{ date: "2026-11-19", heure: "09:00", label: "jeudi 19 novembre à 09:00" }] } : { ok: true }))
+  })
+}).listen(18902)
+
+const bridge = spawn("node", ["build/server.mjs"], { env: { PATH: process.env.PATH, PORT: "18900", BRIDGE_SECRET: SECRET, XAI_API_KEY: "fake-key", XAI_REALTIME_URL: "ws://127.0.0.1:18901", APP_URL: "http://127.0.0.1:18902" }, stdio: ["ignore", "pipe", "pipe"] })
+let logs = ""; bridge.stdout.on("data", d => logs += d); bridge.stderr.on("data", d => logs += d)
+await wait(600)
+
+const health = await fetch("http://127.0.0.1:18900/health").then(r => r.text()).catch(() => "")
+check("GET /health", health === "ok")
+
+async function fakeCall(token) {
+  const got = { media: 0 }
+  const tw = new WebSocket("ws://127.0.0.1:18900/twilio")
+  await new Promise(r => tw.on("open", r))
+  tw.on("message", raw => { const m = JSON.parse(raw.toString()); if (m.event === "media") got.media++ })
+  const exp = Math.floor(Date.now() / 1000) + 120
+  tw.send(JSON.stringify({ event: "connected", protocol: "Call", version: "1.0.0" }))
+  tw.send(JSON.stringify({ event: "start", streamSid: "MZ1", start: { streamSid: "MZ1", callSid: CALL, tracks: ["inbound"], mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 }, customParameters: { artisan_id: ARTISAN, call_sid: CALL, from: "+33612345678", exp: String(exp), token: token(exp) } } }))
+  await wait(500)
+  for (let i = 0; i < 10; i++) { tw.send(JSON.stringify({ event: "media", streamSid: "MZ1", media: { track: "inbound", payload: Buffer.alloc(160, 0x7f).toString("base64") } })); await wait(20) }
+  await wait(400)
+  tw.send(JSON.stringify({ event: "stop", streamSid: "MZ1" }))
+  await wait(300)
+  return got
+}
+
+const good = exp => createHmac("sha256", SECRET).update(`${ARTISAN}.${CALL}.${exp}`).digest("hex")
+const g = await fakeCall(good)
+check("session xAI en audio/pcmu des deux côtés", seen.session?.audio?.input?.format?.type === "audio/pcmu" && seen.session?.audio?.output?.format?.type === "audio/pcmu")
+check("même prompt que l'app + contexte téléphone", /CONTEXTE TÉLÉPHONE/.test(seen.session?.instructions || "") && /\+33612345678/.test(seen.session.instructions) && seen.session.tools?.length === 3)
+check("créneaux préchargés dans le prompt", /jeudi 19 novembre/.test(seen.session?.instructions || ""))
+check("clé xAI envoyée côté serveur", seen.auth === "Bearer fake-key")
+check("audio appelant → xAI", seen.appends >= 8)
+check("audio IA → Twilio (accueil)", g.media >= 1)
+check("outil get_available_slots via /api/booking", seen.toolOutput?.ok === true && api.calls.includes("/api/booking"))
+check("auth serveur x-akno-bridge / x-akno-artisan", api.headers?.["x-akno-bridge"] === SECRET && api.headers?.["x-akno-artisan"] === ARTISAN)
+
+const before = seen.appends
+const bad = await fakeCall(() => "0".repeat(64))
+check("jeton invalide refusé (aucun audio relayé)", bad.media === 0 && seen.appends === before)
+
+bridge.kill(); xai.close(); app.close()
+console.log(`\n${ok} OK, ${ko} KO`)
+if (ko) { console.log(logs); process.exit(1) }
+process.exit(0)
