@@ -7,6 +7,11 @@ self.addEventListener("activate", event => {
   event.waitUntil(self.clients.claim())
 })
 
+// update59 · bouton « Redémarrer pour mettre à jour » : débloque un worker en attente (n'affecte pas les push)
+self.addEventListener("message", event => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting()
+})
+
 self.addEventListener("push", event => {
   let data = {}
   try { data = event.data ? event.data.json() : {} } catch {

@@ -43,6 +43,9 @@ import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS
 const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
 // update57 · configurateur « Ma réceptionniste » (chargé à la demande)
 const ReceptionnisteStudio = lazy(() => import("./reception/ReceptionnisteStudio"))
+import UpdateButton from "./UpdateButton"
+import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
+import { CloudDownload } from "lucide-react"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
@@ -97,7 +100,7 @@ function Top() {
     addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [page, modal])
   return <div className="flex h-16 shrink-0 items-center border-b border-white/[.07] bg-black px-8"><span className={tx.title}>{page === "set" ? "Paramètres" : A[page].n}</span>
     <div className="ml-auto flex items-center gap-4"><label className="flex h-9 w-[240px] items-center gap-2 rounded-full bg-white/[.07] px-3 text-[13px] text-white/50"><Search size={16} strokeWidth={SW} className="shrink-0" /><input ref={ref} value={q} onChange={e => setQ(e.target.value)} placeholder="Rechercher" className="w-full min-w-0 bg-transparent text-white outline-none placeholder:text-white/40" />{q ? <button aria-label="Effacer" onClick={() => setQ("")}><X size={14} /></button> : <kbd className="ml-auto rounded-[6px] bg-white/[.08] px-1.5 font-sans text-[11px] text-white/50">/</kbd>}</label>
-      {page !== "set" && !(page === "rec" && !rr.reception) && <Capsule k={page} />}</div></div>
+      <UpdateButton />{page !== "set" && !(page === "rec" && !rr.reception) && <Capsule k={page} />}</div></div>
 }
 function Num({ n, u, money }: { n: number; u?: string; money?: boolean }) {
   const reduce = useReducedMotion(), [v, setV] = useState(0), from = useRef(0)
@@ -116,7 +119,7 @@ function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: 
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0"><QA items={actions} /></div></motion.div><div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div>{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
     <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
-    <div className="flex h-10 shrink-0 items-center px-5"><img src="/logo.png" alt="Akno" className="h-[25px] w-auto" />{k && <div className="ml-auto flex items-center"><Capsule k={k} sm /></div>}</div>
+    <div className="flex h-10 shrink-0 items-center px-5"><img src="/logo.png" alt="Akno" className="h-[25px] w-auto" /><div className="ml-auto flex items-center gap-2"><UpdateButton sm />{k && <Capsule k={k} sm />}</div></div>
     <motion.div variants={rise} className="mt-6 flex flex-col items-center px-5">{LB}{H}</motion.div>
     <motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
     <div className="mt-5 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
@@ -1061,12 +1064,17 @@ function AknoApp() {
 
 const noop = () => () => {}
 /** Rendu client uniquement : localStorage et matchMedia ne sont lus qu'après le montage (aucune erreur d'hydratation). */
-class Boundary extends Component<{ children: ReactNode }, { err: boolean }> {
-  state = { err: false }
-  static getDerivedStateFromError() { return { err: true } }
-  componentDidCatch(e: unknown) { console.error("Akno crash", e) }
-  render() { return this.state.err ? <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-black px-6 text-center text-white"><p className="text-[15px] text-white/60">Un problème est survenu.</p><button onClick={() => location.reload()} className="h-[52px] rounded-full bg-white px-8 text-[16px] font-semibold text-black">Recharger</button></div> : this.props.children }
+class Boundary extends Component<{ children: ReactNode }, { err: boolean; upd?: boolean }> {
+  state: { err: boolean; upd?: boolean } = { err: false }
+  static getDerivedStateFromError(e: unknown) { return { err: true, upd: isChunkError(e) } }
+  componentDidCatch(e: unknown) { console.error("Akno crash", e); if (isChunkError(e)) recoverChunkError() }
+  render() {
+    // update59 · morceau d'une ancienne version introuvable : même bouton bleu que dans l'en-tête
+    if (this.state.err && this.state.upd) return <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-black px-6 text-center text-white"><p className="text-[15px] text-white/60">Une nouvelle version d'Akno est disponible.</p><button onClick={() => void applyUpdate()} className="flex h-[52px] items-center gap-2.5 rounded-full px-7 text-[16px] font-semibold text-white" style={{ background: "#0A84FF" }}><CloudDownload size={19} strokeWidth={2} />Redémarrer pour mettre à jour</button></div>
+    return this.state.err ? <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-black px-6 text-center text-white"><p className="text-[15px] text-white/60">Un problème est survenu.</p><button onClick={() => location.reload()} className="h-[52px] rounded-full bg-white px-8 text-[16px] font-semibold text-black">Recharger</button></div> : this.props.children
+  }
 }
+initAppUpdate()
 export default function AknoRoot() { return <Boundary><AknoRootInner /></Boundary> }
 function AknoRootInner() {
   const ready = useSyncExternalStore(noop, () => true, () => false), [ses, setSes] = useState<Session | null | undefined>(undefined)

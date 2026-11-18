@@ -120,4 +120,17 @@ function apiDev(): Plugin {
   }
 }
 
-export default defineConfig({ plugins: [react(), tailwindcss(), apiDev()] })
+// update59 · identifiant de build (commit Vercel, sinon horodatage) figé dans le bundle et publié dans /version.json
+const BUILD_ID = (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 12) || `t${Date.now().toString(36)}`
+function versionFile(): Plugin {
+  return {
+    name: "akno-version",
+    apply: "build",
+    generateBundle() { this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ build: BUILD_ID, at: new Date().toISOString() }) }) },
+  }
+}
+
+export default defineConfig(({ command }) => ({
+  plugins: [react(), tailwindcss(), apiDev(), versionFile()],
+  define: { __AKNO_BUILD__: JSON.stringify(command === "build" ? BUILD_ID : "dev") },
+}))
