@@ -47,7 +47,7 @@ export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?:
       {v.type === "mo" ? <div className="grid grid-cols-2 gap-3">
         <div><L>Durée par défaut</L><Stepper big value={v.duree_h ?? 1} onChange={n => up({ duree_h: n })} suffix="h" ariaLabel="Durée en heures" /></div>
         <div><L>Taux horaire HT</L><NumField value={v.taux_horaire} onChange={n => up({ taux_horaire: n })} suffix="€/h" ariaLabel="Taux horaire" placeholder={taux != null ? `${fmtN(taux)} (réglages)` : "Ex. 55"} inputClass="!h-11" /></div>
-      </div> : <div className="grid grid-cols-[1fr_120px] gap-3">
+      </div> : <div className="grid grid-cols-[minmax(0,1fr)_120px] gap-3">
         <div><L>{v.type === "fft" ? "Prix du forfait HT" : "Prix unitaire HT"}</L><NumField value={v.prix_unitaire} onChange={n => up({ prix_unitaire: n ?? 0 })} suffix="€" ariaLabel="Prix unitaire HT" inputClass="!h-11" /></div>
         <label className="block"><L>Unité</L><select className={field + " !h-11"} value={v.unite} disabled={v.type === "fft"} onChange={e => up({ unite: e.target.value })}>{UNITS.filter(u => u !== "h").map(u => <option key={u} value={u}>{u}</option>)}</select></label>
       </div>}
@@ -125,9 +125,9 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
     else if (e.key === "Enter") { e.preventDefault(); const p = list[sel]; if (p) pick(p) }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose() }
   }
-  return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-start justify-center pt-[12vh]" : "items-end"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+  return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-start justify-center pt-[12vh]" : "items-end kb-sheet"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
     <motion.div role="dialog" aria-label="Ajouter une prestation" onClick={e => e.stopPropagation()} initial={desk ? { y: -8, opacity: 0 } : { y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 380, damping: 34 }}
-      className={`flex w-full flex-col overflow-hidden border-white/[.09] bg-[#121214] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${desk ? "max-h-[70vh] max-w-[620px] rounded-[22px] border" : "h-[86dvh] rounded-t-[24px] border-t"}`}>
+      className={`flex w-full flex-col overflow-hidden border-white/[.09] bg-[#121214] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${desk ? "max-h-[70vh] max-w-[620px] rounded-[22px] border" : "kb-panel h-[86dvh] rounded-t-[24px] border-t"}`}>
       {!desk && <div className="mx-auto mt-3 h-[5px] w-9 shrink-0 rounded-full bg-white/20" />}
       <div className="flex shrink-0 items-center gap-3 border-b border-white/[.07] px-4 py-3">
         <Search size={18} strokeWidth={1.7} className="shrink-0 text-white/40" />

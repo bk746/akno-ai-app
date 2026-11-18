@@ -269,10 +269,10 @@ function Wizard({ k, onClose, onDone }: { k: K; onClose: () => void; onDone: () 
   }
   const back = () => { setErrs({}); setAlert(""); setDir(-1); setI(i - 1) }
 
-  return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[3px] ${desk ? "items-center justify-center p-6" : "items-end"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!busy) onClose() }}>
+  return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[3px] ${desk ? "items-center justify-center p-6" : "items-end kb-sheet"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!busy) onClose() }}>
     <motion.div ref={ref} role="dialog" aria-modal="true" aria-labelledby={tid} onClick={e => e.stopPropagation()}
       initial={reduce ? { opacity: 0 } : desk ? { opacity: 0, scale: .97 } : { y: 48, opacity: 0 }} animate={desk ? { opacity: 1, scale: 1 } : { y: 0, opacity: 1 }} exit={desk ? { opacity: 0, scale: .98 } : { y: 48, opacity: 0 }} transition={{ type: "spring", stiffness: 340, damping: 34, mass: .9 }}
-      className={`relative flex w-full flex-col overflow-hidden border-white/[.08] bg-[#121214] shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] ${desk ? "h-[min(680px,88dvh)] max-w-[520px] rounded-[28px] border" : "h-[92dvh] rounded-t-[28px] border-t"}`}>
+      className={`relative flex w-full flex-col overflow-hidden border-white/[.08] bg-[#121214] shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] ${desk ? "h-[min(680px,88dvh)] max-w-[520px] rounded-[28px] border" : "kb-panel h-[92dvh] rounded-t-[28px] border-t"}`}>
       <div className={desk ? "px-7 pt-6" : "px-5 pt-2.5"}>
         {!desk && <div aria-hidden className="mx-auto mb-3 h-[5px] w-9 rounded-full bg-white/20" />}
         <div className="flex items-center gap-3">

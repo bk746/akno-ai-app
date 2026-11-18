@@ -254,7 +254,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
         </aside>
       </div>
     </div> : <>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4" style={{ paddingBottom: "calc(96px + var(--sab))" }}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4" style={{ paddingBottom: "calc(96px + var(--sab) + var(--kb, 0px))" }}>
         <div className="space-y-6">{clientCard}{lines}{recap}</div>
       </div>
       <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/[.08] bg-[#0B0B0C]/95 px-4 pt-3 backdrop-blur-xl" style={{ paddingBottom: "max(12px, var(--sab))" }}>
@@ -349,7 +349,7 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
 
   return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className={`rounded-[18px] border p-3 transition-colors ${ring}`}>
     <div className="flex items-start gap-1">{handle}{label}{menuEl}</div>
-    <div className="mt-2 grid grid-cols-[1fr_1fr] gap-2">
+    <div className="mt-2 grid grid-cols-[minmax(0,1fr)_1fr] gap-2">
       <div><div className="mb-1 px-0.5 text-[11.5px] text-white/40">{x.k === "mo" ? "Heures" : "Quantité"}</div>{qtyEl}</div>
       <div><div className="mb-1 px-0.5 text-[11.5px] text-white/40">{x.k === "mo" ? "Taux horaire" : x.k === "fft" ? "Prix du forfait" : "Prix unitaire"}</div>{puEl}</div>
     </div>

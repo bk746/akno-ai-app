@@ -750,7 +750,7 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     </div>}
     {draft && <>
       <div className="mb-4 rounded-[16px] border border-[#0E8F8F]/35 bg-[#0E8F8F]/10 px-4 py-3 text-[13.5px] text-white/80">Brouillon — à valider. Rien n'est envoyé au client tant que vous n'avez pas cliqué sur « Valider et envoyer ».</div>
-      <div className="mb-4 grid grid-cols-[1fr_auto] items-center gap-3 rounded-[20px] bg-white/[.04] p-4">
+      <div className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[20px] bg-white/[.04] p-4">
         <div className="min-w-0"><div className={tx.cap}>Total TTC</div><div className="mt-1 text-[24px] font-semibold tabular-nums tracking-[-0.02em]">{e2(Math.round((ht + tax) * 100) / 100)}</div><div className="text-[12.5px] text-white/45">{e2(Math.round(ht * 100) / 100)} HT · {lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length} ligne{lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length > 1 ? "s" : ""}</div></div>
         <Btn c={A.dev.c} onClick={() => { onClose(); modal({ kind: "devisEditor", data: dv }) }}><FilePen size={16} strokeWidth={1.6} />Modifier</Btn>
         <div className="col-span-2"><F l="E-mail du client"><input className={inp} type="email" value={email} placeholder="kevin.m@example.com" onChange={e => { setEmail(e.target.value); setMailErr("") }} /></F></div>
@@ -975,7 +975,7 @@ function Chat() {
   if (desk) return <motion.aside initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} className="flex w-[380px] shrink-0 flex-col border-l border-white/[.06] bg-[#0B0B0C]">
     <div className="flex h-16 shrink-0 items-center border-b border-white/[.06] px-5">{head}</div>{msgs}<div className="p-5">{input}</div></motion.aside>
   return <><motion.div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setChat(false)} />
-    <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }} transition={{ type: "spring", stiffness: 200, damping: 24 }} className="fixed inset-x-0 bottom-0 z-40 flex h-[560px] max-h-[88dvh] flex-col rounded-t-[24px] border-t border-white/[.08] bg-[#121214] px-5 pt-3 shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)]" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+    <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }} transition={{ type: "spring", stiffness: 200, damping: 24 }} className="kb-bottom kb-panel fixed inset-x-0 bottom-0 z-40 flex h-[560px] max-h-[88dvh] flex-col rounded-t-[24px] border-t border-white/[.08] bg-[#121214] px-5 pt-3 shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)]" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
       <div className="mx-auto h-[5px] w-9 shrink-0 rounded-full bg-white/20" /><div className="mt-4 shrink-0">{head}</div>{msgs}<div className="pt-3">{input}</div></motion.div></>
 }
 

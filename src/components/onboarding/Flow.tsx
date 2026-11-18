@@ -220,7 +220,7 @@ function Entreprise({ p }: { p: Profile }) {
         <Field label="Raison sociale" name="organization" autoComplete="organization" value={f.nom} onChange={set("nom")} />
         <Field label="Adresse du siège" name="street-address" autoComplete="street-address" placeholder="12 rue des Lilas" value={f.adresse} onChange={set("adresse")} />
         <Field label="Code postal et ville" name="postal" autoComplete="address-level2" placeholder="69003 Lyon" value={f.cpv} onChange={set("cpv")} />
-        <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_140px]">
           <Field label="N° de TVA intracommunautaire" name="tva" placeholder="FR12 345678901" value={f.tva} onChange={set("tva")} />
           <Field label="Code APE" name="ape" placeholder="43.21A" value={f.ape} onChange={set("ape")} />
         </div>

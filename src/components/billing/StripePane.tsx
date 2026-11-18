@@ -25,7 +25,8 @@ const appearance: Appearance = {
     colorSuccess: "#30D158",
     colorIcon: "#8E8E93",
     fontFamily: "Geist, ui-sans-serif, system-ui, sans-serif",
-    fontSizeBase: "15px",
+    // update53 : 16 px sur écran tactile, sinon iOS zoome dans le champ carte
+    fontSizeBase: typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches ? "16px" : "15px",
     fontWeightMedium: "500",
     borderRadius: "12px",
     spacingUnit: "4px",

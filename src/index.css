@@ -191,3 +191,31 @@ label:focus-within input:focus-visible { outline: none; }
 [role="button"]:focus-visible { outline: 2px solid rgba(255,255,255,.4); outline-offset: -2px; }
 
 :root{--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)}
+
+/* ───────── update53 · responsive mobile + fluidité ───────── */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+/* Double-tap zoom coupé, réponse immédiate au toucher */
+:where(button, a, [role="button"], [role="switch"], label, select, summary) { touch-action: manipulation; }
+/* Champs : 16 px minimum sur écran tactile, sinon iOS zoome au focus et décale toute la page */
+@media (pointer: coarse) {
+  @layer base { input, textarea, select { font-size: 16px; } }
+  :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select)[class*="text-[1"]:not([class*="text-[16"]):not([class*="text-[17"]):not([class*="text-[18"]):not([class*="text-[19"]),
+  :where(input, textarea, select)[class*="text-xs"], :where(input, textarea, select)[class*="text-sm"] { font-size: 16px !important; }
+  /* Cibles tactiles ≥ 44 px sans changer le visuel : zone de toucher invisible autour des petits boutons */
+  @layer base {
+    :where(button, a[href], [role="button"], [role="switch"]):not([data-nohit]) { position: relative; }
+    :where(select) { min-height: 44px; min-width: 44px; }
+    :where(button, a[href], [role="button"], [role="switch"]):not([data-nohit])::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  }
+  /* Flous plein écran allégés (coûteux sur iPhone pendant les animations) */
+  .fixed.inset-0.backdrop-blur-\[2px\], .fixed.inset-0.backdrop-blur-\[3px\], .fixed.inset-0.backdrop-blur-sm { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  :root { --blur-xl: 16px; --blur-md: 8px; }
+}
+/* Mouvements réduits : animations CSS coupées (les animations motion respectent déjà MotionConfig reducedMotion="user") */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+/* Feuilles du bas : remontent au-dessus du clavier virtuel (--kb, calculé dans lib/mobile.ts) */
+.kb-sheet { padding-bottom: var(--kb, 0px); }
+.kb-bottom { bottom: var(--kb, 0px) !important; }
+.kb-open .kb-panel { max-height: calc(100dvh - var(--kb, 0px) - var(--sat, 0px) - 8px) !important; }

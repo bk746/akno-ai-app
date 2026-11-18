@@ -7,12 +7,14 @@ import "./index.css"
 import AknoApp from "./components/AknoApp"
 import AcceptDevis from "./components/AcceptDevis"
 import { initMonitoring } from "./lib/monitoring"
+import { initMobile } from "./lib/mobile"
 
 const Legal = lazy(() => import("./components/Legal"))
 const DossierPublic = lazy(() => import("./components/DossierPublic"))
 const LEGAL = ["cgv", "mentions-legales", "confidentialite", "dpa"]
 const Lazy = ({ children }: { children: React.ReactNode }) => <Suspense fallback={<div className="fixed inset-0 bg-black" />}>{children}</Suspense>
 initMonitoring()
+initMobile()
 
 const PAGES = ["reception", "agenda", "relance", "devis", "parametres"]
 
