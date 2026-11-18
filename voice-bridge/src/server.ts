@@ -52,13 +52,33 @@ async function loadProfile(artisanId: string): Promise<VoiceProfile> {
 }
 
 // ---------- API Akno (Vercel) ----------
-async function akno(path: string, artisanId: string, body: Json, ms = 2500): Promise<Json> {
-  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms)
+// update60 : 8 s par défaut (2,5 s coupait la réservation au démarrage à froid de Vercel + Cal.com) ;
+// le résultat garde le statut HTTP (_status) et la nature de l'échec (_fail : timeout / network / http).
+const APP_TIMEOUT_MS = Number(E.APP_TIMEOUT_MS || 8000)
+async function akno(path: string, artisanId: string, body: Json, ms = APP_TIMEOUT_MS): Promise<Json> {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms), t0 = Date.now()
   try {
     const r = await fetch(`${APP_URL}${path}`, { method: "POST", signal: ctl.signal, headers: { "Content-Type": "application/json", "x-akno-bridge": E.BRIDGE_SECRET || "", "x-akno-artisan": artisanId }, body: JSON.stringify(body) })
-    return await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }))
-  } catch { return { ok: false, error: "L'agenda met trop de temps à répondre." } } finally { clearTimeout(t) }
+    const j = await r.json().catch(() => null) as Json | null
+    if (!j || typeof j !== "object") return { ok: false, error: `HTTP ${r.status}`, _status: r.status, _fail: "http" }
+    if (!r.ok && r.status !== 409) log("[app]", path, body.action || body.type || "", r.status, `${Date.now() - t0}ms`)
+    return { ...j, _status: r.status, ...(r.ok || r.status === 409 ? {} : { _fail: "http" }) }
+  } catch (e) {
+    const timeout = (e as Error)?.name === "AbortError"
+    log("[app]", path, body.action || body.type || "", timeout ? `timeout ${ms}ms` : `réseau ${(e as Error)?.message || e}`)
+    return { ok: false, error: timeout ? "L'agenda met trop de temps à répondre." : "Agenda injoignable.", _fail: timeout ? "timeout" : "network" }
+  } finally { clearTimeout(t) }
 }
+
+/** Réponse métier de /api/booking (créneau pris / demande invalide) — par opposition à une panne. */
+function isBusinessRefusal(b: Json) {
+  if (b.ok) return false
+  if (b._fail) return false
+  if (b.reason) return b.reason === "taken" || b.reason === "invalid"
+  return b._status === 409
+}
+const TECH_BOOK = "PROBLÈME TECHNIQUE : la réservation n'a pas pu être confirmée (agenda injoignable). Ne dis JAMAIS que le créneau est pris. Dis : « Je n'arrive pas à confirmer le rendez-vous pour un souci technique. Je note votre demande pour ce créneau et l'artisan vous rappelle pour le confirmer. » Puis termine normalement ; save_call avec rdv_pris false et rappel_souhaite true."
+const TECH_SLOTS = "PROBLÈME TECHNIQUE : l'agenda ne répond pas. N'invente aucun créneau. Note les disponibilités du client ; l'artisan le rappelle pour fixer le rendez-vous (rappel_souhaite true)."
 
 const transcriptText = (lines: Line[]) => lines.map(l => `${l.role === "assistant" ? "Akno" : "Client"}: ${l.text.trim()}`).filter(l => !l.endsWith(":")).join("\n")
 
@@ -72,6 +92,9 @@ function handleCall(tw: WebSocket) {
   const startedAt = Date.now()
   let assistantBuf = "", greeting = true
   let maxTimer: NodeJS.Timeout | null = null
+  // update60 : rendez-vous réellement créé pendant l'appel (seule source de vérité pour rdv_pris / rdv_date)
+  let booked: { start: string; appointmentId: string | null } | null = null
+  let bookFailed: string | null = null
 
   const toTwilio = (m: Json) => { if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify(m)) }
   const toXai = (m: Json) => { if (xai?.readyState === WebSocket.OPEN) xai.send(JSON.stringify(m)) }
@@ -86,11 +109,16 @@ function handleCall(tw: WebSocket) {
 
   async function saveCall(args: Json) {
     const urgent = args.urgence === "urgent" || args.type_demande === "urgence"
-    const rappel = args.rappel_souhaite === true || (args.rappel_souhaite == null && args.a_rappeler === true)
+    let rappel = args.rappel_souhaite === true || (args.rappel_souhaite == null && args.a_rappeler === true)
     const wantDevis = args.devis_demande === true || args.type_demande === "devis"
     let type = String(args.type_demande || "").trim() || "autre"
     if (wantDevis && type === "autre") type = "devis"
     const resume = String(args.resume || "").trim() || "Appel téléphonique reçu par la réceptionniste."
+    // update60 : « rdv_pris » seulement si book_appointment a vraiment créé le rendez-vous ;
+    // sinon (souci technique ou RDV annoncé sans réservation) la fiche passe « à rappeler ».
+    const unconfirmed = !booked && (args.rdv_pris === true || !!bookFailed)
+    if (unconfirmed) rappel = true
+    const noteRdv = unconfirmed ? `RDV demandé mais NON confirmé${bookFailed ? ` (${bookFailed})` : ""} — rappeler le client pour le fixer.` : ""
     const row = {
       nom_client: String(args.nom_client || "").trim() || "Appel téléphonique",
       telephone_client: String(args.telephone_client || "").trim() || from || null,
@@ -103,8 +131,9 @@ function handleCall(tw: WebSocket) {
       type_demande: type,
       urgence: urgent ? "urgent" : "normal",
       email_client: String(args.email_client || "").trim() || null,
-      statut: rappel ? "a_rappeler" : args.rdv_pris ? "rdv_pris" : "renseigne",
-      notes: String(args.notes || "").trim() || null,
+      statut: rappel ? "a_rappeler" : booked ? "rdv_pris" : "renseigne",
+      rdv_date: booked?.start || null,
+      notes: [String(args.notes || "").trim(), noteRdv].filter(Boolean).join(" — ") || null,
       rappel_souhaite: rappel,
       rappel_creneau: rappel ? (String(args.rappel_creneau || "").trim() || null) : null,
       transcript: transcriptText(lines) || null,
@@ -112,14 +141,23 @@ function handleCall(tw: WebSocket) {
     }
     const id = await upsertCall(row)
     saved = true
+    // Relie le rendez-vous créé à la fiche d'appel (Agenda ⇄ Réception).
+    if (id && booked?.appointmentId) void sb(`/rest/v1/appointments?id=eq.${booked.appointmentId}`, { method: "PATCH", body: JSON.stringify({ call_id: id }) })
     void akno("/api/notify", artisanId, { type: "call", client: row.nom_client, motif: row.motif, resume, besoin_detail: row.besoin_detail, call_id: id, rappel_souhaite: rappel, rappel_creneau: row.rappel_creneau, urgent })
     return { ok: true, call_id: id, message: wantDevis ? "Appel enregistré. Demande de devis notée — à générer depuis la fiche client." : "Appel enregistré dans Réception." }
   }
 
   async function book(args: Json) {
     const client = [args.prenom, args.nom].map(x => String(x || "").trim()).filter(Boolean).join(" ") || String(args.client || "").trim() || "Client"
+    const t0 = Date.now()
     const b = await akno("/api/booking", artisanId, { action: "book", ...args, client })
-    if (!b.ok) return { ok: false, error: b.error || "Créneau indisponible.", alternatives: b.alternatives || [] }
+    const slot = [args.date, args.heure].filter(Boolean).join(" à ")
+    log("[book]", b.ok ? "ok" : `refus ${b.reason || b._fail || b._status}`, `${Date.now() - t0}ms`)
+    if (!b.ok) {
+      if (isBusinessRefusal(b)) return { ok: false, reason: b.reason || "taken", error: b.error || "Créneau indisponible.", alternatives: b.alternatives || [] }
+      bookFailed = slot || "créneau demandé"
+      return { ok: false, reason: "technical", error: "Souci technique : réservation non confirmée.", instruction: TECH_BOOK, alternatives: [] }
+    }
     const minutes = Math.max(30, Number(args.duree_minutes) || 60)
     const start = b.start || new Date().toISOString()
     const row = {
@@ -133,6 +171,13 @@ function handleCall(tw: WebSocket) {
     const exists = !!b.appointment_id
     const ins = exists ? null : await sb(`/rest/v1/appointments?select=id`, { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(row) })
     const appointmentId = b.appointment_id || (Array.isArray(ins) ? ins[0]?.id : null)
+    // Agenda interne : sans ligne « appointments », rien n'est réservé → souci technique, pas de faux « confirmé ».
+    if (!appointmentId && !b.cal_uid) {
+      bookFailed = slot || "créneau demandé"
+      return { ok: false, reason: "technical", error: "Souci technique : réservation non enregistrée.", instruction: TECH_BOOK, alternatives: [] }
+    }
+    booked = { start, appointmentId: appointmentId || null }
+    bookFailed = null
     void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" à ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId })
     return { ok: true, appointment_id: appointmentId, confirmation: b.confirmation || `Rendez-vous confirmé pour ${client}.` }
   }
@@ -141,7 +186,10 @@ function handleCall(tw: WebSocket) {
     let result: unknown = { ok: false, error: "Outil inconnu." }
     try {
       const args = ev.arguments ? JSON.parse(ev.arguments) : {}
-      if (ev.name === "get_available_slots") result = await akno("/api/booking", artisanId, { action: "slots", ...args })
+      if (ev.name === "get_available_slots") {
+        const b = await akno("/api/booking", artisanId, { action: "slots", ...args })
+        result = b.ok ? { ok: true, slots: b.slots || [], timezone: b.timezone } : { ok: false, reason: "technical", slots: [], error: b.error || "Agenda injoignable.", instruction: TECH_SLOTS }
+      }
       else if (ev.name === "book_appointment") result = await book(args)
       else if (ev.name === "save_call") result = await saveCall(args)
     } catch (e) { log("[tool]", ev.name, e); result = { ok: false, error: "Erreur pendant l'opération." } }
@@ -190,7 +238,10 @@ function handleCall(tw: WebSocket) {
     if (!verifyToken(E.BRIDGE_SECRET || "", params)) { log("[call] jeton invalide, raccroche"); tw.close(); return }
     artisanId = params.artisan_id; from = params.from || ""
     log("[call] start", callSid, "artisan", artisanId.slice(0, 8))
-    const slotsP = akno("/api/booking", artisanId, { action: "slots" }, 1500).then(b => (Array.isArray(b.slots) ? b.slots : []) as SlotHint[]).catch(() => [] as SlotHint[])
+    // update60 : cette requête réveille aussi /api/booking (et Cal.com) dès le décroché ; on n'attend que 1,5 s
+    // pour l'accueil, mais elle continue en arrière-plan (8 s) pour que la future réservation tombe sur une fonction chaude.
+    const warm = akno("/api/booking", artisanId, { action: "slots" }).then(b => (Array.isArray(b.slots) ? b.slots : []) as SlotHint[]).catch(() => [] as SlotHint[])
+    const slotsP = Promise.race([warm, new Promise<SlotHint[]>(r => setTimeout(() => r([]), 1500))])
     const [p, slots] = await Promise.all([loadProfile(artisanId), slotsP])
     profile = p
     log("[call] voix", profile.reception?.voice || "défaut", "débit", profile.reception?.speed || 1)

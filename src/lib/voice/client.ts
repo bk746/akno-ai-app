@@ -573,6 +573,9 @@ export async function startVoiceSession(opts: {
     return () => clearTimeout(t)
   }
 
+  // update60 : rendez-vous réellement créé pendant l'appel test (rdv_pris / rdv_date fiables)
+  let bookedInfo: { start?: string; appointmentId?: string | null } | null = null
+  let bookFailed: string | null = null
   const handleTool = async (event: { name?: string; call_id?: string; arguments?: string }) => {
     pendingTools++
     opts.onStatus("thinking")
@@ -598,12 +601,18 @@ export async function startVoiceSession(opts: {
         source = "network"
         cancelFiller = armFiller("Un instant…")
         result = await bookAppointment(args as BookArgs)
+        const br = result as { ok?: boolean; start?: string; appointment_id?: string | null; reason?: string }
+        const b = args as BookArgs
+        if (br.ok) { bookedInfo = { start: br.start, appointmentId: br.appointment_id ?? null }; bookFailed = null }
+        else if (br.reason === "technical") bookFailed = [b.date, b.heure].filter(Boolean).join(" à ") || "créneau demandé"
       } else if (event.name === "save_call") {
         source = "save"
         result = await saveCall(args as SaveArgs, {
           transcript: lines,
           durationSec: (Date.now() - startedAt) / 1000,
           profile,
+          booked: bookedInfo,
+          bookFailed,
         })
         if (result && typeof result === "object" && (result as { ok?: boolean }).ok) {
           saved = true
@@ -907,7 +916,7 @@ export async function startVoiceSession(opts: {
           devis_demande: false,
         }
         try {
-          const result = await saveCall(fallbackArgs, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile })
+          const result = await saveCall(fallbackArgs, { transcript: lines, durationSec: (Date.now() - startedAt) / 1000, profile, booked: bookedInfo, bookFailed })
           if (result.ok) {
             saved = true
             savedCallId = result.call_id

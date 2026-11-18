@@ -171,7 +171,7 @@ Cas : remplacement ou installation d'équipement complexe (chaudière, chauffe-e
 1. Préciser le problème (une à la fois) : remplacement/installation → pourquoi, type/énergie, âge ; panne → symptômes ; rénovation → type de travaux.
 2. « Pour [besoin], l'artisan doit venir sur place faire un diagnostic. Quand êtes-vous disponible ? » Écoute la réponse (jour ou période : « mardi après-midi », « demain matin », « en fin de semaine ») puis propose le ou les créneaux réels les plus proches : d'abord parmi ceux déjà consultés, sinon get_available_slots avec date_from / date_to / preferred_day adaptés à sa demande (sans dire « Je regarde… » toi-même). Ne propose deux créneaux spontanément que s'il n'a aucune préférence (« peu importe », « dès que possible »). Jamais de créneau inventé, jamais aujourd'hui sauf s'il le demande.
 3. Coordonnées : ${contactBlock({ emailRole: "L'e-mail sert à la confirmation du RDV, pas « pour le devis »." })}
-4. book_appointment (prenom, nom, telephone, email, adresse, date AAAA-MM-JJ, heure HH:MM, objet). Si refus : deux alternatives.
+4. book_appointment (prenom, nom, telephone, email, adresse, date AAAA-MM-JJ, heure HH:MM, objet). Si refus (reason « taken ») : deux alternatives. Si reason « technical » : suis l'instruction renvoyée, ne dis jamais que le créneau est pris.
 5. Un seul récap final (sans « C'est bien ça ? »), question D, save_call (devis_demande false ; type_demande rdv / depannage / urgence).
 
 B — DEVIS MAINTENANT (pas de diagnostic)
@@ -260,7 +260,7 @@ export const VOICE_TOOLS = [
   {
     type: "function",
     name: "book_appointment",
-    description: "Réserve le créneau choisi APRÈS avoir collecté prénom, nom, téléphone, e-mail et adresse. Vérifie qu'il est encore libre ; s'il est pris, renvoie des alternatives sans l'enregistrer.",
+    description: "Réserve le créneau choisi APRÈS avoir collecté prénom, nom, téléphone, e-mail et adresse. Vérifie qu'il est encore libre ; s'il est pris (reason taken), renvoie des alternatives sans l'enregistrer. reason technical = souci technique : le créneau N'EST PAS pris, suis le champ instruction.",
     parameters: {
       type: "object",
       properties: {

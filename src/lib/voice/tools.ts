@@ -44,7 +44,7 @@ export type SaveArgs = {
 }
 
 
-const CAL_TIMEOUT_MS = 2500
+const CAL_TIMEOUT_MS = 8000 // update60 : 2,5 s coupait l'agenda au démarrage à froid (Vercel + Cal.com)
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise(resolve => {
@@ -149,7 +149,7 @@ async function notifySelf(payload: Record<string, unknown>) {
   } catch { /* ignore */ }
 }
 
-async function bookingApi(action: "slots" | "book", payload: object) {
+async function bookingApi(action: "slots" | "book", payload: object): Promise<Record<string, any>> {
   try {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.access_token) return { ok: false, error: "Session expirée." }
@@ -160,11 +160,11 @@ async function bookingApi(action: "slots" | "book", payload: object) {
     })
     const body = await r.json().catch(() => ({})) as Record<string, unknown>
     if (typeof body.ok !== "boolean" && !r.ok) {
-      return { ok: false, error: String(body.error || "Impossible de joindre l'agenda.") }
+      return { ok: false, error: String(body.error || "Impossible de joindre l'agenda."), _fail: "http", _status: r.status }
     }
-    return body
+    return { ...body, _status: r.status }
   } catch {
-    return { ok: false, error: "Impossible de joindre l'agenda." }
+    return { ok: false, error: "Impossible de joindre l'agenda.", _fail: "network" }
   }
 }
 
@@ -175,7 +175,7 @@ export async function getAvailableSlots(args: SlotsArgs) {
     { ok: false, error: "L'agenda met trop de temps à répondre.", slots: [] as unknown[] },
   )
   if (body.ok === true) return body
-  return { ok: false, error: body.error || "Impossible de lire les créneaux.", slots: body.slots || [] }
+  return { ok: false, reason: "technical", error: body.error || "Impossible de lire les créneaux.", slots: body.slots || [], instruction: "PROBLÈME TECHNIQUE : l'agenda ne répond pas. N'invente aucun créneau. Note les disponibilités du client ; l'artisan le rappelle pour fixer le rendez-vous (rappel_souhaite true)." }
 }
 
 function bookingClientName(args: BookArgs) {
@@ -185,14 +185,24 @@ function bookingClientName(args: BookArgs) {
   return composed || args.client?.trim() || "Client"
 }
 
+// update60 : même règle que le relais téléphonique — un souci technique n'est jamais annoncé comme « créneau pris ».
+export const TECH_BOOK = "PROBLÈME TECHNIQUE : la réservation n'a pas pu être confirmée (agenda injoignable). Ne dis JAMAIS que le créneau est pris. Dis : « Je n'arrive pas à confirmer le rendez-vous pour un souci technique. Je note votre demande pour ce créneau et l'artisan vous rappelle pour le confirmer. » Puis termine normalement ; save_call avec rdv_pris false et rappel_souhaite true."
+export function isBusinessRefusal(b: { ok?: unknown; reason?: unknown; _fail?: unknown; _status?: unknown }) {
+  if (b.ok) return false
+  if (b._fail) return false
+  if (b.reason) return b.reason === "taken" || b.reason === "invalid"
+  return b._status === 409
+}
+
 export async function bookAppointment(args: BookArgs) {
   const client = bookingClientName(args)
-  const booked = await bookingApi("book", { ...args, client }) as {
+  const booked = await withTimeout(bookingApi("book", { ...args, client }), 15_000, { ok: false, error: "L'agenda met trop de temps à répondre.", _fail: "timeout" }) as {
     ok?: boolean; error?: string; alternatives?: unknown; confirmation?: string
-    start?: string; end?: string; cal_uid?: string; label?: string
+    start?: string; end?: string; cal_uid?: string; label?: string; reason?: string; _fail?: string; _status?: number
   }
   if (!booked.ok) {
-    return { ok: false, error: booked.error || "Créneau indisponible.", alternatives: booked.alternatives || [] }
+    if (isBusinessRefusal(booked)) return { ok: false, reason: booked.reason || "taken", error: booked.error || "Créneau indisponible.", alternatives: booked.alternatives || [] }
+    return { ok: false, reason: "technical", error: "Souci technique : réservation non confirmée.", instruction: TECH_BOOK, alternatives: [] }
   }
   const user = await me()
   const parsed = parseSlot(args.date, args.heure)
@@ -215,9 +225,11 @@ export async function bookAppointment(args: BookArgs) {
   const when = [args.date, args.heure].filter(Boolean).join(" à ") || booked.label || "Nouveau rendez-vous"
   await notifySelf({ type: "appointment", client: row.client, when, appointment_id: data?.id })
   if (error) {
-    return { ok: true, appointment_id: null, confirmation: booked.confirmation || "Rendez-vous confirmé dans l'agenda.", warning: "Enregistré dans Cal.com, mais pas encore visible dans l'Agenda." }
+    // Agenda interne : sans ligne « appointments », rien n'est réservé.
+    if (!booked.cal_uid) return { ok: false, reason: "technical", error: "Souci technique : réservation non enregistrée.", instruction: TECH_BOOK, alternatives: [] }
+    return { ok: true, appointment_id: null, start, confirmation: booked.confirmation || "Rendez-vous confirmé dans l'agenda.", warning: "Enregistré dans Cal.com, mais pas encore visible dans l'Agenda." }
   }
-  return { ok: true, appointment_id: data?.id, confirmation: booked.confirmation || `Rendez-vous confirmé pour ${row.client}.` }
+  return { ok: true, appointment_id: data?.id, start, confirmation: booked.confirmation || `Rendez-vous confirmé pour ${row.client}.` }
 }
 
 function formatTranscript(lines: { role: "user" | "assistant"; text: string }[]) {
@@ -265,13 +277,17 @@ export function inferDevisRequest(args: Partial<SaveArgs>, transcript: { role: s
 
 export async function saveCall(
   args: SaveArgs,
-  extra: { transcript: { role: "user" | "assistant"; text: string }[]; durationSec: number; profile?: VoiceProfile },
+  extra: { transcript: { role: "user" | "assistant"; text: string }[]; durationSec: number; profile?: VoiceProfile; booked?: { start?: string; appointmentId?: string | null } | null; bookFailed?: string | null },
 ) {
   const user = await me()
   const urgent = args.urgence === "urgent" || args.type_demande === "urgence"
-  const rappelSouhaite = args.rappel_souhaite === true || (args.rappel_souhaite == null && args.a_rappeler === true)
+  // update60 : « rdv_pris » seulement si un rendez-vous a vraiment été créé pendant l'appel.
+  const booked = extra.booked || null
+  const unconfirmed = !booked && (args.rdv_pris === true || !!extra.bookFailed)
+  const rappelSouhaite = unconfirmed || args.rappel_souhaite === true || (args.rappel_souhaite == null && args.a_rappeler === true)
   const rappelCreneau = rappelSouhaite ? (args.rappel_creneau?.trim() || null) : null
-  const statut = rappelSouhaite ? "a_rappeler" : args.rdv_pris ? "rdv_pris" : "renseigne"
+  const statut = rappelSouhaite ? "a_rappeler" : booked ? "rdv_pris" : "renseigne"
+  const noteRdv = unconfirmed ? `RDV demandé mais NON confirmé${extra.bookFailed ? ` (${extra.bookFailed})` : ""} — rappeler le client pour le fixer.` : ""
   const resume = (args.resume || "").trim() || "Appel test de la réceptionniste."
   const row = {
     artisan_id: user.id,
@@ -289,7 +305,8 @@ export async function saveCall(
     duration: Math.max(0, Math.round(extra.durationSec)),
     email_client: args.email_client?.trim() || null,
     statut,
-    notes: args.notes?.trim() || null,
+    rdv_date: booked?.start || null,
+    notes: [args.notes?.trim(), noteRdv].filter(Boolean).join(" — ") || null,
     rappel_souhaite: rappelSouhaite,
     rappel_creneau: rappelCreneau,
   }
@@ -297,6 +314,7 @@ export async function saveCall(
   if (wantDevis && (row.type_demande === "autre" || !row.type_demande)) row.type_demande = "devis"
   const { data, error } = await supabase.from("calls").insert(row).select("id").maybeSingle()
   if (error) return { ok: false, error: "Impossible d'enregistrer l'appel." }
+  if (data?.id && booked?.appointmentId) await supabase.from("appointments").update({ call_id: data.id }).eq("id", booked.appointmentId)
   await notifySelf({
     type: "call",
     client: row.nom_client,

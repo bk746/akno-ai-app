@@ -290,16 +290,18 @@ function parseBookStart(input: BookInput) {
 async function providerBook(cfg: CalCfg, input: BookInput) {
   const parsed = parseBookStart(input)
   if ("error" in parsed) {
-    const alts = await providerGetSlots(cfg, { date_from: input.date, date_to: input.date || addDaysYmd(input.date || todayParis(), 7), duree_minutes: input.duree_minutes })
-    return { ok: false, error: parsed.error, alternatives: alts.slots.slice(0, 4) }
+    const alts = await providerGetSlots(cfg, { date_from: input.date, date_to: input.date || addDaysYmd(input.date || todayParis(), 7), duree_minutes: input.duree_minutes }).catch(() => ({ slots: [] as BookingSlot[] }))
+    return { ok: false, reason: "invalid", error: parsed.error, alternatives: alts.slots.slice(0, 4) }
   }
   const eventType = await resolveEventType(cfg)
   const duration = Math.max(15, Number(input.duree_minutes) || eventType.lengthInMinutes || 60)
   const daySlots = await providerGetSlots(cfg, { date_from: input.date, date_to: input.date, duree_minutes: duration }, { fresh: true })
+  // update60 : Cal.com injoignable ≠ créneau pris (sinon la réceptionniste annonçait à tort « créneau déjà pris »)
+  if (!daySlots.ok) return { ok: false, reason: "error", error: daySlots.error || "Impossible de lire l'agenda Cal.com.", alternatives: [] }
   const match = daySlots.slots.find(s => Math.abs(new Date(s.start).getTime() - parsed.start.getTime()) < 60_000)
   if (!match) {
     const wider = daySlots.slots.length ? daySlots : await providerGetSlots(cfg, { date_from: input.date || todayParis(), date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration })
-    return { ok: false, error: "Ce créneau n'est plus disponible.", alternatives: wider.slots.slice(0, 4) }
+    return { ok: false, reason: "taken", error: "Ce créneau n'est plus disponible.", alternatives: wider.slots.slice(0, 4) }
   }
 
   const eventTypeId = eventType.id
@@ -317,7 +319,7 @@ async function providerBook(cfg: CalCfg, input: BookInput) {
     const hint = (input.telephone || "").trim()
       ? "Le numéro de téléphone n'est pas valide. Demande-le à nouveau chiffre par chiffre, ou un e-mail."
       : "Il faut un numéro de téléphone ou un e-mail pour confirmer le rendez-vous."
-    return { ok: false, error: hint, alternatives: [] }
+    return { ok: false, reason: "invalid", error: hint, alternatives: [] }
   }
 
   const body: Json = {
@@ -345,8 +347,10 @@ async function providerBook(cfg: CalCfg, input: BookInput) {
   }
   if (!r.ok) {
     const msg = String((payload as { error?: { message?: string }; message?: string }).error?.message || payload.message || "Impossible de réserver ce créneau.")
-    const alts = await providerGetSlots(cfg, { date_from: input.date || todayParis(), date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration })
-    return { ok: false, error: msg, alternatives: alts.slots.slice(0, 4) }
+    // Cal.com refuse : créneau réellement indisponible (message explicite) ou erreur technique.
+    const taken = r.status === 409 || /not available|no available|already ha(s|ve) (a )?booking|unavailable|booked|disponible/i.test(msg)
+    const alts = taken ? await providerGetSlots(cfg, { date_from: input.date || todayParis(), date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration }).catch(() => ({ slots: [] as BookingSlot[] })) : { slots: [] as BookingSlot[] }
+    return { ok: false, reason: taken ? "taken" : "error", error: msg, alternatives: alts.slots.slice(0, 4) }
   }
   const data = (payload.data && !Array.isArray(payload.data) ? payload.data : Array.isArray(payload.data) ? payload.data[0] : payload.data) as {
     start?: string; end?: string; uid?: string; duration?: number; title?: string
@@ -404,14 +408,14 @@ async function internalBook(db: SupabaseClient, userId: string, input: BookInput
   const duration = Math.max(30, Number(input.duree_minutes) || 60)
   if ("error" in parsed) {
     const alts = await internalSlots(db, userId, { date_from: input.date, date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration })
-    return { ok: false, error: parsed.error, alternatives: alts.slots.slice(0, 4) }
+    return { ok: false, reason: "invalid", error: parsed.error, alternatives: alts.slots.slice(0, 4) }
   }
   const start = parsed.start, end = new Date(start.getTime() + duration * 60_000)
-  if (start.getTime() < Date.now()) return { ok: false, error: "Ce créneau est déjà passé.", alternatives: [] }
+  if (start.getTime() < Date.now()) return { ok: false, reason: "invalid", error: "Ce créneau est déjà passé.", alternatives: [] }
   const busy = await busyRanges(db, userId, start.toISOString(), end.toISOString())
   if (busy.some(x => x.a < end.getTime() && x.b > start.getTime())) {
     const alts = await internalSlots(db, userId, { date_from: input.date, date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration })
-    return { ok: false, error: "Ce créneau n'est plus disponible.", alternatives: alts.slots.slice(0, 4) }
+    return { ok: false, reason: "taken", error: "Ce créneau n'est plus disponible.", alternatives: alts.slots.slice(0, 4) }
   }
   const name = (input.client || "Client").trim()
   return {
@@ -441,17 +445,18 @@ export async function handleBooking(authorization: string | undefined, body: unk
       }
       return { status: 400, body: { error: "Action inconnue." } }
     }
+    // update60 : 409 seulement si le créneau est vraiment pris ou invalide ; une panne Cal.com renvoie 502.
     if (input.action === "slots") {
       const result = await providerGetSlots(cfg, input)
       return { status: result.ok ? 200 : 502, body: result }
     }
     if (input.action === "book") {
       const result = await providerBook(cfg, input)
-      return { status: result.ok ? 200 : 409, body: result }
+      return { status: result.ok ? 200 : "reason" in result && result.reason === "error" ? 502 : 409, body: result }
     }
     return { status: 400, body: { error: "Action inconnue." } }
   } catch (e) {
-    return { status: 502, body: { error: e instanceof Error ? e.message : "Erreur agenda." } }
+    return { status: 502, body: { ok: false, reason: "error", error: e instanceof Error ? e.message : "Erreur agenda." } }
   }
 }
 
