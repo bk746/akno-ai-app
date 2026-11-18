@@ -3,8 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Minus, Plus } from "lucide-react"
 import { fmtN, parseN } from "../../lib/devisCalc"
 
-export const TEAL = "#0E8F8F"
-export const TEAL_T = "#3FD0C9" // teal lisible sur fond noir (texte, focus)
+export const TEAL = "#2F6BFF" // accent Devis (bleu, update54)
+export const TEAL_T = "#7EA6FF" // bleu Devis lisible sur fond noir (texte, focus)
 export const field = "h-10 w-full rounded-[12px] border border-white/[.08] bg-white/[.04] px-3 text-[14px] text-white outline-none transition-colors [color-scheme:dark] placeholder:text-white/30 hover:border-white/[.14] focus:border-[#3FD0C9]/70 focus:bg-white/[.06]"
 
 /** Nombre au format français : « 3,5 », « 1 250 ». Garde la saisie brute pendant la frappe. */

@@ -101,7 +101,7 @@ export default function BrandPanel() {
         </Card>
         <Card k="ag" d={d(3)} time="10:03">
           <div className="flex items-center gap-3.5">
-            <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-[11px] bg-white/[.06] leading-none"><span className="text-[10.5px] font-medium text-[#FF7070]">jeu.</span><span className="mt-0.5 text-[17px] font-semibold tabular-nums">19</span></div>
+            <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-[11px] bg-white/[.06] leading-none"><span className="text-[10.5px] font-medium text-[#8B7CFF]">jeu.</span><span className="mt-0.5 text-[17px] font-semibold tabular-nums">19</span></div>
             <div className="min-w-0"><div className="text-[14.5px] font-medium text-white">Intervention calée · 9 h 00</div><div className="mt-0.5 truncate text-[13px] text-white/50">Mme Martin · 12 rue des Lilas, Lyon 3e</div></div>
           </div>
           <div className="mt-4 border-t border-white/[.07] pt-3"><Done show={!!reduce || on("ag")} delay={.8}>Confirmation envoyée par SMS</Done></div>

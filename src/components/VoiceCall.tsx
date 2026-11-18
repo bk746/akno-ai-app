@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import { motion } from "motion/react"
 import { PhoneOff, X } from "lucide-react"
-import { BLOB } from "./blobPath"
+import { Orb, orbEyes } from "./ui"
 import { fetchVoiceToken, startVoiceSession, type TranscriptLine, type VoiceStatus } from "../lib/voice/client"
 import { mergeProfile, type VoiceProfile } from "../lib/voice/script"
 import { formatVoiceTimings, isVoiceDebugEnabled, subscribeVoiceDebugFlag, subscribeVoiceTimings } from "../lib/voice/timing"
 import { primeCallWakeLock } from "../lib/voice/wakeLock"
 
-const C = "#E6E6E6"
+const C = "#E6E6E6", EG = orbEyes(148)
 
 const STATUS: Record<VoiceStatus, string> = {
   idle: "",
@@ -118,11 +118,10 @@ export default function VoiceCall({
           className="pointer-events-none relative"
         >
           <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[280px] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${C}${status === "speaking" ? "33" : "1A"} 0%, transparent 64%)` }} />
-          <svg viewBox="0 0 267 279" width={148} height={148 * 279 / 267} className="relative">
-            <path d={BLOB} fill={C} />
-            <ellipse cx={106.5} cy={104.5} rx={22.5} ry={status === "listening" ? 28 : 31} fill="#000" />
-            <ellipse cx={169.5} cy={104.5} rx={22.5} ry={status === "listening" ? 28 : 31} fill="#000" />
-          </svg>
+          <span className="relative block"><Orb c={C} s={148}>
+            <ellipse cx={EG.l} cy={EG.y} rx={EG.rx} ry={status === "listening" ? EG.ry - 3 : EG.ry} fill="#000" />
+            <ellipse cx={EG.r} cy={EG.y} rx={EG.rx} ry={status === "listening" ? EG.ry - 3 : EG.ry} fill="#000" />
+          </Orb></span>
         </motion.div>
         <div className="mt-8 text-center">
           <div className="text-[13px] font-medium uppercase tracking-[.12em] text-white/40">Réceptionniste</div>

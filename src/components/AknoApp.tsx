@@ -53,7 +53,7 @@ const dd = (iso: string) => new Date(iso + "T12:00:00")
 const dlabel = (iso: string) => `${DAYS[(dd(iso).getDay() + 6) % 7]} ${dd(iso).getDate()}`
 const short = (n: string) => /^(M\.|Mme|Chantier)/.test(n) ? n : n.split(" ").length > 1 ? `${n[0]}. ${n.split(" ").slice(1).join(" ")}` : n
 const ttc = (ht: number, tv: number) => Math.round(ht * (1 + tv / 100))
-const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#0E8F8F"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"], sans: ["Sans réponse", "rgba(255,255,255,.3)"] }
+const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#2F6BFF"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"], sans: ["Sans réponse", "rgba(255,255,255,.3)"] }
 const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
@@ -749,7 +749,7 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
       {!dv.remindersOff && <button type="button" className="shrink-0 text-[13px] font-medium text-white" onClick={stopRem}>Arrêter</button>}
     </div>}
     {draft && <>
-      <div className="mb-4 rounded-[16px] border border-[#0E8F8F]/35 bg-[#0E8F8F]/10 px-4 py-3 text-[13.5px] text-white/80">Brouillon — à valider. Rien n'est envoyé au client tant que vous n'avez pas cliqué sur « Valider et envoyer ».</div>
+      <div className="mb-4 rounded-[16px] border border-[#2F6BFF]/35 bg-[#2F6BFF]/10 px-4 py-3 text-[13.5px] text-white/80">Brouillon — à valider. Rien n'est envoyé au client tant que vous n'avez pas cliqué sur « Valider et envoyer ».</div>
       <div className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[20px] bg-white/[.04] p-4">
         <div className="min-w-0"><div className={tx.cap}>Total TTC</div><div className="mt-1 text-[24px] font-semibold tabular-nums tracking-[-0.02em]">{e2(Math.round((ht + tax) * 100) / 100)}</div><div className="text-[12.5px] text-white/45">{e2(Math.round(ht * 100) / 100)} HT · {lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length} ligne{lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length > 1 ? "s" : ""}</div></div>
         <Btn c={A.dev.c} onClick={() => { onClose(); modal({ kind: "devisEditor", data: dv }) }}><FilePen size={16} strokeWidth={1.6} />Modifier</Btn>

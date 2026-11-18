@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence, useAnimationControls } from "motion/react"
 import { Delete, ScanFace } from "lucide-react"
-import { BLOB } from "./blobPath"
+import { Orb, orbEyes, Blob } from "./ui"
 import { bioAvailable, checkCode, enableBio, getLock, isMissingGestureError, setCode, unlockBio } from "../lib/lock"
 import { supabase } from "../lib/supabase"
 import { FlowSteps } from "./auth/FlowShell"
@@ -10,7 +10,8 @@ const buzz = () => { try { navigator.vibrate?.([30, 40, 30]) } catch { } }
 function Bot({ s = 64 }: { s?: number }) {
   const [b, setB] = useState(false)
   useEffect(() => { let t: ReturnType<typeof setTimeout>; const loop = () => { t = setTimeout(() => { setB(true); setTimeout(() => setB(false), 120); loop() }, 2500 + Math.random() * 3000) }; loop(); return () => clearTimeout(t) }, [])
-  return <svg viewBox="0 0 267 279" width={s} height={s * 279 / 267} aria-hidden><path d={BLOB} fill="#fff" /><g style={{ transformBox: "fill-box", transformOrigin: "center", transform: `scaleY(${b ? .1 : 1})`, transition: "transform .06s" }}><ellipse cx={106.5} cy={104.5} rx={22.5} ry={31} fill="#000" /><ellipse cx={169.5} cy={104.5} rx={22.5} ry={31} fill="#000" /></g></svg>
+  const g = orbEyes(s)
+  return <Orb c="#E6E6E6" s={s}><g style={{ transformBox: "fill-box", transformOrigin: "center", transform: `scaleY(${b ? .1 : 1})`, transition: "transform .06s" }}><ellipse cx={g.l} cy={g.y} rx={g.rx} ry={g.ry} fill="#000" /><ellipse cx={g.r} cy={g.y} rx={g.rx} ry={g.ry} fill="#000" /></g></Orb>
 }
 const Dots = ({ n, ctl }: { n: number; ctl: ReturnType<typeof useAnimationControls> }) => <motion.div animate={ctl} className="flex justify-center gap-4">{Array.from({ length: 6 }, (_, i) => <span key={i} className={`h-3.5 w-3.5 rounded-full transition-colors ${i < n ? "bg-white" : "bg-white/20"}`} />)}</motion.div>
 function Pad({ onKey, onDel, left }: { onKey: (d: string) => void; onDel: () => void; left?: React.ReactNode }) {
@@ -91,7 +92,7 @@ export function LockSetup({ uid, email, onDone, flow }: { uid: string; email: st
   // update50 · dans le parcours : même en-tête que les autres étapes (logo, « Plus tard »), bloc centré sur grand écran
   return <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-black px-6 text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
     {flow ? <header className="flex h-10 shrink-0 items-center justify-between gap-3 pt-5 sm:px-4">
-      <span className="flex items-center gap-2.5" aria-label="Akno"><svg viewBox="0 0 267 279" width={26} height={26 * 279 / 267} aria-hidden><path d={BLOB} fill="#E6E6E6" /><ellipse cx={106.5} cy={104.5} rx={22.5} ry={31} fill="#000" /><ellipse cx={169.5} cy={104.5} rx={22.5} ry={31} fill="#000" /></svg><span className="text-[17px] font-semibold tracking-[-0.03em]">Akno</span></span>
+      <span className="flex items-center gap-2.5" aria-label="Akno"><Blob c="#E6E6E6" s={26} /><span className="text-[17px] font-semibold tracking-[-0.03em]">Akno</span></span>
       <button onClick={() => onDone(true)} className="rounded-full px-3 py-1.5 text-[14px] font-medium text-white/55 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-white/60">Plus tard</button>
     </header>
     : <button onClick={() => onDone(true)} className="absolute right-5 top-[calc(env(safe-area-inset-top)+16px)] rounded-full px-2 py-1 text-[15px] text-white/50 transition-colors hover:text-white">Plus tard</button>}

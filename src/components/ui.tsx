@@ -1,18 +1,17 @@
 /* Système visuel partagé d'Akno (extrait d'AknoApp.tsx à l'update44, à l'identique)
    pour que les nouveaux écrans (Entreprise, Abonnement, Factures, Conformité, Demandes) gardent le même style. */
-import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react"
+import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react"
 import { motion, useReducedMotion } from "motion/react"
 import { PhoneCall, CalendarDays, Repeat2, Receipt, Search, X, ChevronRight } from "lucide-react"
-import { BLOB } from "./blobPath"
 import type { St } from "../lib/store"
 
 export type K = "rec" | "ag" | "rel" | "dev"
 export type P = K | "set"
 export const A = {
   rec: { n: "Réceptionniste", c: "#E6E6E6", tab: "Réception", I: PhoneCall, slug: "reception", d: "Décroche 24/7" },
-  ag: { n: "Agenda", c: "#FF7070", tab: "Agenda", I: CalendarDays, slug: "agenda", d: "Cale vos RDV" },
-  rel: { n: "Relance", c: "#5B1BE0", tab: "Relance", I: Repeat2, slug: "relance", d: "Avis et rappels" },
-  dev: { n: "Devis", c: "#0E8F8F", tab: "Devis", I: Receipt, slug: "devis", d: "Chiffre en direct" },
+  ag: { n: "Agenda", c: "#8B7CFF", tab: "Agenda", I: CalendarDays, slug: "agenda", d: "Cale vos RDV" },
+  rel: { n: "Relance", c: "#22B07A", tab: "Relance", I: Repeat2, slug: "relance", d: "Avis et rappels" },
+  dev: { n: "Devis", c: "#2F6BFF", tab: "Devis", I: Receipt, slug: "devis", d: "Chiffre en direct" },
 } as const
 
 export type Modal = { kind: "entreprise" | "abonnement" | "factures" | "conformite" | "leads" | "agendaCal" | "reception" | "sms" | "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "urgencePhone" | "clientReply" | "prestations" | "devisEditor"; data?: any } | null
@@ -26,7 +25,7 @@ export const setListen = (v: boolean) => { listenV = v; listenL.forEach(f => f()
 export const useListen = () => useSyncExternalStore(f => { listenL.add(f); return () => { listenL.delete(f) } }, () => listenV, () => false)
 const rnd = (a: number, b: number) => a + Math.random() * (b - a)
 // Yeux vivants : clignements aléatoires (parfois doubles) + regards/saccades autonomes. Pas de suivi du pointeur.
-export function Eyes({ small, wide }: { small: boolean; wide: boolean }) {
+export function Eyes({ small, wide, g = EYE0 }: { small: boolean; wide: boolean; g?: EyeG }) {
   const reduce = useReducedMotion(), [blink, setBlink] = useState(false), [look, setLook] = useState({ x: 0, y: 0 })
   useEffect(() => {
     if (reduce) return
@@ -42,9 +41,26 @@ export function Eyes({ small, wide }: { small: boolean; wide: boolean }) {
   const sy = blink ? .1 : wide ? 1.12 : 1, sx = wide && !blink ? 1.06 : 1
   return <motion.g animate={{ x: look.x, y: look.y }} transition={{ type: "spring", stiffness: 260, damping: 20, mass: .6 }}>
     <motion.g style={{ transformBox: "fill-box", transformOrigin: "center" }} animate={{ scaleY: sy, scaleX: sx }} transition={blink ? { duration: .06, ease: "easeIn" } : { type: "spring", stiffness: 500, damping: 30 }}>
-      <ellipse cx={106.5} cy={104.5} rx={22.5} ry={31} fill="#000" /><ellipse cx={169.5} cy={104.5} rx={22.5} ry={31} fill="#000" /></motion.g></motion.g>
+      <ellipse cx={g.l} cy={g.y} rx={g.rx} ry={g.ry} fill="#000" /><ellipse cx={g.r} cy={g.y} rx={g.rx} ry={g.ry} fill="#000" /></motion.g></motion.g>
 }
-export const Blob = ({ c, s }: { c: string; s: number }) => { const l = useListen(); return <svg viewBox="0 0 267 279" width={s} height={s * 279 / 267}><path d={BLOB} fill={c} /><Eyes small={s < 60} wide={l && s >= 60 && c === A.rec.c} /></svg> }
+// Mascottes 3D (update54) : sphère à dégradé maillé animé (CSS pur, transform uniquement) + reflet + ombrage. Styles dans index.css (.orb).
+type EyeG = { l: number; r: number; y: number; rx: number; ry: number }
+const EYE0: EyeG = { l: 106.5, r: 169.5, y: 104.5, rx: 22.5, ry: 31 }
+export const orbEyes = (s: number): EyeG => s < 30 ? { l: 106, r: 168, y: 118, rx: 18, ry: 36 } : { l: 109, r: 165, y: 117, rx: 14.5, ry: 31 }
+// [fond, tache 1..4] par couleur d'agent ; delay = décalage pour désynchroniser les agents
+const ORB: Record<string, { p: string[]; d: number }> = {
+  "#2F6BFF": { p: ["#0B2AA8", "#061A86", "#2F6EEA", "#A9BEEA", "#1A47D8"], d: 0 },
+  "#8B7CFF": { p: ["#8A7DF4", "#5F63EC", "#F5A3D3", "#F4E2B8", "#B7A2FF"], d: -7 },
+  "#22B07A": { p: ["#1E8C5E", "#0B6544", "#7AD9AA", "#ECE59E", "#2EAA72"], d: -13 },
+  "#E6E6E6": { p: ["#ECECEF", "#FFFFFF", "#CFCFD6", "#E6CEF6", "#F8DFC4"], d: -4 },
+}
+export function Orb({ c, s, children }: { c: string; s: number; children?: React.ReactNode }) {
+  const o = ORB[c] || { p: [c, c, "#FFFFFF99", c, c], d: -2 }
+  const v = { width: s, height: s, "--o0": o.p[0], "--o1": o.p[1], "--o2": o.p[2], "--o3": o.p[3], "--o4": o.p[4], "--od": `${o.d}s`, "--os": `${Math.max(1, s * .06)}px`, "--oa": c === "#E6E6E6" ? ".32" : ".55" } as React.CSSProperties
+  return <span aria-hidden className={`orb${s < 30 ? " orb-sm" : ""}`} style={v}><span className="orb-in"><span className="orb-rot"><i /><i /><i /><i /></span></span><span className="orb-sh" />
+    {children && <svg viewBox="0 0 267 267" width={s} height={s} className="orb-ey">{children}</svg>}</span>
+}
+export const Blob = ({ c, s }: { c: string; s: number }) => { const l = useListen(); return <Orb c={c} s={s}><Eyes small={s < 60} wide={l && s >= 60 && c === A.rec.c} g={orbEyes(s)} /></Orb> }
 
 export const GREEN = "#30D158", AMBER = "#FFB340", RED = "#FF5F57", GREY = "rgba(255,255,255,.3)"
 export const tx = { fig: "font-semibold leading-none tracking-[-0.04em]", title: "text-[17px] font-semibold tracking-[-0.02em]", body: "text-[15px] font-medium tracking-[-0.01em] text-white", cap: "text-[13px] text-white/50" }

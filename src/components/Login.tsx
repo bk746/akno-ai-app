@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { supabase } from "../lib/supabase"
-import { BLOB } from "./blobPath"
+import { Blob } from "./ui"
 import AuthScreen from "./auth/AuthScreen"
 
 const inp = "h-[52px] w-full rounded-[16px] bg-white/[.06] px-4 text-[16px] text-white outline-none placeholder:text-white/35 focus:bg-white/[.09] focus:ring-1 focus:ring-white/20"
@@ -25,7 +25,7 @@ export default function Login({ mode: m0 = "login", onDone }: { mode?: "login" |
   const sub = mode === "forgot" ? "Recevez un lien pour réinitialiser votre mot de passe" : "Choisissez un nouveau mot de passe"
   return <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-black px-6 text-white">
     <form onSubmit={go} method="post" action="#" className="w-full max-w-[360px]">
-      <svg viewBox="0 0 266 278" className="mx-auto mb-6 h-16 w-16" aria-hidden><path d={BLOB} fill="white" fillOpacity=".92" /></svg>
+      <div className="mb-6 flex justify-center"><Blob c="#E6E6E6" s={64} /></div>
       <h1 className="text-center text-[28px] font-semibold tracking-[-0.02em]">Akno</h1>
       <p className="mb-8 mt-1.5 text-center text-[15px] text-white/50">{sub}</p>
       <div className="space-y-2.5">
