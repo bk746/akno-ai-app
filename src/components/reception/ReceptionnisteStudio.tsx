@@ -1,12 +1,19 @@
 /* update57 · « Ma réceptionniste » : configurateur de la réceptionniste IA (voix Grok, accueil, ton, entreprise,
-   prestations, urgences, FAQ, consignes, prononciation). Même config pour l'appel test de l'app et le vrai téléphone. */
+   prestations, urgences, FAQ, consignes, prononciation). Même config pour l'appel test de l'app et le vrai téléphone.
+   update58 · mode « premier lancement » (prop setup) : le même configurateur, guidé étape par étape
+   (Voix → Accueil → Entreprise et prestations → Urgences et consignes → Appel test → Terminer). */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import { ArrowLeft, AudioLines, Building2, Check, ChevronDown, CircleHelp, Clock, Headphones, Info, LoaderCircle, MapPin, MessageSquareText, Pause, Phone, Play, Plus, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, Wrench } from "lucide-react"
+import { ArrowLeft, ArrowRight, AudioLines, Building2, Check, ChevronDown, ChevronLeft, CircleHelp, Clock, Headphones, Info, LoaderCircle, MapPin, MessageSquareText, Pause, Phone, Play, Plus, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, Wrench } from "lucide-react"
 import { Blob, Btn, Chip, GREEN, AMBER, GREY, inp, tx, useC } from "../ui"
 import { useProfile, type Profile } from "../../lib/profile"
 import { api } from "../../lib/accountApi"
 import { primeCallWakeLock } from "../../lib/voice/wakeLock"
+import { markSetupDone } from "../../lib/setup"
+import { mergeTarifs } from "../../lib/tarifs"
+import { digitsFr, fmtTel } from "../../lib/phone"
+import { Hours, ZONES, asHours, companyKey, companyOf, hoursErr, nearZone } from "../setup/SetupGate"
+import type { H } from "../sheets/ReglagesSheets"
 import { companyName, mergeProfile, welcomeLine, RECORDING_NOTICE, type VoiceProfile } from "../../lib/voice/script"
 import { DEFAULT_VOICE, LIMITS, SPEED_MAX, SPEED_MIN, VOICES, formatConfigForPrompt, formatHoraires, metierActivite, normalizeConfig, serializeConfig, starterServices, suggestedDefaults, voiceInfo, type Faq, type Pron, type ReceptionConfig, type Service, type VoiceInfo } from "../../lib/voice/receptionist"
 import VoiceCall from "../VoiceCall"
@@ -18,6 +25,21 @@ const SECTIONS: { id: SecId; l: string; I: typeof AudioLines }[] = [
   { id: "prestations", l: "Prestations", I: Wrench }, { id: "urgences", l: "Urgences et limites", I: ShieldCheck }, { id: "faq", l: "Questions fréquentes", I: CircleHelp },
   { id: "avance", l: "Consignes avancées", I: SlidersHorizontal },
 ]
+// update58 · étapes du premier lancement (chaque étape affiche les sections correspondantes du configurateur)
+type StepId = "voix" | "accueil" | "entreprise" | "urgences" | "test" | "fin"
+const STEPS: { id: StepId; l: string; I: typeof AudioLines; secs: SecId[]; skip?: boolean }[] = [
+  { id: "voix", l: "Sa voix", I: AudioLines, secs: ["voix"] },
+  { id: "accueil", l: "L'accueil", I: MessageSquareText, secs: ["accueil"] },
+  { id: "entreprise", l: "Entreprise et prestations", I: Building2, secs: ["entreprise", "prestations"], skip: true },
+  { id: "urgences", l: "Urgences et consignes", I: ShieldCheck, secs: ["urgences", "faq", "avance"], skip: true },
+  { id: "test", l: "Appel test", I: Phone, secs: [], skip: true },
+  { id: "fin", l: "Terminer", I: Check, secs: [] },
+]
+type SetupX = { nom: string; h: H; zone: number; urg: string }
+// Accueil pré-rempli : mention IA + enregistrement déjà incluses (rien n'est ajouté en double).
+const setupGreet = (nom: string) => `${nom.trim() || "Votre entreprise"}, bonjour ! Je suis l'assistante IA, cet appel peut être enregistré pour le suivi de votre demande. Comment puis-je vous aider ?`
+const sstr = (x: unknown) => typeof x === "string" ? x.trim() : ""
+
 const FAQ_IDEAS = ["Le devis est-il gratuit ?", "Intervenez-vous le week-end ?", "Êtes-vous assurés (décennale) ?", "Quels moyens de paiement acceptez-vous ?", "Quel est le délai pour un rendez-vous ?"]
 const GREET_IDEAS = (co: string) => [
   `${co}, bonjour ! Je suis l'assistante de l'entreprise, je prends votre demande.`,
@@ -90,12 +112,12 @@ const Suggest = ({ onClick, children }: { onClick: () => void; children: ReactNo
 const IconBtn = ({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) => <button type="button" aria-label={label} title={label} onClick={onClick} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/40 transition hover:bg-white/[.07] hover:text-[#FF9B96]">{children}</button>
 
 // ---------- Écran ----------
-export default function ReceptionnisteStudio({ close, onHoraires }: { close: () => void; onHoraires?: () => void }) {
+export default function ReceptionnisteStudio({ close, onHoraires, setup, onDone }: { close: () => void; onHoraires?: () => void; setup?: boolean; onDone?: () => void }) {
   const { p, save } = useProfile()
-  return <StudioView p={p} save={save} close={close} onHoraires={onHoraires} />
+  return <StudioView p={p} save={save} close={close} onHoraires={onHoraires} setup={setup} onDone={onDone} />
 }
 
-export function StudioView({ p, save, close, onHoraires, initialSection }: { p: Profile | null; save: (patch: Record<string, unknown>) => Promise<string>; close: () => void; onHoraires?: () => void; initialSection?: SecId }) {
+export function StudioView({ p, save, close, onHoraires, initialSection, setup, onDone, initialStep }: { setup?: boolean; onDone?: () => void; initialStep?: number; p: Profile | null; save: (patch: Record<string, unknown>) => Promise<string>; close: () => void; onHoraires?: () => void; initialSection?: SecId }) {
   const { toast, desk } = useC()
   const [cfg, setCfg] = useState<ReceptionConfig | null>(null)
   const [greet, setGreet] = useState("")
@@ -108,12 +130,25 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
   const [showPrompt, setShowPrompt] = useState(false), [askClose, setAskClose] = useState(false)
   const pv = usePreview()
   const scroller = useRef<HTMLDivElement | null>(null)
+  // update58 · premier lancement : étape courante + champs repris de l'ancien parcours (nom annoncé, horaires, zone, urgence)
+  const [step, setStep] = useState(initialStep || 0), [seen, setSeen] = useState(initialStep || 0)
+  const [sx, setSx] = useState<SetupX | null>(null), [sErr, setSErr] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!p || cfg) return
     const c = normalizeConfig(p.reception_config), g = String(p.message_accueil || "")
-    setCfg(c); setGreet(g); setBase(JSON.stringify([serializeConfig(c), g.trim()]))
-  }, [p, cfg])
+    setBase(JSON.stringify([serializeConfig(c), g.trim()]))
+    if (setup) {
+      // Valeurs pré-remplies : tout est déjà prêt, l'artisan n'a qu'à valider ou ajuster.
+      const t = mergeTarifs(p.tarifs), nom = companyOf(p), zone = nearZone(t.zoneKm)
+      const d = suggestedDefaults({ company: nom || "Votre entreprise", metier: String(p.entreprise_metier || ""), city: String(p.entreprise_cp_ville || ""), rayon: `${zone} km` })
+      setSx({ nom, h: asHours(p.horaires), zone, urg: fmtTel(digitsFr(sstr(p.telephone_urgence) || sstr(p.entreprise_telephone) || sstr(p.telephone))) })
+      setCfg({ ...c, presentation: c.presentation || d.presentation }); setGreet(g || setupGreet(nom))
+      return
+    }
+    setCfg(c); setGreet(g)
+  }, [p, cfg, setup])
+  useEffect(() => { scroller.current?.scrollTo({ top: 0 }) }, [step])
   useEffect(() => { if (initialSection) document.getElementById(`rs-${initialSection}`)?.scrollIntoView({ block: "start" }) }, [initialSection, cfg])
 
   // Section active (sommaire) selon le défilement
@@ -129,12 +164,14 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
   const migrated = !p || "reception_config" in p
   const c = cfg || normalizeConfig(null)
   const dirty = ready && JSON.stringify([serializeConfig(c), greet.trim()]) !== base
-  const prof = useMemo(() => profileFromArtisan(p, c, greet), [p, c, greet])
+  // En premier lancement, l'aperçu et l'appel test utilisent le brouillon (nom, horaires, zone) avant enregistrement.
+  const pd = useMemo<Profile | null>(() => !setup || !p || !sx ? p : { ...p, nom_entreprise: sx.nom.trim() || p.nom_entreprise, entreprise_nom: sx.nom.trim() || p.entreprise_nom, horaires: sx.h, telephone_urgence: digitsFr(sx.urg) || null, tarifs: { ...mergeTarifs(p.tarifs), zoneKm: sx.zone } }, [setup, p, sx])
+  const prof = useMemo(() => profileFromArtisan(pd, c, greet), [pd, c, greet])
   const co = prof.company
-  const sug = suggestedDefaults({ company: co, metier: String(p?.entreprise_metier || ""), city: String(p?.entreprise_cp_ville || ""), rayon: prof.rayon })
+  const sug = suggestedDefaults({ company: co, metier: String(pd?.entreprise_metier || ""), city: String(pd?.entreprise_cp_ville || ""), rayon: prof.rayon })
   const greeting = welcomeLine(prof)
   const voice = voiceInfo(c.voice)
-  const horaires = formatHoraires(p?.horaires) || "du lundi au vendredi de 8 h à 18 h"
+  const horaires = formatHoraires(pd?.horaires) || "du lundi au vendredi de 8 h à 18 h"
   const up = (patch: Partial<ReceptionConfig>) => setCfg({ ...c, ...patch })
   const list = VOICES.filter(v => filter === "all" ? true : filter === "reco" ? v.reco : v.gender === filter)
   const nc = useMemo(() => normalizeConfig(c), [c])
@@ -149,7 +186,50 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
     if (e) { setErr(e); return }
     setBase(JSON.stringify([serializeConfig(c), greet.trim()])); setSavedAt(Date.now()); toast("Réceptionniste enregistrée · active au prochain appel")
   }
-  const tryClose = () => { pv.stop(); if (dirty) setAskClose(true); else close() }
+  const tryClose = () => { pv.stop(); if (dirty || setup) setAskClose(true); else close() }
+
+  // ---------- update58 · premier lancement ----------
+  const cur = STEPS[step], lastStep = step === STEPS.length - 1
+  const show = (id: SecId) => !setup || cur.secs.includes(id)
+  const upX = (patch: Partial<SetupX>) => {
+    if (!sx) return
+    if (patch.nom !== undefined && p) {
+      // Tant que l'accueil et la présentation pré-remplis n'ont pas été retouchés, ils suivent le nom annoncé.
+      const pres = (n: string) => suggestedDefaults({ company: n.trim() || "Votre entreprise", metier: String(p.entreprise_metier || ""), city: String(p.entreprise_cp_ville || ""), rayon: `${sx.zone} km` }).presentation
+      if (greet === setupGreet(sx.nom)) setGreet(setupGreet(patch.nom))
+      if (c.presentation === pres(sx.nom)) up({ presentation: pres(patch.nom) })
+    }
+    setSx({ ...sx, ...patch }); setSErr({})
+  }
+  const checkStep = (i: number): Record<string, string> => {
+    if (!sx) return {}
+    const id = STEPS[i].id
+    if (id === "accueil" && !sx.nom.trim()) return { nom: "Indiquez le nom annoncé au téléphone." }
+    if (id === "entreprise") { const h = hoursErr(sx.h); if (h) return { h } }
+    if (id === "urgences" && sx.urg.trim() && digitsFr(sx.urg).length < 10) return { urg: "Numéro français à 10 chiffres, ou laissez vide." }
+    return {}
+  }
+  const goStep = (i: number) => { pv.stop(); setErr(""); setSErr({}); setStep(i); setSeen(v => Math.max(v, i)) }
+  const finish = async () => {
+    if (!p || !sx) return
+    if (!migrated) { setErr("La base n'est pas encore à jour (migration update57) : l'enregistrement sera possible juste après."); return }
+    // Revérifie les étapes passées : on renvoie vers la première à corriger.
+    for (let i = 0; i < STEPS.length; i++) { const e = checkStep(i); if (Object.keys(e).length) { goStep(i); setSErr(e); return } }
+    setBusy(true); setErr("")
+    const t = mergeTarifs(p.tarifs)
+    const e = await save({ [companyKey(p)]: sx.nom.trim(), message_accueil: greet.trim().slice(0, 300) || null, reception_config: serializeConfig(c), horaires: sx.h, telephone_urgence: digitsFr(sx.urg) || null, tarifs: mergeTarifs({ ...t, zoneKm: sx.zone }) })
+    if (e) { setBusy(false); setErr(e); return }
+    const e2 = await markSetupDone("rec")
+    setBusy(false)
+    if (e2) { setErr(e2); return }
+    onDone?.(); close()
+  }
+  const next = (skip = false) => {
+    if (lastStep) { void finish(); return }
+    const e = skip ? {} : checkStep(step)
+    if (Object.keys(e).length) { setSErr(e); return }
+    goStep(step + 1)
+  }
   const go = (id: SecId) => { setActive(id); document.getElementById(`rs-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }) }
   const listen = (id = c.voice) => void pv.play(id, greeting, c.speed, phoneSound)
   const startTest = () => { pv.stop(); primeCallWakeLock(); setTestOn(true) }
@@ -162,29 +242,33 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
 
   const preview = <PreviewCard voice={voice} greeting={greeting} custom={!!greet.trim()} speed={c.speed} tutoiement={c.tutoiement} pv={pv} onListen={() => listen()} onTest={startTest} score={score} phoneSound={phoneSound} setPhoneSound={setPhoneSound} compact={!desk} />
 
-  return <motion.div role="dialog" aria-modal="true" aria-label="Ma réceptionniste" className="fixed inset-0 z-[55] flex flex-col bg-[#0A0A0B] text-white" initial={{ opacity: 0, y: desk ? 0 : 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: desk ? 0 : 24 }} transition={{ duration: .32, ease: EASE }}>
+  return <motion.div role="dialog" aria-modal="true" aria-label={setup ? "Configurez votre réceptionniste" : "Ma réceptionniste"} className="fixed inset-0 z-[55] flex flex-col bg-[#0A0A0B] text-white" initial={{ opacity: 0, y: desk ? 0 : 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: desk ? 0 : 24 }} transition={{ duration: .32, ease: EASE }}>
     <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[420px]" style={{ background: "radial-gradient(60% 100% at 50% 0%, rgba(230,230,230,.08), transparent 70%)" }} />
     {/* En-tête */}
     <header className="relative z-10 shrink-0 border-b border-white/[.06] bg-[#0A0A0B]/80 backdrop-blur-xl" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       <div className={`mx-auto flex h-16 items-center gap-3 ${desk ? "max-w-[1240px] px-8" : "px-4"}`}>
         <button type="button" aria-label="Retour" onClick={tryClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/80 hover:text-white"><ArrowLeft size={19} strokeWidth={1.8} /></button>
-        <div className="min-w-0 flex-1"><div className="truncate text-[17px] font-semibold tracking-[-0.02em]">Ma réceptionniste</div><div className={`truncate ${tx.cap}`}>{dirty ? "Modifications non enregistrées" : savedAt ? "Enregistré · actif sur votre ligne" : `${co} · voix ${voice.name}`}</div></div>
-        {desk && <><Btn className="h-11" onClick={startTest}><Phone size={16} strokeWidth={1.9} />Tester</Btn><Btn primary className="h-11 min-w-[148px]" disabled={busy || !dirty || !migrated} onClick={submit}>{busy ? <LoaderCircle size={17} className="animate-spin" /> : savedAt && !dirty ? <Check size={17} strokeWidth={2.4} /> : null}{busy ? "Enregistrement" : savedAt && !dirty ? "Enregistré" : "Enregistrer"}</Btn></>}
+        <div className="min-w-0 flex-1"><div className="truncate text-[17px] font-semibold tracking-[-0.02em]">{setup ? "Configurez votre réceptionniste" : "Ma réceptionniste"}</div><div className={`truncate ${tx.cap}`}>{setup ? `Étape ${step + 1} sur ${STEPS.length} · ${cur.l}` : dirty ? "Modifications non enregistrées" : savedAt ? "Enregistré · actif sur votre ligne" : `${co} · voix ${voice.name}`}</div></div>
+        {desk && !setup && <><Btn className="h-11" onClick={startTest}><Phone size={16} strokeWidth={1.9} />Tester</Btn><Btn primary className="h-11 min-w-[148px]" disabled={busy || !dirty || !migrated} onClick={submit}>{busy ? <LoaderCircle size={17} className="animate-spin" /> : savedAt && !dirty ? <Check size={17} strokeWidth={2.4} /> : null}{busy ? "Enregistrement" : savedAt && !dirty ? "Enregistré" : "Enregistrer"}</Btn></>}
       </div>
-      {!desk && <nav aria-label="Sections" className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3">{SECTIONS.map(s => <button key={s.id} type="button" onClick={() => go(s.id)} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition ${active === s.id ? "bg-white text-black" : "bg-white/[.06] text-white/65"}`}>{doneMap[s.id] && active !== s.id && <span className="h-1.5 w-1.5 rounded-full bg-[#30D158]" />}{s.l}</button>)}</nav>}
+      {setup && <StepBar step={step} desk={desk} />}
+      {!desk && !setup && <nav aria-label="Sections" className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3">{SECTIONS.map(s => <button key={s.id} type="button" onClick={() => go(s.id)} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition ${active === s.id ? "bg-white text-black" : "bg-white/[.06] text-white/65"}`}>{doneMap[s.id] && active !== s.id && <span className="h-1.5 w-1.5 rounded-full bg-[#30D158]" />}{s.l}</button>)}</nav>}
     </header>
 
-    <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain" style={{ paddingBottom: desk ? 48 : "calc(108px + env(safe-area-inset-bottom))" }}>
+    <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain" style={{ paddingBottom: desk && !setup ? 48 : "calc(108px + env(safe-area-inset-bottom))" }}>
       {!ready ? <div className="flex h-60 items-center justify-center gap-2 text-white/50"><LoaderCircle size={18} className="animate-spin" />Chargement…</div> :
         <div className={`mx-auto ${desk ? "grid max-w-[1240px] grid-cols-[200px_minmax(0,1fr)_340px] gap-8 px-8 pt-8" : "px-4 pt-4"}`}>
-          {desk && <nav aria-label="Sections" className="sticky top-8 self-start"><div className={`mb-3 px-3 ${tx.cap}`}>Configuration</div>{SECTIONS.map(s => <button key={s.id} type="button" onClick={() => go(s.id)} className={`flex h-10 w-full items-center gap-2.5 rounded-[12px] px-3 text-left text-[14px] transition ${active === s.id ? "bg-white/[.08] text-white" : "text-white/55 hover:text-white"}`}><s.I size={16} strokeWidth={1.8} /><span className="flex-1 truncate">{s.l}</span>{doneMap[s.id] && <Check size={14} strokeWidth={2.4} className="text-[#30D158]" />}</button>)}
+          {desk && setup && <nav aria-label="Étapes" className="sticky top-8 self-start"><div className={`mb-3 px-3 ${tx.cap}`}>Premier lancement</div>{STEPS.map((s, i) => <button key={s.id} type="button" disabled={i > seen} aria-current={i === step ? "step" : undefined} onClick={() => goStep(i)} className={`flex h-10 w-full items-center gap-2.5 rounded-[12px] px-3 text-left text-[14px] transition disabled:cursor-default ${i === step ? "bg-white/[.08] text-white" : i <= seen ? "text-white/60 hover:text-white" : "text-white/25"}`}><span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums ${i < step ? "bg-[#30D158] text-black" : i === step ? "bg-white text-black" : "bg-white/[.08] text-white/45"}`}>{i < step ? <Check size={12} strokeWidth={3} /> : i + 1}</span><span className="flex-1 truncate">{s.l}</span></button>)}
+            <p className="mt-6 px-3 text-[12.5px] leading-[18px] text-white/40">Tout reste modifiable ensuite dans Paramètres → Ma réceptionniste.</p></nav>}
+          {desk && !setup && <nav aria-label="Sections" className="sticky top-8 self-start"><div className={`mb-3 px-3 ${tx.cap}`}>Configuration</div>{SECTIONS.map(s => <button key={s.id} type="button" onClick={() => go(s.id)} className={`flex h-10 w-full items-center gap-2.5 rounded-[12px] px-3 text-left text-[14px] transition ${active === s.id ? "bg-white/[.08] text-white" : "text-white/55 hover:text-white"}`}><s.I size={16} strokeWidth={1.8} /><span className="flex-1 truncate">{s.l}</span>{doneMap[s.id] && <Check size={14} strokeWidth={2.4} className="text-[#30D158]" />}</button>)}
             <div className="mt-6 px-3"><div className="flex items-center justify-between text-[12.5px] text-white/50"><span>Profil complété</span><span className="tabular-nums">{score}/7</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[.07]"><motion.div className="h-full rounded-full bg-white" animate={{ width: `${score / 7 * 100}%` }} transition={{ duration: .5, ease: EASE }} /></div></div></nav>}
 
           <div className="min-w-0 space-y-4 md:space-y-5">
-            {!desk && preview}
+            {setup && <StepIntro step={step} />}
+            {!desk && (!setup || step < 2) && preview}
             {!migrated && <div className="flex gap-3 rounded-[20px] border border-[#FFB340]/25 bg-[#FFB340]/[.08] p-4 text-[13.5px] leading-5 text-[#FFD08A]"><TriangleAlert size={18} className="mt-0.5 shrink-0" />La base de données n'est pas encore à jour (migration update57). Vous pouvez tout préparer et tester ; l'enregistrement sera possible dès qu'elle sera appliquée.</div>}
 
-            <Panel id="voix" I={AudioLines} title="Voix" sub="Écoutez et choisissez la voix qui décroche. Les 28 voix de Grok Voice parlent français." done>
+            {show("voix") && <Panel id="voix" I={AudioLines} title="Voix" sub="Écoutez et choisissez la voix qui décroche. Les 28 voix de Grok Voice parlent français." done>
               <Seg label="Filtre des voix" value={filter} onChange={setFilter} items={[["reco", "Conseillées"], ["female", "Femmes"], ["male", "Hommes"], ["all", `Toutes (${VOICES.length})`]]} />
               <motion.div layout className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 <AnimatePresence initial={false}>{list.map(v => { const sel = c.voice === v.id, st = pv.state?.id === v.id ? pv.state.phase : null
@@ -206,27 +290,30 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
                 <label className="flex cursor-pointer items-center gap-2.5 rounded-full bg-white/[.05] py-2 pl-3 pr-2 text-[13px] text-white/70"><Headphones size={15} />Écouter en qualité téléphone<button type="button" role="switch" aria-checked={phoneSound} onClick={() => setPhoneSound(!phoneSound)} className="relative h-[24px] w-[40px] rounded-full transition-colors" style={{ background: phoneSound ? "#2F7BFF" : "rgba(255,255,255,.14)" }}><span className="absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-all" style={{ left: phoneSound ? 19 : 3 }} /></button></label>
               </div>
               <p className={`mt-3 px-1 leading-[18px] ${tx.cap}`}>L'aperçu lit votre accueil avec la synthèse vocale xAI (même voix). En appel, la voix réagit en direct : testez-la avec « Tester ma réceptionniste ».</p>
-            </Panel>
+            </Panel>}
 
-            <Panel id="accueil" I={MessageSquareText} title="Accueil et ton" sub="La première phrase entendue par vos clients, et la façon de leur parler." done={doneMap.accueil}>
+            {show("accueil") && <Panel id="accueil" I={MessageSquareText} title="Accueil et ton" sub="La première phrase entendue par vos clients, et la façon de leur parler." done={doneMap.accueil}>
+              {setup && sx && <div className="mb-4"><Lbl l="Nom annoncé au téléphone" hint="Le nom que la réceptionniste prononce en décrochant."><input className={inp} maxLength={80} autoComplete="organization" aria-invalid={!!sErr.nom} placeholder="Ex. Martin Plomberie" value={sx.nom} onChange={e => upX({ nom: e.target.value })} /></Lbl>{sErr.nom && <p role="alert" className="mt-1.5 px-1 text-[12.5px] text-[#FF9B96]">{sErr.nom}</p>}</div>}
               <Lbl l="Message d'accueil" n={greet.length} max={300} hint={`Laissez vide pour l'accueil standard. « ${RECORDING_NOTICE} » est ajouté automatiquement s'il manque (RGPD), ainsi que la mention d'assistante IA.`}>
                 <textarea className={area} rows={3} maxLength={300} placeholder={welcomeLine({ ...prof, accueil: "" })} value={greet} onChange={e => setGreet(e.target.value)} /></Lbl>
               <div className="mt-3 flex flex-wrap gap-2">{GREET_IDEAS(co).map((g, i) => <Suggest key={i} onClick={() => setGreet(g)}>{["Chaleureux", "Chantier", "Sobre"][i]}</Suggest>)}</div>
               <div className="mt-5"><div className="mb-2 px-1 text-[13px] text-white/60">Ton avec les clients</div>
                 <Seg label="Ton" value={c.tutoiement ? "tu" : "vous"} onChange={v => up({ tutoiement: v === "tu" })} items={[["vous", "Vouvoiement · conseillé"], ["tu", "Tutoiement"]]} /></div>
-            </Panel>
+            </Panel>}
 
-            <Panel id="entreprise" I={Building2} title="Votre entreprise" sub="Ce que la réceptionniste répond quand on lui demande qui vous êtes et où vous intervenez." done={doneMap.entreprise}>
+            {show("entreprise") && <Panel id="entreprise" I={Building2} title="Votre entreprise" sub="Ce que la réceptionniste répond quand on lui demande qui vous êtes et où vous intervenez." done={doneMap.entreprise}>
               <div className="space-y-4">
                 <Lbl l="Présentation" n={c.presentation.length} max={LIMITS.presentation}><textarea className={area} rows={3} maxLength={LIMITS.presentation} placeholder={sug.presentation} value={c.presentation} onChange={e => up({ presentation: e.target.value })} /></Lbl>
                 {!c.presentation && <Suggest onClick={() => up({ presentation: sug.presentation })}>Utiliser la suggestion</Suggest>}
-                <Lbl l="Zone d'intervention" hint="Hors zone, la réceptionniste le dit poliment et prend le numéro."><div className="relative"><MapPin size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/35" /><input className={`${inp} pl-10`} maxLength={LIMITS.zone} placeholder={sug.zone} value={c.zone} onChange={e => up({ zone: e.target.value })} /></div></Lbl>
-                <div className="flex items-center gap-3 rounded-[16px] bg-white/[.04] px-4 py-3"><Clock size={16} className="shrink-0 text-white/45" /><div className="min-w-0 flex-1 text-[13.5px] leading-5 text-white/70">Horaires : {horaires}</div>{onHoraires && <button type="button" onClick={() => dirty ? toast("Enregistrez d'abord vos modifications") : onHoraires()} className="shrink-0 text-[13px] font-medium text-white/60 hover:text-white">Modifier</button>}</div>
+                {setup && sx && <div><div className="mb-2 px-1 text-[13px] text-white/60">Rayon d'intervention</div><Seg label="Rayon d'intervention" value={String(sx.zone)} onChange={v => upX({ zone: Number(v) })} items={ZONES.map(([z, l]) => [String(z), l] as [string, string])} /></div>}
+                <Lbl l={setup ? "Zone en clair (facultatif)" : "Zone d'intervention"} hint="Hors zone, la réceptionniste le dit poliment et prend le numéro."><div className="relative"><MapPin size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/35" /><input className={`${inp} pl-10`} maxLength={LIMITS.zone} placeholder={sug.zone} value={c.zone} onChange={e => up({ zone: e.target.value })} /></div></Lbl>
+                {setup && sx ? <div><div className="mb-2 flex items-center gap-2 px-1 text-[13px] text-white/60"><Clock size={14} className="text-white/45" />Vos horaires</div><Hours h={sx.h} set={h => upX({ h })} error={sErr.h} /></div> :
+                <div className="flex items-center gap-3 rounded-[16px] bg-white/[.04] px-4 py-3"><Clock size={16} className="shrink-0 text-white/45" /><div className="min-w-0 flex-1 text-[13.5px] leading-5 text-white/70">Horaires : {horaires}</div>{onHoraires && <button type="button" onClick={() => dirty ? toast("Enregistrez d'abord vos modifications") : onHoraires()} className="shrink-0 text-[13px] font-medium text-white/60 hover:text-white">Modifier</button>}</div>}
                 <Lbl l="Disponibilités et délais (facultatif)" n={c.disponibilites.length} max={LIMITS.disponibilites} hint="Ex. « Délai moyen d'une semaine, urgences traitées dans la journée. » Les créneaux proposés restent ceux de votre agenda."><textarea className={area} rows={2} maxLength={LIMITS.disponibilites} placeholder="Délai habituel, périodes de congés, intervention le samedi matin…" value={c.disponibilites} onChange={e => up({ disponibilites: e.target.value })} /></Lbl>
               </div>
-            </Panel>
+            </Panel>}
 
-            <Panel id="prestations" I={Wrench} title="Prestations" sub="Ce que vous faites (et donc ce que vous ne faites pas). Un prix indicatif peut être annoncé, jamais un autre." done={doneMap.prestations} aside={<span className={`shrink-0 text-[12.5px] tabular-nums ${tx.cap}`}>{nc.services.length}/{LIMITS.services}</span>}>
+            {show("prestations") && <Panel id="prestations" I={Wrench} title="Prestations" sub="Ce que vous faites (et donc ce que vous ne faites pas). Un prix indicatif peut être annoncé, jamais un autre." done={doneMap.prestations} aside={<span className={`shrink-0 text-[12.5px] tabular-nums ${tx.cap}`}>{nc.services.length}/{LIMITS.services}</span>}>
               <div className="space-y-2.5"><AnimatePresence initial={false}>{raw.services.map((s, i) => <motion.div key={i} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} className="rounded-[18px] bg-white/[.04] p-2.5">
                 <div className="flex items-center gap-2"><input aria-label="Prestation" className={`${inp} h-11 flex-1 bg-white/[.06]`} maxLength={LIMITS.nom} placeholder="Ex. Recherche de fuite" value={s.nom} onChange={e => setSvc(i, { nom: e.target.value })} /><IconBtn label="Supprimer la prestation" onClick={() => up({ services: c.services.filter((_, j) => j !== i) })}><Trash2 size={16} /></IconBtn></div>
                 <div className="mt-2 grid grid-cols-2 gap-2"><input aria-label="Prix indicatif" className={`${inp} h-10 bg-white/[.06] text-[14px]`} maxLength={LIMITS.prix} placeholder="Prix (ex. dès 89 €)" value={s.prix || ""} onChange={e => setSvc(i, { prix: e.target.value })} /><input aria-label="Durée" className={`${inp} h-10 bg-white/[.06] text-[14px]`} maxLength={LIMITS.duree} placeholder="Durée (ex. 1 h)" value={s.duree || ""} onChange={e => setSvc(i, { duree: e.target.value })} /></div>
@@ -236,27 +323,28 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
                 {!raw.services.length && <Suggest onClick={() => up({ services: starterServices(String(p?.entreprise_metier || "")) })}>Exemples {metierActivite(String(p?.entreprise_metier || "")) ? `en ${metierActivite(String(p?.entreprise_metier || ""))}` : "pour démarrer"}</Suggest>}
               </div>
               <p className={`mt-3 px-1 leading-[18px] ${tx.cap}`}>Vos frais fixes (déplacement, taux horaire) restent gérés dans Devis › Tarifs.</p>
-            </Panel>
+            </Panel>}
 
-            <Panel id="urgences" I={ShieldCheck} title="Urgences et limites" sub="Vos consignes en cas d'urgence, et ce que la réceptionniste ne doit jamais promettre." done={doneMap.urgences}>
+            {show("urgences") && <Panel id="urgences" I={ShieldCheck} title="Urgences et limites" sub="Vos consignes en cas d'urgence, et ce que la réceptionniste ne doit jamais promettre." done={doneMap.urgences}>
               <div className="space-y-4">
+                {setup && sx && <div><Lbl l="Numéro pour les urgences" hint="Donné au client seulement en cas d'urgence réelle. Vide : elle prend le message et vous prévient."><input className={inp} type="tel" inputMode="tel" autoComplete="tel" aria-invalid={!!sErr.urg} placeholder="06 12 34 56 78" value={sx.urg} onChange={e => upX({ urg: fmtTel(e.target.value) })} /></Lbl>{sErr.urg && <p role="alert" className="mt-1.5 px-1 text-[12.5px] text-[#FF9B96]">{sErr.urg}</p>}</div>}
                 <Lbl l="En cas d'urgence" n={c.urgences.length} max={LIMITS.urgences}><textarea className={area} rows={3} maxLength={LIMITS.urgences} placeholder={sug.urgences} value={c.urgences} onChange={e => up({ urgences: e.target.value })} /></Lbl>
                 <Lbl l="À ne jamais promettre ni dire" n={c.interdits.length} max={LIMITS.interdits}><textarea className={area} rows={3} maxLength={LIMITS.interdits} placeholder={sug.interdits} value={c.interdits} onChange={e => up({ interdits: e.target.value })} /></Lbl>
                 <div className="rounded-[18px] bg-white/[.035] p-4"><div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-white/75"><ShieldCheck size={15} className="text-[#30D158]" />Toujours actif, même sans réglage</div>
                   <ul className="space-y-1.5 text-[13px] leading-5 text-white/55">{["Gaz : couper, aérer, sortir, 112 et GRDF", "Annonce d'enregistrement (RGPD) et mention d'assistante IA", "Aucun prix de travaux ni créneau inventé, jamais de RIB", "Votre numéro d'urgence seulement en vraie urgence"].map(x => <li key={x} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-white/40" />{x}</li>)}</ul></div>
               </div>
-            </Panel>
+            </Panel>}
 
-            <Panel id="faq" I={CircleHelp} title="Questions fréquentes" sub="Les réponses que vous donneriez vous-même. Elle les reformule naturellement." done={doneMap.faq} aside={<span className={`shrink-0 text-[12.5px] tabular-nums ${tx.cap}`}>{nc.faq.length}/{LIMITS.faq}</span>}>
+            {show("faq") && <Panel id="faq" I={CircleHelp} title="Questions fréquentes" sub="Les réponses que vous donneriez vous-même. Elle les reformule naturellement." done={doneMap.faq} aside={<span className={`shrink-0 text-[12.5px] tabular-nums ${tx.cap}`}>{nc.faq.length}/{LIMITS.faq}</span>}>
               <div className="space-y-2.5"><AnimatePresence initial={false}>{raw.faq.map((f, i) => <motion.div key={i} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} className="rounded-[18px] bg-white/[.04] p-2.5">
                 <div className="flex items-center gap-2"><input aria-label="Question" className={`${inp} h-11 flex-1 bg-white/[.06] font-medium`} maxLength={LIMITS.q} placeholder="Question du client" value={f.q} onChange={e => setFaq(i, { q: e.target.value })} /><IconBtn label="Supprimer la question" onClick={() => up({ faq: raw.faq.filter((_, j) => j !== i) })}><Trash2 size={16} /></IconBtn></div>
                 <textarea aria-label="Réponse" className={`${area} mt-2 min-h-[72px] bg-white/[.06] text-[14px]`} rows={2} maxLength={LIMITS.r} placeholder="Votre réponse" value={f.r} onChange={e => setFaq(i, { r: e.target.value })} />
               </motion.div>)}</AnimatePresence></div>
               <div className="mt-3 flex flex-wrap gap-2"><Btn className="h-10 text-[14px]" disabled={raw.faq.length >= LIMITS.faq} onClick={() => up({ faq: [...raw.faq, { q: "", r: "" }] })}><Plus size={16} />Ajouter une question</Btn>
                 {FAQ_IDEAS.filter(q => !raw.faq.some(f => f.q === q)).slice(0, raw.faq.length ? 2 : 3).map(q => <Suggest key={q} onClick={() => up({ faq: [...raw.faq, { q, r: "" }] })}>{q}</Suggest>)}</div>
-            </Panel>
+            </Panel>}
 
-            <Panel id="avance" I={SlidersHorizontal} title="Consignes avancées" sub="Pour aller plus loin : consignes libres et prononciation des noms propres." done={doneMap.avance}>
+            {show("avance") && <Panel id="avance" I={SlidersHorizontal} title="Consignes avancées" sub="Pour aller plus loin : consignes libres et prononciation des noms propres." done={doneMap.avance}>
               <Lbl l="Consignes particulières" n={c.consignes.length} max={LIMITS.consignes} hint="Elles complètent le script Akno sans pouvoir désactiver les règles de sécurité."><textarea className={area} rows={4} maxLength={LIMITS.consignes} placeholder="Ex. Proposez toujours le contrat d'entretien aux clients qui appellent pour une chaudière. Les clients professionnels sont rappelés par Julie." value={c.consignes} onChange={e => up({ consignes: e.target.value })} /></Lbl>
               <div className="mt-5"><div className="mb-2 px-1 text-[13px] text-white/60">Prononciation</div>
                 <div className="space-y-2">{raw.prononciations.map((x, i) => <div key={i} className="flex items-center gap-2"><input aria-label="Mot écrit" className={`${inp} h-11 flex-1`} maxLength={LIMITS.mot} placeholder="Écrit (ex. Akno)" value={x.mot} onChange={e => setPron(i, { mot: e.target.value })} /><span className="text-white/35">→</span><input aria-label="Prononcé" className={`${inp} h-11 flex-1`} maxLength={LIMITS.dit} placeholder="Dit (ex. Ak-no)" value={x.dit} onChange={e => setPron(i, { dit: e.target.value })} /><IconBtn label="Supprimer" onClick={() => up({ prononciations: raw.prononciations.filter((_, j) => j !== i) })}><Trash2 size={16} /></IconBtn></div>)}</div>
@@ -264,7 +352,18 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
                 <p className={`mt-2 px-1 leading-[18px] ${tx.cap}`}>Pour un nom d'entreprise ou de rue mal prononcé. Seule la voix change, pas la transcription.</p></div>
               <button type="button" onClick={() => setShowPrompt(!showPrompt)} className="mt-5 flex w-full items-center gap-2 rounded-[16px] bg-white/[.04] px-4 py-3 text-left text-[13.5px] text-white/70 hover:bg-white/[.06]"><Info size={15} /><span className="flex-1">Ce que la réceptionniste sait de vous</span><ChevronDown size={16} className={`transition-transform ${showPrompt ? "rotate-180" : ""}`} /></button>
               <AnimatePresence initial={false}>{showPrompt && <motion.pre initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-2 max-h-[320px] overflow-auto whitespace-pre-wrap rounded-[16px] bg-black/40 p-4 font-mono text-[11.5px] leading-[18px] text-white/60">{formatConfigForPrompt(nc) || "Rien de personnalisé pour l'instant : le script Akno standard s'applique."}</motion.pre>}</AnimatePresence>
-            </Panel>
+            </Panel>}
+            {setup && cur.id === "test" && <TestStep voice={voice} greeting={greeting} pv={pv} onListen={() => listen()} onTest={startTest} />}
+            {setup && cur.id === "fin" && sx && <Recap rows={[
+              { I: AudioLines, l: "Voix", v: `${voice.name} · ${voice.tone}`, to: 0 },
+              { I: MessageSquareText, l: "Accueil", v: `« ${greeting} »`, to: 1 },
+              { I: Sparkles, l: "Ton", v: c.tutoiement ? "Tutoiement" : "Vouvoiement", to: 1 },
+              { I: Clock, l: "Horaires", v: horaires, to: 2 },
+              { I: MapPin, l: "Zone", v: nc.zone || `${sx.zone} km autour de ${prof.city.replace(/^\d{5}\s*/, "") || "chez vous"}`, to: 2 },
+              { I: Wrench, l: "Prestations", v: nc.services.length ? nc.services.map(x => x.nom).join(", ") : "Votre métier en général", to: 2 },
+              { I: ShieldCheck, l: "Urgences", v: sx.urg.trim() ? `Numéro d'urgence : ${sx.urg}` : "Elle prend le message et vous prévient", to: 3 },
+              { I: CircleHelp, l: "Questions fréquentes", v: nc.faq.length ? `${nc.faq.length} réponse${nc.faq.length > 1 ? "s" : ""} prête${nc.faq.length > 1 ? "s" : ""}` : "Aucune pour l'instant", to: 3 },
+            ]} onEdit={goStep} />}
             {err && <p role="alert" className="px-1 text-[13.5px] text-[#FF9B96]">{err}</p>}
           </div>
 
@@ -272,14 +371,60 @@ export function StudioView({ p, save, close, onHoraires, initialSection }: { p: 
         </div>}
     </div>
 
-    {!desk && ready && <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(10,10,11,0), rgba(10,10,11,.9) 26px, #0A0A0B 52px)" }}>
+    {setup && ready && <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(10,10,11,0), rgba(10,10,11,.9) 26px, #0A0A0B 52px)" }}>
+      <div className={`pointer-events-auto mx-auto flex items-center gap-2 ${desk ? "max-w-[1240px] justify-end px-4" : ""}`}>
+        {step > 0 && <Btn className="h-[52px] w-[52px] shrink-0 px-0" aria-label="Étape précédente" onClick={() => goStep(step - 1)}><ChevronLeft size={19} /></Btn>}
+        {cur.skip && <Btn className={`h-[52px] shrink-0 ${desk ? "px-6" : "px-4"}`} onClick={() => next(true)}>Passer</Btn>}
+        <Btn primary className={`h-[52px] ${desk ? "min-w-[220px]" : "flex-1"}`} disabled={busy} onClick={() => next()}>{busy ? <LoaderCircle size={17} className="animate-spin" /> : null}{busy ? "Activation…" : lastStep ? "Terminer et activer" : cur.id === "test" ? "Continuer" : "Continuer"}{!busy && !lastStep && <ArrowRight size={17} strokeWidth={2} />}{!busy && lastStep && <Check size={17} strokeWidth={2.4} />}</Btn>
+      </div></div>}
+    {!desk && !setup && ready && <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(10,10,11,0), rgba(10,10,11,.9) 26px, #0A0A0B 52px)" }}>
       <div className="pointer-events-auto flex gap-2"><Btn className="h-[52px] w-[52px] shrink-0 px-0" aria-label="Tester ma réceptionniste" onClick={startTest}><Phone size={18} /></Btn><Btn primary className="h-[52px] flex-1" disabled={busy || !dirty || !migrated} onClick={submit}>{busy ? <LoaderCircle size={17} className="animate-spin" /> : savedAt && !dirty ? <Check size={17} strokeWidth={2.4} /> : null}{busy ? "Enregistrement…" : savedAt && !dirty ? "Enregistré" : dirty ? "Enregistrer" : "Aucune modification"}</Btn></div></div>}
 
     <AnimatePresence>{askClose && <motion.div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/60 p-6 backdrop-blur-[2px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setAskClose(false)}>
-      <motion.div role="alertdialog" aria-label="Quitter sans enregistrer ?" onClick={e => e.stopPropagation()} initial={{ scale: .96 }} animate={{ scale: 1 }} className="w-full max-w-[360px] rounded-[24px] border border-white/[.08] bg-[#151517] p-6"><div className={tx.title}>Quitter sans enregistrer ?</div><p className={`mt-1.5 leading-5 ${tx.cap}`}>Vos modifications de la réceptionniste seront perdues.</p>
-        <div className="mt-5 flex gap-2"><Btn className="flex-1" onClick={() => { setAskClose(false); close() }}>Quitter</Btn><Btn primary className="flex-1" disabled={!migrated} onClick={async () => { setAskClose(false); await submit(); close() }}>Enregistrer</Btn></div></motion.div></motion.div>}</AnimatePresence>
-    {testOn && <VoiceCall fallback={{ company: co }} override={{ reception: nc, accueil: greet.trim().slice(0, 300) }} onDone={msg => { setTestOn(false); if (msg) toast(msg) }} />}
+      <motion.div role="alertdialog" aria-label="Quitter sans enregistrer ?" onClick={e => e.stopPropagation()} initial={{ scale: .96 }} animate={{ scale: 1 }} className="w-full max-w-[360px] rounded-[24px] border border-white/[.08] bg-[#151517] p-6"><div className={tx.title}>{setup ? "Quitter la configuration ?" : "Quitter sans enregistrer ?"}</div><p className={`mt-1.5 leading-5 ${tx.cap}`}>{setup ? "Vos choix ne sont pas encore enregistrés. Vous pourrez reprendre depuis la page Réception." : "Vos modifications de la réceptionniste seront perdues."}</p>
+        <div className="mt-5 flex gap-2"><Btn className="flex-1" onClick={() => { setAskClose(false); close() }}>Quitter</Btn>{setup ? <Btn primary className="flex-1" onClick={() => setAskClose(false)}>Continuer</Btn> : <Btn primary className="flex-1" disabled={!migrated} onClick={async () => { setAskClose(false); await submit(); close() }}>Enregistrer</Btn>}</div></motion.div></motion.div>}</AnimatePresence>
+    {testOn && <VoiceCall fallback={{ company: co }} override={setup ? { reception: nc, accueil: greet.trim().slice(0, 300), company: prof.company, horaires: prof.horaires, rayon: prof.rayon, tarifs: pd?.tarifs as VoiceProfile["tarifs"], telephoneUrgence: prof.telephoneUrgence } : { reception: nc, accueil: greet.trim().slice(0, 300) }} onDone={msg => { setTestOn(false); if (msg) toast(msg) }} />}
   </motion.div>
+}
+
+/* ---------- update58 · composants du premier lancement ---------- */
+function StepBar({ step, desk }: { step: number; desk: boolean }) {
+  return <div className={`mx-auto flex gap-1.5 pb-3 ${desk ? "max-w-[1240px] px-8" : "px-4"}`} aria-hidden>{STEPS.map((s, i) => <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/[.08]"><motion.div className="h-full rounded-full bg-white" initial={false} animate={{ width: i <= step ? "100%" : "0%" }} transition={{ duration: .4, ease: EASE }} /></div>)}</div>
+}
+
+const INTRO: Record<StepId, [string, string]> = {
+  voix: ["Choisissez sa voix", "Écoutez les voix conseillées et gardez celle qui vous ressemble. Elle décroche avec ce timbre sur votre vraie ligne."],
+  accueil: ["Comment elle décroche", "Le nom annoncé, la première phrase et le ton. Déjà pré-rempli : ajustez si besoin."],
+  entreprise: ["Votre entreprise", "Ce que vous faites, où et quand vous intervenez. Plus c'est précis, mieux elle répond."],
+  urgences: ["Urgences et consignes", "Ce qu'elle fait en cas d'urgence, ce qu'elle ne doit jamais promettre et vos réponses toutes prêtes."],
+  test: ["Essayez-la", "Appelez-la depuis l'application avec ces réglages, comme un client. Rien n'est envoyé à vos clients."],
+  fin: ["Tout est prêt", "Vérifiez le résumé puis activez-la. Vous pourrez tout modifier ensuite dans Paramètres."],
+}
+function StepIntro({ step }: { step: number }) {
+  const s = STEPS[step], [t, d] = INTRO[s.id]
+  return <div className="px-1 pt-1"><div className="text-[12px] font-medium uppercase tracking-[.08em] text-white/40">Étape {step + 1} sur {STEPS.length}</div><h2 className="mt-1 text-[24px] font-semibold leading-[30px] tracking-[-0.025em] md:text-[28px] md:leading-[34px]">{t}</h2><p className="mt-1.5 max-w-[560px] text-[14.5px] leading-[21px] text-white/55">{d}</p></div>
+}
+
+function TestStep({ voice, greeting, pv, onListen, onTest }: { voice: VoiceInfo; greeting: string; pv: ReturnType<typeof usePreview>; onListen: () => void; onTest: () => void }) {
+  const st = pv.state?.id === voice.id ? pv.state.phase : null
+  return <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-b from-[#1A1A1D] to-[#111113] px-6 py-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,.08)]">
+    <div aria-hidden className="pointer-events-none absolute left-1/2 top-0 h-64 w-64 -translate-x-1/2 -translate-y-1/3 rounded-full" style={{ background: `radial-gradient(circle, hsl(${hue(voice.id)} 70% 70% / .18), transparent 65%)` }} />
+    <div className="relative flex justify-center"><Blob c="#E6E6E6" s={88} /></div>
+    <div className="relative mt-4 text-[18px] font-semibold tracking-[-0.02em]">{voice.name} est prête à décrocher</div>
+    <p className="relative mx-auto mt-1.5 max-w-[420px] text-[14px] leading-[21px] text-white/55">« {greeting} »</p>
+    <div className="relative mx-auto mt-6 flex max-w-[360px] flex-col gap-2">
+      <Btn primary className="h-[52px]" onClick={onTest}><Phone size={17} strokeWidth={1.9} />Lancer l'appel test</Btn>
+      <Btn className="h-12" onClick={onListen}>{st === "load" ? <LoaderCircle size={16} className="animate-spin" /> : st === "play" ? <Pause size={16} /> : <Play size={16} />}{st === "play" ? "Arrêter" : "Écouter l'accueil"}</Btn>
+    </div>
+    <div className="relative mx-auto mt-6 grid max-w-[460px] gap-2 text-left text-[13px] leading-[19px] text-white/50">{["Jouez un client : « J'ai une fuite sous l'évier »", "Demandez un devis, un rendez-vous ou vos horaires", "Posez une de vos questions fréquentes"].map(x => <div key={x} className="flex gap-2 rounded-[14px] bg-white/[.04] px-3.5 py-2.5"><Check size={14} strokeWidth={2.4} className="mt-0.5 shrink-0 text-white/40" />{x}</div>)}</div>
+  </div>
+}
+
+function Recap({ rows, onEdit }: { rows: { I: typeof AudioLines; l: string; v: string; to: number }[]; onEdit: (i: number) => void }) {
+  return <div className="overflow-hidden rounded-[24px] bg-[#141416] shadow-[inset_0_1px_0_rgba(255,255,255,.06)]">{rows.map((r, i) => <div key={r.l} className={`flex items-start gap-3 px-4 py-3.5 md:px-5 ${i ? "border-t border-white/[.06]" : ""}`}>
+    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-white/[.06] text-white/70"><r.I size={16} strokeWidth={1.8} /></div>
+    <div className="min-w-0 flex-1"><div className="text-[12.5px] text-white/45">{r.l}</div><div className="mt-0.5 line-clamp-2 text-[14.5px] leading-[20px] text-white/90">{r.v}</div></div>
+    <button type="button" onClick={() => onEdit(r.to)} className="shrink-0 pt-0.5 text-[13px] font-medium text-white/55 hover:text-white">Modifier</button></div>)}</div>
 }
 
 function PreviewCard({ voice, greeting, custom, speed, tutoiement, pv, onListen, onTest, score, phoneSound, setPhoneSound, compact }: { voice: VoiceInfo; greeting: string; custom: boolean; speed: number; tutoiement: boolean; pv: ReturnType<typeof usePreview>; onListen: () => void; onTest: () => void; score: number; phoneSound: boolean; setPhoneSound: (b: boolean) => void; compact: boolean }) {

@@ -3,7 +3,7 @@
    et un mini-assistant en 2 ou 3 étapes. Une fois terminé : réglages enregistrés dans la fiche artisan
    (champs existants), page marquée configurée côté serveur (lib/setup.ts), le flou s'efface.
    Les comptes qui ont déjà de l'activité sur la page (appels, RDV, relances, devis) ne sont pas bloqués. */
-import { useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { Suspense, lazy, useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { ArrowRight, Check, ChevronLeft, X } from "lucide-react"
@@ -17,10 +17,13 @@ import { digitsFr, fmtTel } from "../../lib/phone"
 import { markSetupDone, setLockedPage, useSetupFlags } from "../../lib/setup"
 import type { St } from "../../lib/store"
 
+// update58 · Réceptionniste : la première configuration passe par le configurateur complet (mode « premier lancement »)
+const ReceptionnisteStudio = lazy(() => import("../reception/ReceptionnisteStudio"))
+
 /* ---------------- Textes ---------------- */
 const COPY: Record<K, { t: string; d: string; steps: string[]; done: string }> = {
   dev: { t: "Configurez vos devis", d: "Vos mentions légales, votre TVA et vos tarifs : Akno s'en sert pour préparer des devis conformes, prêts à envoyer.", steps: ["Mentions légales", "TVA et conditions", "Vos tarifs"], done: "Devis configurés" },
-  rec: { t: "Configurez votre réceptionniste", d: "Dites-lui comment présenter votre entreprise, quand vous êtes joignable et où vous joindre en cas d'urgence.", steps: ["Accueil", "Horaires", "Urgences et zone"], done: "Réceptionniste configurée" },
+  rec: { t: "Configurez votre réceptionniste", d: "Choisissez sa voix, son accueil et ce qu'elle sait de votre entreprise. Vous l'essayez avant de la mettre en ligne.", steps: ["Sa voix", "L'accueil", "Entreprise et prestations", "Urgences et consignes", "Un appel test"], done: "Réceptionniste configurée" },
   ag: { t: "Configurez votre agenda", d: "Vos horaires de travail et la durée de vos interventions, pour que chaque rendez-vous tombe au bon moment.", steps: ["Horaires", "Interventions"], done: "Agenda configuré" },
   rel: { t: "Configurez vos relances", d: "Choisissez quand relancer un devis resté sans réponse et au nom de qui partent les messages.", steps: ["Rythme", "Expéditeur"], done: "Relances configurées" },
 }
@@ -74,7 +77,9 @@ export default function SetupGate({ page, loading, mobile, children }: { page: P
       <div aria-hidden className="absolute inset-0" style={{ background: `radial-gradient(60% 50% at 50% 46%, ${c}${c === "#E6E6E6" ? "12" : "1F"} 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%)` }} />
       <motion.div className="relative flex w-full justify-center" animate={{ opacity: wiz ? 0 : 1, scale: wiz ? .98 : 1 }} transition={{ duration: .25, ease: EASE }}><Intro k={k} onStart={() => setWiz(true)} /></motion.div>
     </motion.div>}</AnimatePresence>
-    {createPortal(<AnimatePresence>{wiz && locked && k && <Wizard key={k} k={k} onClose={() => setWiz(false)} onDone={() => toast(COPY[k].done)} />}</AnimatePresence>, document.body)}
+    {createPortal(<AnimatePresence>{wiz && locked && k && (k === "rec"
+      ? <Suspense key="rec-studio" fallback={null}><ReceptionnisteStudio setup close={() => setWiz(false)} onDone={() => toast(COPY.rec.done)} /></Suspense>
+      : <Wizard key={k} k={k} onClose={() => setWiz(false)} onDone={() => toast(COPY[k].done)} />)}</AnimatePresence>, document.body)}
   </div>
 }
 
@@ -95,7 +100,7 @@ function Intro({ k, onStart }: { k: K; onStart: () => void }) {
       className="group/b relative mt-7 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-white text-[15.5px] font-semibold tracking-[-0.01em] text-black shadow-[0_10px_30px_-12px_rgba(255,255,255,.35)] transition-colors hover:bg-[#F2F2F2] focus-visible:outline-2 focus-visible:outline-offset-[3px] focus-visible:outline-white">
       Configurer<ArrowRight size={17} strokeWidth={2} className="transition-transform duration-200 group-hover/b:translate-x-0.5" />
     </motion.button>
-    <p className="relative mt-3 text-[12.5px] text-white/35">Environ {t.steps.length === 2 ? "1 minute" : "2 minutes"} · modifiable ensuite dans Paramètres</p>
+    <p className="relative mt-3 text-[12.5px] text-white/35">Environ {t.steps.length === 2 ? "1 minute" : t.steps.length > 3 ? "3 minutes" : "2 minutes"} · modifiable ensuite dans Paramètres</p>
   </motion.section>
 }
 
@@ -134,7 +139,7 @@ const PRESETS: [string, H][] = [
   ["Lun–sam, 8 h–18 h", { ...DEF_H, sam: ["08:00", "18:00"] }],
   ["Lun–ven, 7 h 30–17 h", { lun: ["07:30", "17:00"], mar: ["07:30", "17:00"], mer: ["07:30", "17:00"], jeu: ["07:30", "17:00"], ven: ["07:30", "17:00"], sam: null, dim: null }],
 ]
-function Hours({ h, set, error }: { h: H; set: (h: H) => void; error?: string }) {
+export function Hours({ h, set, error }: { h: H; set: (h: H) => void; error?: string }) {
   const same = (a: H, b: H) => DAYS.every(([d]) => JSON.stringify(a[d] || null) === JSON.stringify(b[d] || null))
   return <div>
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Horaires types">{PRESETS.map(([l, v]) => { const on = same(h, v); return <button key={l} type="button" aria-pressed={on} onClick={() => set({ ...v })}
@@ -150,13 +155,13 @@ function Hours({ h, set, error }: { h: H; set: (h: H) => void; error?: string })
     {error && <p className="mt-2 px-0.5 text-[12.5px] text-[#FF6B61]">{error}</p>}
   </div>
 }
-const hoursErr = (h: H) => { const v = DAYS.map(([d]) => h[d]).filter(Boolean) as [string, string][]; return !v.length ? "Ouvrez au moins un jour." : v.some(x => !x[0] || !x[1] || x[0] >= x[1]) ? "Une plage horaire se termine avant de commencer." : "" }
+export const hoursErr = (h: H) => { const v = DAYS.map(([d]) => h[d]).filter(Boolean) as [string, string][]; return !v.length ? "Ouvrez au moins un jour." : v.some(x => !x[0] || !x[1] || x[0] >= x[1]) ? "Une plage horaire se termine avant de commencer." : "" }
 const numF = (x: string) => { const t = x.trim().replace(",", "."); if (!t) return null; const n = Number(t); return Number.isFinite(n) ? n : NaN }
-const asHours = (raw: unknown): H => raw && typeof raw === "object" && !Array.isArray(raw) ? { ...DEF_H, ...(raw as H) } : { ...DEF_H }
-const companyKey = (p: Profile) => str(p.entreprise_nom) ? "entreprise_nom" : "nom_entreprise"
-const companyOf = (p: Profile) => str(p.entreprise_nom) || str(p.nom_entreprise)
-const ZONES: [number, string][] = [[10, "10 km"], [20, "20 km"], [30, "30 km"], [50, "50 km"], [80, "80 km"]]
-const nearZone = (z: number | null | undefined) => z == null ? 30 : ZONES.reduce((a, [v]) => Math.abs(v - z) < Math.abs(a - z) ? v : a, 30)
+export const asHours = (raw: unknown): H => raw && typeof raw === "object" && !Array.isArray(raw) ? { ...DEF_H, ...(raw as H) } : { ...DEF_H }
+export const companyKey = (p: Profile) => str(p.entreprise_nom) ? "entreprise_nom" : "nom_entreprise"
+export const companyOf = (p: Profile) => str(p.entreprise_nom) || str(p.nom_entreprise)
+export const ZONES: [number, string][] = [[10, "10 km"], [20, "20 km"], [30, "30 km"], [50, "50 km"], [80, "80 km"]]
+export const nearZone = (z: number | null | undefined) => z == null ? 30 : ZONES.reduce((a, [v]) => Math.abs(v - z) < Math.abs(a - z) ? v : a, 30)
 
 /* ---------------- Assistant ---------------- */
 type StepDef = { title: string; desc: string; body: ReactNode; check: () => Record<string, string> }
@@ -332,7 +337,7 @@ function MailPreview({ company, first }: { company: string; first: number }) {
 }
 
 /* ---------------- État du formulaire, pré-rempli ---------------- */
-const greet = (nom: string) => `${nom.trim() || "Votre entreprise"}, bonjour ! Je suis l'assistante de l'entreprise. Comment puis-je vous aider ?`
+export const greet = (nom: string) => `${nom.trim() || "Votre entreprise"}, bonjour ! Je suis l'assistante de l'entreprise. Comment puis-je vous aider ?`
 const relDelays = (raw: unknown) => { const a = Array.isArray(raw) ? [...new Set(raw.map(Number).filter(n => n >= 1 && n <= 60))].sort((x, y) => x - y).slice(0, 3) : []; return a.length ? a : [3, 7] }
 type V = { siret: string; nom: string; adresse: string; cpv: string; tvaNum: string; tvaNA: boolean; assureur: string; police: string; tva: number; validite: number; conditions: string; taux: string; depl: string; gratuit: boolean; msg: string; h: H; urg: string; zone: number; duree: number; delays: number[]; email: string; sms: boolean; sender: string }
 function initV(p: Profile, s: St): V {
