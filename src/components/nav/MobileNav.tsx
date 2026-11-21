@@ -29,6 +29,12 @@ const TILES: { k: CreateKind; l: string; I: typeof MapPin; p: P }[] = [
   { k: "chantier", l: "Nouveau chantier", I: MapPin, p: "ch" }, { k: "clients", l: "Clients", I: UserRound, p: "cl" }, { k: "equipe", l: "Équipe", I: Users, p: "eq" },
 ]
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
+/* update68 : la règle globale `button { transition: … opacity .2s, transform .15s }` (index.css, hors @layer donc plus forte
+   que `transition-colors`) s'appliquait aussi aux tuiles animées par motion. Sur WebKit (Safari / PWA iPhone), quand
+   l'animation WAAPI de motion se termine, la valeur finale est écrite en style inline et WebKit lance alors une
+   transition CSS depuis l'état de départ (opacité 0, y 14) : les tuiles disparaissaient puis réapparaissaient.
+   Les tuiles ne gardent donc que les transitions de couleur ; opacité/transform restent pilotés par motion seul. */
+const TILE_NO_CSS_TR = { transitionProperty: "color, background-color, border-color" } as const
 const TILE_V = { h: { opacity: 0, y: 14, scale: .96 }, s: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, stiffness: 500, damping: 34 } } }
 const BAR_BOTTOM = "max(calc(var(--sab) - 10px), 12px)"
 
@@ -109,7 +115,7 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate, onInte
       <div aria-hidden className="mx-auto h-[5px] w-9 rounded-full bg-white/20" />
       <h2 id="cr-title" className="mt-4 px-1 text-[20px] font-semibold tracking-[-0.02em]">Créer</h2>
       <motion.div className="mt-4 grid grid-cols-3 gap-2.5" initial="h" animate="s" variants={{ h: {}, s: { transition: { staggerChildren: .045, delayChildren: .05 } } }}>
-        {TILES.map(x => <motion.button key={x.k} type="button" onClick={() => pick(x.k)} variants={TILE_V} whileTap={{ scale: .95 }}
+        {TILES.map(x => <motion.button key={x.k} type="button" onClick={() => pick(x.k)} variants={TILE_V} whileTap={{ scale: .95 }} style={TILE_NO_CSS_TR}
           className="flex h-[104px] flex-col items-center justify-center gap-2.5 rounded-[20px] border border-white/[.05] bg-white/[.06] px-2 text-center text-[13.5px] font-medium leading-[1.2] text-white outline-none transition-colors [-webkit-tap-highlight-color:transparent] hover:bg-white/[.09] focus-visible:ring-2 focus-visible:ring-white/40">
           <x.I size={22} strokeWidth={1.75} aria-hidden />{x.l}
         </motion.button>)}
