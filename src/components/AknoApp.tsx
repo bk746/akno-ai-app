@@ -23,7 +23,7 @@ import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } 
 import { useLocation, useNavigate } from "react-router-dom"
 import { Component, Suspense, lazy, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
-import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck, Package, FilePen } from "lucide-react"
+import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, HardHat, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck, Package, FilePen } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
 import { mergeTarifs, tarifsSummary } from "../lib/tarifs"
@@ -42,6 +42,10 @@ import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from
 import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, isK, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
 // update45 : déclaré après les imports (sinon « Cannot access lazy before initialization » en mode dev Vite)
 const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
+// update64 · Chantiers (carte Leaflet) et Équipe : chargés à la demande, hors bundle principal
+const ChantiersPage = lazy(() => import("./chantiers/ChantiersPage"))
+const EquipeSheet = lazy(() => import("./chantiers/EquipeSheet"))
+import { loadChantiers, requestNewChantier, useChantiers } from "../lib/chantiers"
 // update57 · configurateur « Ma réceptionniste » (chargé à la demande)
 const ReceptionnisteStudio = lazy(() => import("./reception/ReceptionnisteStudio"))
 import UpdateButton from "./UpdateButton"
@@ -573,24 +577,15 @@ function DocSwitch({ mode }: { mode: "dev" | "fac" }) {
       {on && <motion.span layoutId="doc-seg" transition={spring} className="absolute inset-0 rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,.10)]" style={{ background: `linear-gradient(180deg, ${A.dev.c}55, ${A.dev.c}33)` }} />}<span className="relative">{l}</span></motion.button> })}
   </div>
 }
-/* ---------------- update62 · Chantiers (page d'attente, aucun contenu encore) ---------------- */
+/* ---------------- update64 · Chantiers : carte satellite, carrousel, fiche, création (page chargée à la demande) ---------------- */
 function ChP() {
-  const { desk } = useC()
-  const empty = <motion.div variants={rise} className="flex flex-1 flex-col items-center justify-center px-8 pb-10 text-center">
-    <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: "radial-gradient(circle, rgba(255,255,255,.08) 0%, transparent 62%)" }} />
-      <span className="relative flex h-[88px] w-[88px] items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.14)]"><MapPin size={34} strokeWidth={1.5} /></span></div>
-    <p className="mt-6 text-[17px] font-semibold tracking-[-0.01em] text-white/90">Bientôt : la carte de vos chantiers</p>
-    <p className={`mt-2 max-w-[280px] ${tx.cap}`}>Retrouvez ici chaque chantier, son adresse et son avancement.</p>
-  </motion.div>
-  if (desk) return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .04 } } }} className="flex h-full flex-col px-8 pt-8"><motion.h1 variants={rise} className="text-[32px] font-semibold tracking-[-0.03em]">Chantiers</motion.h1>{empty}</motion.div>
-  return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .04 } } }} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-    <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
-    <MobileHead />
-    <motion.h1 variants={rise} className="mt-6 px-5 text-[32px] font-semibold leading-none tracking-[-0.03em]">Chantiers</motion.h1>
-    {empty}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
+  const { s } = useC()
+  return <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center bg-[#0b0d0c]"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white/15 border-t-white/60" /></div>}><ChantiersPage me={<Me size={30} />} clients={ctInfos(s)} /></Suspense>
 }
 function SetP() {
   const { s, set, desk, toast, modal, go } = useC(), st = s.settings, presta = usePrestations()
+  const chS = useChantiers(), equipeN = chS.employes.length // update64 · Réglages → Équipe
+  useEffect(() => { if (!chS.ready) void loadChantiers() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const uidL: string = (window as any).__aknoUid || "", lk = hasLock(uidL), [bio, setBio] = useState(() => !!getLock(uidL)?.cred), [canBio, setCanBio] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [testBusy, setTestBusy] = useState(false)
@@ -649,7 +644,7 @@ function SetP() {
     { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => recLock ? openUpgrade("reception") : modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
-      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => modal({ kind: "contacts" })} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
+      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => modal({ kind: "contacts" })} /><S I={HardHat} l="Équipe" v={equipeN ? `${equipeN} personne${equipeN > 1 ? "s" : ""}` : ""} onClick={() => modal({ kind: "equipe" })} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><Row first label="Ma réceptionniste" onClick={() => modal({ kind: "studio" })} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Ma réceptionniste" s={`Voix ${voiceInfo(prof?.reception_config?.voice).name} · script, prestations, FAQ`} r={<Chev />} /><S I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
@@ -978,6 +973,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "pw") return <PwSheet close={close} />
   if (m.kind === "entreprise") return <EntrepriseSheet close={close} />
   if (m.kind === "abonnement") return <AbonnementSheet close={close} />
+  if (m.kind === "equipe") return <Suspense fallback={null}><AnimatePresence><EquipeSheet key="eq" desk={desk} close={close} /></AnimatePresence></Suspense>
   if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} startNew={!!d?.create} clients={ctInfos(s)} /></Suspense>
   if (m.kind === "conformite") return <ConformiteSheet close={close} />
   if (m.kind === "leads") return rr.clients ? <LeadsSheet close={close} /> : null
@@ -1182,6 +1178,7 @@ function AknoApp() {
     else if (k === "devis") modal({ kind: "devis" })
     else if (k === "facture") modal({ kind: "factures", data: { create: true } })
     else if (k === "contact") modal({ kind: "contacts" })
+    else if (k === "chantier") { requestNewChantier(); go("ch") }
     else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
   }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }

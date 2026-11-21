@@ -256,3 +256,25 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .kb-hide { transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .18s ease; }
 .kb-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .kb-hide { transition: none; } }
+
+/* update64 · Carte des chantiers (Leaflet) */
+.ch-map { position: absolute; inset: 0; z-index: 0; isolation: isolate; background: #0b0d0c; touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.ch-map .leaflet-container, .ch-map.leaflet-container { background: #0b0d0c; font: inherit; outline: none; }
+.ch-map[data-layer="plan"] { background: #111214; }
+.ch-pin { background: none !important; border: 0 !important; }
+.ch-dot { display: block; width: 14px; height: 14px; margin: 4px; border-radius: 999px; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.45); transition: transform .18s cubic-bezier(.2,.8,.2,1); }
+.ch-pin:active .ch-dot { transform: scale(.85); }
+.ch-big { position: absolute; left: 0; top: 0; width: 48px; height: 48px; border-radius: 999px; background: #fff; padding: 3px; box-shadow: 0 8px 22px rgba(0,0,0,.45); animation: ch-pop .42s cubic-bezier(.2,1.4,.4,1) both; }
+.ch-big::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 12px; height: 12px; background: #fff; transform: translateX(-50%) rotate(45deg); border-radius: 2px; z-index: -1; }
+.ch-big-in { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; border-radius: 999px; background: var(--c); }
+.ch-label { position: absolute; left: 50%; top: 62px; transform: translateX(-50%); max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 10px; border-radius: 9px; background: rgba(28,28,30,.82); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: #fff; font-size: 12.5px; font-weight: 500; line-height: 1.2; box-shadow: 0 4px 14px rgba(0,0,0,.35); pointer-events: none; animation: ch-fade .3s ease both .08s; }
+.ch-drop { animation: ch-drop .5s cubic-bezier(.2,1.3,.4,1) both; }
+.ch-me { position: relative; display: block; width: 16px; height: 16px; margin: 3px; border-radius: 999px; background: #2F7BFF; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+.ch-me-halo { position: absolute; inset: -12px; border-radius: 999px; background: rgba(47,123,255,.25); animation: ch-halo 2.2s ease-out infinite; z-index: -1; }
+@keyframes ch-pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes ch-fade { from { opacity: 0; transform: translateX(-50%) translateY(-3px); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes ch-drop { from { transform: translateY(-36px) scale(.8); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes ch-halo { 0% { transform: scale(.5); opacity: .9; } 100% { transform: scale(1.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ch-big, .ch-label, .ch-drop, .ch-me-halo { animation: none !important; } }
+.ch-carousel { scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.ch-carousel::-webkit-scrollbar { display: none; }

@@ -10,7 +10,8 @@
     "test:assistant": "esbuild scripts/test-assistant.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test.mjs --log-level=warning && node /tmp/akno-test.mjs",
     "test:twilio": "esbuild scripts/test-twilio.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-twilio.mjs --log-level=warning && node /tmp/akno-test-twilio.mjs",
     "test:receptionist": "esbuild scripts/test-receptionist.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-receptionist.mjs --log-level=warning && node /tmp/akno-test-receptionist.mjs",
-    "test:factures": "esbuild scripts/test-factures.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-factures.mjs --log-level=warning && node /tmp/akno-test-factures.mjs"
+    "test:factures": "esbuild scripts/test-factures.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-factures.mjs --log-level=warning && node /tmp/akno-test-factures.mjs",
+    "test:chantiers": "esbuild scripts/test-chantiers.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-chantiers.mjs --log-level=warning && node /tmp/akno-test-chantiers.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -20,6 +21,7 @@
     "@supabase/supabase-js": "^2.109.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.67.0",
     "motion": "^14.9.0",
     "pdf-lib": "^1.17.1",
@@ -30,6 +32,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.4",
+    "@types/leaflet": "^1.9.22",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/web-push": "^3.6.4",

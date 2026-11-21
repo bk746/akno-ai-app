@@ -110,8 +110,38 @@ INSERT INTO public.devis_modeles (artisan_id, nom, lignes) VALUES ('aaaaaaaa-000
 INSERT INTO public.client_fiches (artisan_id, cle, nom, notes) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'client a', 'Client A', 'Code portail 1234');
 INSERT INTO results SELECT 'u61_modele_et_fiche_crees', (SELECT count(*) FROM public.devis_modeles) = 1 AND (SELECT count(*) FROM public.client_fiches) = 1;
 
+-- ===== update64 : chantiers, équipe, affectations =====
+INSERT INTO public.employes (artisan_id, first_name, role) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Julien', 'Chef de chantier');
+INSERT INTO public.chantiers (artisan_id, title, status, start_date, end_date, lat, lng) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Salle de bain A', 'in_progress', '2026-11-18', '2026-11-29', 45.91, 6.12);
+INSERT INTO public.chantier_employes (chantier_id, employe_id, artisan_id) SELECT c.id, e.id, c.artisan_id FROM public.chantiers c, public.employes e;
+INSERT INTO results SELECT 'u64_chantier_equipe_crees', (SELECT count(*) FROM public.chantier_employes) = 1;
+UPDATE public.chantiers SET notes = 'x', updated_at = '2000-01-01' WHERE title = 'Salle de bain A';
+INSERT INTO results SELECT 'u64_updated_at_auto', updated_at > '2001-01-01' FROM public.chantiers WHERE title = 'Salle de bain A';
+DO $$ BEGIN
+  BEGIN
+    INSERT INTO public.chantiers (artisan_id, title, start_date, end_date) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Dates', '2026-12-10', '2026-12-01');
+    INSERT INTO results VALUES ('u64_dates_coherentes', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u64_dates_coherentes', true);
+  END;
+END $$;
 -- ===== Artisan B =====
 SELECT set_config('request.jwt.claims', '{"sub":"bbbbbbbb-0000-0000-0000-000000000002","role":"authenticated"}', false);
+INSERT INTO results SELECT 'u64_B_ne_voit_pas_chantiers_A', count(*) = 0 FROM public.chantiers;
+INSERT INTO results SELECT 'u64_B_ne_voit_pas_equipe_A', (SELECT count(*) FROM public.employes) = 0 AND (SELECT count(*) FROM public.chantier_employes) = 0;
+INSERT INTO public.employes (artisan_id, first_name) VALUES ('bbbbbbbb-0000-0000-0000-000000000002', 'Bob');
+DO $$ BEGIN
+  BEGIN
+    INSERT INTO public.chantiers (artisan_id, title) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Intrus');
+    INSERT INTO results VALUES ('u64_chantier_chez_autrui_refuse', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u64_chantier_chez_autrui_refuse', true);
+  END;
+  BEGIN
+    INSERT INTO public.chantier_employes (chantier_id, employe_id, artisan_id) SELECT (SELECT id FROM public.chantiers LIMIT 1), id, 'bbbbbbbb-0000-0000-0000-000000000002' FROM public.employes;
+    INSERT INTO results SELECT 'u64_affectation_autrui_refusee', false;
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u64_affectation_autrui_refusee', true);
+  END;
+END $$;
+UPDATE public.chantiers SET title = 'pirate';
 INSERT INTO results SELECT 'B_ne_voit_pas_calls_A', count(*) = 0 FROM public.calls;
 INSERT INTO results SELECT 'B_ne_voit_pas_devis_A', count(*) = 0 FROM public.devis;
 INSERT INTO results SELECT 'B_ne_voit_pas_factures_A', count(*) = 0 FROM public.factures;
@@ -169,6 +199,7 @@ INSERT INTO public.signature_events (artisan_id, devis_id, event, event_hash) SE
 DELETE FROM public.devis WHERE client_nom = 'Client Z';
 INSERT INTO results SELECT 'u61_devis_non_signe_supprimable', NOT EXISTS (SELECT 1 FROM public.devis WHERE client_nom = 'Client Z') AND NOT EXISTS (SELECT 1 FROM public.signature_events WHERE event = 'envoi');
 INSERT INTO results SELECT 'A_intact_apres_B', count(*) = 1 FROM public.calls WHERE nom_client = 'Client A';
+INSERT INTO results SELECT 'u64_A_chantier_intact', count(*) = 1 FROM public.chantiers WHERE title = 'Salle de bain A';
 INSERT INTO results SELECT 'A_devis_intacts', count(*) = 2 FROM public.devis;
 INSERT INTO results SELECT 'minutes_comptees', count = 120 FROM public.usage_counters WHERE metric = 'voice_seconds';
 SELECT test, ok FROM results ORDER BY ok, test;
