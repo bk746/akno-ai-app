@@ -21,7 +21,7 @@ export function AvatarStack({ team, max = 3, size = 26 }: { team: Employe[]; max
   const shown = team.slice(0, max), more = team.length - shown.length
   return <span className="flex items-center" aria-label={`Équipe : ${team.map(empName).join(", ")}`}>
     {shown.map((e, i) => <span key={e.id} style={{ marginLeft: i ? -size * .3 : 0, zIndex: 10 - i }}><EmpAvatar e={e} size={size} ring /></span>)}
-    {more > 0 && <span className="flex items-center justify-center rounded-full bg-[#3A3A3D] text-[11px] font-semibold text-white ring-2 ring-[#232326]" style={{ width: size, height: size, marginLeft: -size * .3 }}>+{more}</span>}
+    {more > 0 && <span className="flex items-center justify-center rounded-full bg-[#3A3A3D] text-[11px] font-semibold text-white ring-2 ring-[#232326]" style={{ width: size, height: size, marginLeft: -size * .3, zIndex: 11 }}>+{more}</span>}
   </span>
 }
 export const StatusHead = ({ c, long }: { c: Chantier; long?: boolean }) => { const st = effectiveStatus(c); return <div className="flex min-w-0 items-center gap-1.5 text-[13px]">

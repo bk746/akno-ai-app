@@ -9,6 +9,8 @@ export type FactureLite = {
   id: string; numero: string | null; type: FType; statut: string; client_nom: string | null; objet?: string | null
   lignes: FLine[] | null; acompte_deduit?: number | null; retenue_garantie_pct?: number | null; autoliquidation?: boolean | null
   situation_numero?: number | null; date_emission?: string | null; date_echeance?: string | null; created_at?: string | null
+  // update66 · carnet d'adresses (CA, historique, documents)
+  total_ttc?: number | null; devis_id?: string | null; envoyee_le?: string | null; payee_le?: string | null; client_telephone?: string | null
 }
 type State = { rows: FactureLite[] | null; error: boolean }
 let state: State = { rows: null, error: false }
@@ -30,7 +32,7 @@ export function refreshFactures(): Promise<void> {
       const uid = session?.user.id
       if (!uid) return
       const { data, error } = await supabase.from("factures")
-        .select("id, numero, type, statut, client_nom, objet, lignes, acompte_deduit, retenue_garantie_pct, autoliquidation, situation_numero, date_emission, date_echeance, created_at")
+        .select("id, numero, type, statut, client_nom, objet, lignes, acompte_deduit, retenue_garantie_pct, autoliquidation, situation_numero, date_emission, date_echeance, created_at, total_ttc, devis_id, envoyee_le, payee_le, client_telephone")
         .eq("artisan_id", uid).order("created_at", { ascending: false }).limit(300)
       if (error) emit({ rows: state.rows || [], error: true })
       else emit({ rows: (data || []) as FactureLite[], error: false })

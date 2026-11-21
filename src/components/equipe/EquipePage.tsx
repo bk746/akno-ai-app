@@ -6,6 +6,7 @@ import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Check, ChevronLeft, ChevronRight, Loader2, Mail, MessageSquare, Phone, Plus, Search, Users, X } from "lucide-react"
 import { useC } from "../ui"
+import { SatThumb } from "../SatThumb"
 import { MemberForm } from "../chantiers/EquipeSheet"
 import { Bar, EmpAvatar } from "../chantiers/parts"
 import { inviteEmploye, loadChantiers, requestOpenChantier, setAccess, useChantiers, type Chantier, type Employe } from "../../lib/chantiers"
@@ -15,19 +16,6 @@ import { ROLE_LABEL, cityOf, entryDate, frPhone, groupTeam, initialsOf, invitedA
 const NAV = "calc(92px + max(var(--sab) - 10px, 12px))"
 const PUSH = { type: "spring" as const, stiffness: 420, damping: 40, mass: .9 }
 const card = "rounded-[16px] bg-white/[.07]"
-
-/* ---------- vignette satellite (tuiles Esri, sans clé) centrée sur le chantier, avec le repère ---------- */
-export function SatThumb({ lat, lng, size = 64, color = "#FF9F0A" }: { lat: number; lng: number; size?: number; color?: string }) {
-  const z = 17, n = 2 ** z, fx = (lng + 180) / 360 * n, r = lat * Math.PI / 180, fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n
-  const x0 = Math.floor(fx - .5), y0 = Math.floor(fy - .5), k = .5 // tuiles 256 px affichées à 128 px (nettes sur écran Retina)
-  const px = (fx - x0) * 256 * k, py = (fy - y0) * 256 * k
-  return <span aria-hidden className="relative block shrink-0 overflow-hidden rounded-[12px] bg-[#1d2a1d]" style={{ width: size, height: size }}>
-    <span className="absolute grid grid-cols-2" style={{ width: 256, height: 256, left: size / 2 - px, top: size / 2 - py }}>
-      {[0, 1].flatMap(j => [0, 1].map(i => <img key={`${i}${j}`} alt="" draggable={false} loading="lazy" className="block h-[128px] w-[128px]" src={`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y0 + j}/${x0 + i}`} />))}
-    </span>
-    <span className="absolute left-1/2 top-1/2 h-[13px] w-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-[2.5px] ring-white shadow-[0_1px_4px_rgba(0,0,0,.5)]" style={{ background: color }} />
-  </span>
-}
 
 const PendingAv = ({ e, size = 36 }: { e: Employe; size?: number }) => <span aria-hidden className="flex shrink-0 items-center justify-center rounded-full bg-white/[.08] font-semibold text-white/75 ring-1 ring-inset ring-white/15" style={{ width: size, height: size, fontSize: size * .36 }}>{initialsOf(e)}</span>
 const Dot = ({ c }: { c: string }) => <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: c }} />

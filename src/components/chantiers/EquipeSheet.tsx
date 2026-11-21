@@ -13,11 +13,11 @@ import { EmpAvatar } from "./parts"
 const SPRING = { type: "spring" as const, stiffness: 420, damping: 36 }
 /** Encart groupé (maquette : fond gris clair, filets fins décalés). */
 export const Group = ({ children, className = "" }: { children: ReactNode; className?: string }) => <div className={`overflow-hidden rounded-[16px] bg-white/[.07] ${className}`}>{children}</div>
-const Field = ({ label, htmlFor, children, err }: { label: string; htmlFor: string; children: ReactNode; err?: string }) => <div className="eq-sep">
+export const Field = ({ label, htmlFor, children, err }: { label: string; htmlFor: string; children: ReactNode; err?: string }) => <div className="eq-sep">
   <div className="flex min-h-[50px] items-center gap-3 pl-4"><label htmlFor={htmlFor} className="w-[100px] shrink-0 text-[16px] text-white/50">{label}</label><div className="flex min-w-0 flex-1 items-center pr-4">{children}</div></div>
   <AnimatePresence initial={false}>{err && <motion.p role="alert" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden px-4 pb-2.5 text-[13px] text-[#FF6B6B]">{err}</motion.p>}</AnimatePresence>
 </div>
-const inp = "h-[52px] w-full min-w-0 bg-transparent text-[16px] text-white outline-none caret-[#30D158] [color-scheme:dark] placeholder:text-white/28"
+export const inp = "h-[52px] w-full min-w-0 bg-transparent text-[16px] text-white outline-none caret-[#30D158] [color-scheme:dark] placeholder:text-white/28"
 export function GreenSwitch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
   const rm = useReducedMotion()
   return <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} className="relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200" style={{ background: on ? "#30D158" : "rgba(120,120,128,.32)" }}>

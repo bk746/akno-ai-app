@@ -31,7 +31,7 @@ import { digitsFr, formatPhonePairs } from "../lib/phone"
 import { draftDevisFromCall, sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
-import { ClientFactures, FicheEditor, useFiche } from "./sheets/ClientFiche"
+import { ClientFactures, FicheEditor, ficheKey, useFiche } from "./sheets/ClientFiche"
 import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, registerPushWorker, sendTestNotification, updateAppBadge } from "../lib/push"
 import Login from "./Login"
 import Flow from "./onboarding/Flow"
@@ -45,8 +45,10 @@ const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
 // update64 · Chantiers (carte Leaflet) et Équipe : chargés à la demande, hors bundle principal
 const ChantiersPage = lazy(() => import("./chantiers/ChantiersPage"))
 const EquipePage = lazy(() => import("./equipe/EquipePage")) // update65
+const ClientsPage = lazy(() => import("./clients/ClientsPage")) // update66
 import { loadChantiers, requestNewChantier, requestOpenChantier, useChantiers } from "../lib/chantiers"
 import ClientChantiers from "./chantiers/ClientChantiers"
+import { clientsState, loadClients, requestNewClient, requestOpenClient, useClients } from "../lib/clients"
 // update57 · configurateur « Ma réceptionniste » (chargé à la demande)
 const ReceptionnisteStudio = lazy(() => import("./reception/ReceptionnisteStudio"))
 import UpdateButton from "./UpdateButton"
@@ -57,10 +59,10 @@ import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount,
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
-const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel", devis: "dev", parametres: "set", factures: "fac", chantiers: "ch", equipe: "eq" }
-const slugOf = (p: P) => p === "set" ? "parametres" : p === "fac" ? "factures" : p === "ch" ? "chantiers" : p === "eq" ? "equipe" : A[p].slug
+const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel", devis: "dev", parametres: "set", factures: "fac", chantiers: "ch", equipe: "eq", clients: "cl" }
+const slugOf = (p: P) => p === "set" ? "parametres" : p === "fac" ? "factures" : p === "ch" ? "chantiers" : p === "eq" ? "equipe" : p === "cl" ? "clients" : A[p].slug
 /** update62 · titre lisible d'une page (Factures et Chantiers ne sont pas des agents) */
-const pageTitle = (p: P) => p === "set" ? "Paramètres" : p === "fac" ? "Factures" : p === "ch" ? "Chantiers" : p === "eq" ? "Équipe" : A[p].tab
+const pageTitle = (p: P) => p === "set" ? "Paramètres" : p === "fac" ? "Factures" : p === "ch" ? "Chantiers" : p === "eq" ? "Équipe" : p === "cl" ? "Clients" : A[p].tab
 const DAYS = ["Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim."]
 const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
 const _now = new Date(), TODAY = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}-${String(_now.getDate()).padStart(2, "0")}`, NOW = _now.getHours() + _now.getMinutes() / 60
@@ -90,7 +92,7 @@ function Side() {
   const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}<span className="ml-auto flex items-center gap-2">{id === "rec" && !rr.reception && <LockIco size={13} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" />}{id === "dev" && nDev > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}{id === "fac" && nFac > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1.5 text-[11px] font-bold text-black">{nFac}</span>}{on && <span className="h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></span></motion.button> }
   return <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/[.07] px-4 py-6">
     <div className="flex h-12 items-center px-3"><img src="/logo.png" alt="Akno" className="h-9" /></div>
-    <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}<It id="fac" l="Factures" c="#fff" /><It id="ch" l="Chantiers" c="#fff" /><It id="eq" l="Équipe" c="#fff" /></nav>
+    <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}<It id="fac" l="Factures" c="#fff" /><It id="ch" l="Chantiers" c="#fff" /><It id="eq" l="Équipe" c="#fff" /><It id="cl" l="Clients" c="#fff" /></nav>
     <div className={`mt-8 px-3 ${tx.cap}`}>Agents</div>
     <div className="mt-3 space-y-3 px-3">{agents.map(a => <button key={a} onClick={() => go(a)} className="flex w-full items-center gap-3 text-[13px] text-white/70"><Blob c={A[a].c} s={16} />{A[a].n}<span className="ml-auto">{a === "rec" && !rr.reception ? <LockIco size={12} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" /> : <Dot c={s.settings.agents[a] ? GREEN : GREY} />}</span></button>)}</div>
     <div className="mt-auto"><It id="set" l="Paramètres" c="#fff" /><div className="mt-3 flex items-center gap-3 border-t border-white/[.07] px-3 pt-4"><Av n={meName(s)} /><div><div className="text-[13px] font-medium">{meName(s)}</div><div className="text-[12px] text-white/50">{s.settings.company || ""}</div></div></div></div>
@@ -170,9 +172,10 @@ const NAV_I: Record<P, any> = {
   fac: <><rect x="5" y="3.5" width="14" height="17" rx="2.5" /><path d="M8.5 8h7M8.5 11.5h7M8.5 15h4" /></>,
   ch: <><path d="M12 20.5s-6.25-5.4-6.25-10.6a6.25 6.25 0 0 1 12.5 0c0 5.2-6.25 10.6-6.25 10.6Z" /><circle cx="12" cy="9.9" r="2.3" /></>,
   eq: <><circle cx="9" cy="8.5" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><path d="M15.5 5.8a3 3 0 0 1 0 5.4M17.5 14.2A5.5 5.5 0 0 1 20.5 19" /></>,
+  cl: <><rect x="5" y="3.5" width="14" height="17" rx="2.5" /><circle cx="12" cy="10" r="2.6" /><path d="M8.2 16.8a4 4 0 0 1 7.6 0M3.5 8h2M3.5 12h2M3.5 16h2" /></>,
 }
-const NAV_C: Record<P, string> = { rec: "#fff", ag: A.ag.c, rel: A.rel.c, dev: A.dev.c, set: "#fff", fac: "#fff", ch: "#fff", eq: "#fff" }
-const NAV_L: Record<P, string> = { rec: "Réception", ag: "Agenda", rel: "Relance", dev: "Devis", set: "Réglages", fac: "Factures", ch: "Chantiers", eq: "Équipe" }
+const NAV_C: Record<P, string> = { rec: "#fff", ag: A.ag.c, rel: A.rel.c, dev: A.dev.c, set: "#fff", fac: "#fff", ch: "#fff", eq: "#fff", cl: "#fff" }
+const NAV_L: Record<P, string> = { rec: "Réception", ag: "Agenda", rel: "Relance", dev: "Devis", set: "Réglages", fac: "Factures", ch: "Chantiers", eq: "Équipe", cl: "Clients" }
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
 /* Lecteur d'appel : audio réel (URL signée) + vitesse 1x / 1.25x / 1.5x / 2x */
 const secs = (d?: string) => { const [m, x] = (d || "0:00").split(":").map(Number); return (m || 0) * 60 + (x || 0) || 1 }
@@ -269,22 +272,13 @@ function contacts(s: St): Ct[] {
 function ctInfos(s: St): CtInfo[] {
   const m = new Map<string, CtInfo>()
   const up = (name?: string, p: Partial<CtInfo> = {}) => { const n = (name || "").trim(); if (!n || /^Inconnu$/i.test(n)) return; const k = n.toLowerCase(), c = m.get(k) || { name: n }; m.set(k, { name: c.name, phone: c.phone || p.phone || undefined, email: c.email || p.email || undefined, addr: c.addr || p.addr || undefined }) }
+  // update66 : fiches du carnet d'adresses d'abord (coordonnées saisies par l'artisan)
+  clientsState().fiches.forEach(f => up(f.nom, { phone: f.telephone || undefined, email: f.email || undefined, addr: f.adresse || undefined }))
   ;(s.clients || []).forEach(x => up(x.name, { phone: x.phone, email: x.email, addr: x.addr }))
   s.devis.forEach(x => up(x.client, { phone: x.phone, email: x.email, addr: x.addr }))
   s.calls.forEach(x => up(x.name, { phone: x.phone, addr: x.addr }))
   s.events.forEach(x => !/^Chantier/.test(x.name) && up(x.name, { phone: x.phone, addr: x.addr }))
   return [...m.values()].sort((a, b) => sortN(a.name).localeCompare(sortN(b.name)))
-}
-const lastL = (d: string) => !d ? "—" : d === TODAY ? "aujourd'hui" : d === addDays(TODAY, -1) ? "hier" : dd(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short", ...(d.slice(0, 4) !== TODAY.slice(0, 4) ? { year: "numeric" } : {}) })
-const CtRow = ({ x, first, onOpen }: { x: Ct; first?: boolean; onOpen: () => void }) => <Row first={first} label={`Fiche ${x.name}`} onClick={onOpen} lead={<Av n={x.name} />} t={x.name} s={<>{x.phone}<br />{x.calls} appel{x.calls > 1 ? "s" : ""} · dernier contact {lastL(x.last)}</>} r={<TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${x.phone.replace(/ /g, "")}`} />} />
-function ContactsSheet({ close }: { close: () => void }) {
-  const { s, modal } = useC(), [q2, setQ2] = useState(""), emails = new Map(ctInfos(s).map(c => [c.name.toLowerCase(), c.email || ""])), all = contacts(s).filter(x => match(q2, x.name, x.phone, x.phone.replace(/ /g, ""), emails.get(x.name.toLowerCase()) || "")).sort((a, b) => sortN(a.name).localeCompare(sortN(b.name)))
-  const groups: [string, Ct[]][] = []; all.forEach(x => { const L = sortN(x.name)[0]?.toUpperCase() || "#"; const g = groups.find(g => g[0] === L); g ? g[1].push(x) : groups.push([L, [x]]) })
-  return <Sheet title="Clients" sub={`${contacts(s).length} clients et contacts depuis le début`} c={A.rec.c} onClose={close}>
-    <div className="relative mb-5"><Search size={16} strokeWidth={1.6} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/40" /><input autoFocus value={q2} onChange={e => setQ2(e.target.value)} placeholder="Nom, numéro ou e-mail" className={`${inp} pl-11`} aria-label="Rechercher un client" /></div>
-    {groups.length ? <div className="space-y-5">{groups.map(([L, xs]) => <div key={L}><div className={`mb-2 px-1 text-[13px] font-semibold text-white/45`}>{L}</div><List>{xs.map((x, i) => <CtRow key={x.key} x={x} first={i === 0} onOpen={() => modal({ kind: "client", data: { name: x.name } })} />)}</List></div>)}</div>
-      : <List empty="Aucun contact ne correspond">{[]}</List>}
-  </Sheet>
 }
 function parisYmd(d: Date) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/Paris" }) }
 function mondayParisYmd() {
@@ -584,6 +578,10 @@ function ChP() {
   const { s } = useC()
   return <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center bg-[#0b0d0c]"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white/15 border-t-white/60" /></div>}><ChantiersPage me={<Me size={30} />} clients={ctInfos(s)} /></Suspense>
 }
+/* update66 · Clients (page chargée à la demande) */
+function ClP() {
+  return <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white/15 border-t-white/60" /></div>}><ClientsPage /></Suspense>
+}
 /* update65 · Équipe (page chargée à la demande) */
 function EqP() {
   return <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white/15 border-t-white/60" /></div>}><EquipePage /></Suspense>
@@ -650,7 +648,7 @@ function SetP() {
     { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => recLock ? openUpgrade("reception") : modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
-      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => modal({ kind: "contacts" })} /><S I={HardHat} l="Équipe" v={equipeN ? `${equipeN} membre${equipeN > 1 ? "s" : ""}` : ""} onClick={() => go("eq")} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
+      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => go("cl")} /><S I={HardHat} l="Équipe" v={equipeN ? `${equipeN} membre${equipeN > 1 ? "s" : ""}` : ""} onClick={() => go("eq")} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><Row first label="Ma réceptionniste" onClick={() => modal({ kind: "studio" })} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Ma réceptionniste" s={`Voix ${voiceInfo(prof?.reception_config?.voice).name} · script, prestations, FAQ`} r={<Chev />} /><S I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
@@ -773,8 +771,13 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
   return <Sheet title="Fiche client" c={A.rec.c} onClose={close}>
     <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1 flex flex-wrap items-center gap-2"><Chip c={st[1]}>{st[0]}</Chip>{call?.callback && !/^À rappeler/.test(st[0]) && <Chip c={call.urgent ? RED : AMBER}>À rappeler</Chip>}{call?.wantDevis && <Chip c={A.dev.c}>Devis demandé</Chip>}</div>{call?.callback && call.rappelAt && <div className={`mt-1 ${tx.cap}`}>Rappel souhaité · {call.rappelAt}</div>}</div></div>
     <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}<CQA I={Receipt} l="Devis" onClick={() => modal({ kind: "devis", data: { client: nm, objet: ev?.topic || call?.besoin || call?.topic } })} /></div>
+    {/* update66 : lien vers la page Clients (fiche complète) ; depuis un appel, création de la fiche avec l'origine « Appel » */}
+    <div className="mt-3 flex flex-wrap gap-2">
+      {!/^(inconnu)?$/i.test(nm.trim()) && <button type="button" onClick={() => { close(); requestOpenClient({ key: ficheKey(nm), name: nm, phone: raw }); go("cl") }} className="flex h-9 items-center gap-1 rounded-full bg-white/[.08] px-3.5 text-[13.5px] font-medium text-white/85 active:bg-white/[.12]">Fiche client complète<ChevronRight size={14} /></button>}
+      {!fiche && (seed || linked || call) && <button type="button" onClick={() => { close(); requestNewClient({ name: /^(inconnu)?$/i.test(nm.trim()) || /^[+\d\s.]+$/.test(nm) ? "" : nm, phone: raw, addr: addr || undefined, email: email || undefined, origine: "appel" }); go("cl") }} className="flex h-9 items-center gap-1 rounded-full bg-white px-3.5 text-[13.5px] font-semibold text-black active:opacity-80"><Plus size={14} strokeWidth={2.4} />Ajouter aux clients</button>}
+    </div>
     <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{email && <KV I={Mail} l="E-mail" v={email} href={`mailto:${email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
-    <FicheEditor name={nm} fiche={fiche} available={ficheOk} defaults={{ phone: ph, email, addr }} onSaved={reloadFiche} />
+    <FicheEditor name={nm} fiche={fiche} available={ficheOk} defaults={{ phone: ph, email, addr }} onSaved={() => { reloadFiche(); void loadClients() }} />
     {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative</span></div>}
     {ev && <><H>Rendez-vous</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{ev.topic}</div><Chip c={past ? GREY : A.ag.c}>{past ? "Passé" : "À venir"}</Chip></div><div className={`mt-1 ${tx.cap}`}>{fmtD(ev.date)} · {hh(ev.start)} – {hh(ev.start + ev.dur)}</div>{(ev.notes || ev.addr) && <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{[ev.notes, ev.addr].filter(Boolean).join(" · ")}</p>}</div></>}
     {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div>{call.callback && <div className="mt-2"><Chip c={call.urgent ? RED : AMBER}>À rappeler{call.rappelAt ? ` · ${call.rappelAt}` : ""}</Chip></div>}{call.wantDevis && <div className="mt-2"><Chip c={A.dev.c}>Devis demandé</Chip></div>}<p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{playable && <div className="mt-3"><CallInline call={playable} onMic={() => { close(); setChat(true) }} /></div>}<Btn className="mt-3 w-full" disabled={genBusy} onClick={() => void generateDevis()}><Receipt size={15} strokeWidth={1.5} />{genBusy ? "Génération…" : existingDv ? "Voir le devis" : "Générer un devis"}</Btn>{genErr && <div className="mt-2 text-[13px] text-[#FF9B96]">{genErr}</div>}</div></>}
@@ -967,7 +970,6 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "call") return <Sheet title="Nouvelle note d'appel" c={A.rec.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} placeholder="Fuite, devis, dépannage…" /></F><F l="Note"><textarea className={inp + " h-24 py-2.5"} {...v("note")} /></F>
     <div className="flex items-center gap-3 px-1 text-[15px]"><Tg on={f.urgent} onClick={() => setF({ ...f, urgent: !f.urgent })} label="Urgent" />Urgent</div><div className="flex items-center gap-3 px-1 text-[15px]"><Tg on={f.callback} onClick={() => setF({ ...f, callback: !f.callback })} label="À rappeler" />À rappeler</div></div>
     {foot("Enregistrer", !!f.name.trim(), () => { const now = new Date(); set(x => ({ ...x, calls: [{ id: uid(), name: f.name.trim(), topic: f.topic || "Appel", tag: f.topic || "Appel", note: f.note || "Note ajoutée manuellement.", urgent: f.urgent, callback: f.callback, time: `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`, dur: "0:00" }, ...x.calls] })); toast("Note d'appel ajoutée") })}</Sheet>
-  if (m.kind === "contacts") return <ContactsSheet close={close} />
   if (m.kind === "client") return <ClientSheet name={d.name} callId={d.call} eventId={d.event} close={close} />
   if (m.kind === "callView") { const x = s.calls.find(y => y.id === d.id) || d as Call
     return <Sheet title={x.name} sub={`${x.time} · ${x.topic}`} c={A.rec.c} onClose={close}><CallPlayer call={x} onMic={() => { close(); setChat(true) }} /><div className="text-[15px] leading-relaxed text-white/70">{x.note}</div>{x.addr && <div className="mt-3"><Sub>{x.addr}</Sub></div>}<div className="mt-3"><Sub dot={x.callback ? (x.urgent ? "#FF5F57" : "#FFB340") : "#30D158"}>{x.callback ? (x.urgent ? "À rappeler · urgent" : "À rappeler") : "Traité"}</Sub>{x.callback && x.rappelAt && <div className={`mt-2 ${tx.cap}`}>Moment souhaité · {x.rappelAt}</div>}</div>
@@ -1119,6 +1121,8 @@ const ORD: P[] = ["rec", "ag", "rel", "dev", "set"]
 function AknoApp() {
   const pathname = useLocation().pathname, navigate = useNavigate()
   const [s, setS, loading, put] = useStore(), desk = useDesk()
+  useClients() // update66 : les fiches clients alimentent les sélecteurs de client (devis, factures, chantiers)
+  useEffect(() => { if (!loading) void loadClients() }, [loading])
   // update52 : éditeur de devis pro (plein écran, au-dessus des pages, sous les fiches)
   const [ed, setEd] = useState<EditorReq | null>(null)
   CL = s.clients || []
@@ -1176,6 +1180,7 @@ function AknoApp() {
   const modal = (x: Modal) => {
     if (x?.kind === "devis") { setM(null); setEd({ prefill: x.data }); return }
     if (x?.kind === "devisEditor") { setM(null); setEd({ initial: x.data }); return }
+    if (x?.kind === "contacts") { go("cl"); return } // update66 : l'ancienne liste Clients est remplacée par la page /clients
     setM(x)
   }
   // update62 · raccourcis du bouton « + » : uniquement des parcours existants
@@ -1183,13 +1188,13 @@ function AknoApp() {
     if (k === "rdv") modal({ kind: "rdv" })
     else if (k === "devis") modal({ kind: "devis" })
     else if (k === "facture") modal({ kind: "factures", data: { create: true } })
-    else if (k === "contact") modal({ kind: "contacts" })
+    else if (k === "clients") go("cl") // update66 : la tuile Contact devient Clients
     else if (k === "chantier") { requestNewChantier(); go("ch") }
     else if (k === "equipe") go("eq") // update65 : Équipe remplace Note
     else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
   }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
-  const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: DevFac, set: SetP, fac: DevFac, ch: ChP, eq: EqP }[page]
+  const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: DevFac, set: SetP, fac: DevFac, ch: ChP, eq: EqP, cl: ClP }[page]
   const pkey = page === "fac" ? "dev" : page // update63 : Devis ↔ Factures sans re-monter la page (le bot reste en place)
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={pkey} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>

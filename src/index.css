@@ -282,3 +282,5 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .eq-sep { position: relative; }
 .eq-sep + .eq-sep::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: 0.5px; background: rgba(255,255,255,.1); pointer-events: none; }
 .eq-sep.eq-sep-av + .eq-sep::before, .eq-sep + .eq-sep.eq-sep-av::before { left: 62px; }
+/* update66 · séparateurs des lignes clients (avatar 38 px) */
+.eq-sep + .eq-sep.eq-sep-cl::before { left: 64px; }

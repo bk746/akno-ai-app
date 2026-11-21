@@ -16,7 +16,7 @@ const Lazy = ({ children }: { children: React.ReactNode }) => <Suspense fallback
 initMonitoring()
 initMobile()
 
-const PAGES = ["reception", "agenda", "relance", "devis", "parametres", "factures", "chantiers", "equipe"] // update62 : onglets Factures et Chantiers
+const PAGES = ["reception", "agenda", "relance", "devis", "parametres", "factures", "chantiers", "equipe", "clients"] // update62 : onglets Factures et Chantiers
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

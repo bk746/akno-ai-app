@@ -1,5 +1,5 @@
 /* update64 · Adresses (api-adresse.data.gouv.fr, gratuit, sans clé, appelé depuis l'appareil) + itinéraires. */
-export type Place = { label: string; lat: number; lng: number; city?: string }
+export type Place = { label: string; lat: number; lng: number; city?: string; name?: string; postcode?: string }
 const BASE = "https://api-adresse.data.gouv.fr"
 export async function searchAddress(q: string, signal?: AbortSignal, near?: { lat: number; lng: number }): Promise<Place[]> {
   const t = q.trim()
@@ -8,7 +8,7 @@ export async function searchAddress(q: string, signal?: AbortSignal, near?: { la
   const r = await fetch(u, { signal })
   if (!r.ok) return []
   const j = await r.json()
-  return (j.features || []).map((f: any) => ({ label: f.properties?.label || "", city: f.properties?.city, lng: f.geometry?.coordinates?.[0], lat: f.geometry?.coordinates?.[1] })).filter((p: Place) => p.label && Number.isFinite(p.lat) && Number.isFinite(p.lng))
+  return (j.features || []).map((f: any) => ({ label: f.properties?.label || "", city: f.properties?.city, name: f.properties?.name, postcode: f.properties?.postcode, lng: f.geometry?.coordinates?.[0], lat: f.geometry?.coordinates?.[1] })).filter((p: Place) => p.label && Number.isFinite(p.lat) && Number.isFinite(p.lng))
 }
 export async function reverseAddress(lat: number, lng: number, signal?: AbortSignal): Promise<string> {
   try {

@@ -144,6 +144,30 @@ DO $$ BEGIN
   EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u65_email_invalide_refuse', true);
   END;
 END $$;
+-- ===== update66 : carnet clients (type, origine, ville, coordonnées) =====
+UPDATE public.client_fiches SET type_client = 'syndic', prenom = 'Anne', nom_famille = 'A', origine = 'appel', ville = 'Annecy', lat = 45.9, lng = 6.12 WHERE cle = 'client a';
+INSERT INTO results SELECT 'u66_fiche_enrichie', type_client = 'syndic' AND origine = 'appel' AND ville = 'Annecy' AND lat = 45.9 FROM public.client_fiches WHERE cle = 'client a';
+INSERT INTO public.client_fiches (artisan_id, cle, nom, telephone) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'julie mercier', 'Julie Mercier', '06 45 12 88 33');
+INSERT INTO results SELECT 'u66_created_at_par_defaut', created_at IS NOT NULL FROM public.client_fiches WHERE cle = 'julie mercier';
+DO $$ BEGIN
+  BEGIN
+    UPDATE public.client_fiches SET type_client = 'fournisseur' WHERE cle = 'client a';
+    INSERT INTO results VALUES ('u66_type_inconnu_refuse', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u66_type_inconnu_refuse', true);
+  END;
+  BEGIN
+    UPDATE public.client_fiches SET origine = 'tiktok' WHERE cle = 'client a';
+    INSERT INTO results VALUES ('u66_origine_inconnue_refusee', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u66_origine_inconnue_refusee', true);
+  END;
+  BEGIN
+    UPDATE public.client_fiches SET lat = 123 WHERE cle = 'client a';
+    INSERT INTO results VALUES ('u66_coordonnees_hors_bornes_refusees', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u66_coordonnees_hors_bornes_refusees', true);
+  END;
+END $$;
+DELETE FROM public.client_fiches WHERE cle = 'julie mercier';
+INSERT INTO results SELECT 'u66_fiche_supprimable', NOT EXISTS (SELECT 1 FROM public.client_fiches WHERE cle = 'julie mercier');
 -- ===== Artisan B =====
 SELECT set_config('request.jwt.claims', '{"sub":"bbbbbbbb-0000-0000-0000-000000000002","role":"authenticated"}', false);
 INSERT INTO results SELECT 'u64_B_ne_voit_pas_chantiers_A', count(*) = 0 FROM public.chantiers;
@@ -168,6 +192,15 @@ INSERT INTO results SELECT 'B_ne_voit_pas_devis_A', count(*) = 0 FROM public.dev
 INSERT INTO results SELECT 'B_ne_voit_pas_factures_A', count(*) = 0 FROM public.factures;
 INSERT INTO results SELECT 'u61_B_ne_voit_pas_modeles_A', count(*) = 0 FROM public.devis_modeles;
 INSERT INTO results SELECT 'u61_B_ne_voit_pas_fiches_A', count(*) = 0 FROM public.client_fiches;
+UPDATE public.client_fiches SET origine = 'autre', type_client = 'pro';
+DELETE FROM public.client_fiches;
+DO $$ BEGIN
+  BEGIN
+    INSERT INTO public.client_fiches (artisan_id, cle, nom) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'intrus', 'Intrus');
+    INSERT INTO results VALUES ('u66_fiche_chez_autrui_refusee', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u66_fiche_chez_autrui_refusee', true);
+  END;
+END $$;
 INSERT INTO results SELECT 'B_voit_sa_seule_fiche', count(*) = 1 FROM public.artisans;
 INSERT INTO results SELECT 'B_storage_isole', count(*) = 0 FROM storage.objects;
 UPDATE public.calls SET nom_client = 'pirate';
@@ -221,6 +254,7 @@ DELETE FROM public.devis WHERE client_nom = 'Client Z';
 INSERT INTO results SELECT 'u61_devis_non_signe_supprimable', NOT EXISTS (SELECT 1 FROM public.devis WHERE client_nom = 'Client Z') AND NOT EXISTS (SELECT 1 FROM public.signature_events WHERE event = 'envoi');
 INSERT INTO results SELECT 'A_intact_apres_B', count(*) = 1 FROM public.calls WHERE nom_client = 'Client A';
 INSERT INTO results SELECT 'u64_A_chantier_intact', count(*) = 1 FROM public.chantiers WHERE title = 'Salle de bain A';
+INSERT INTO results SELECT 'u66_A_fiche_intacte', count(*) = 1 FROM public.client_fiches WHERE cle = 'client a' AND origine = 'appel' AND type_client = 'syndic';
 INSERT INTO results SELECT 'u65_A_acces_intact', access_role = 'chef' AND invite_status = 'pending' AND email = 'julien@exemple.fr' FROM public.employes WHERE first_name = 'Julien';
 INSERT INTO results SELECT 'A_devis_intacts', count(*) = 2 FROM public.devis;
 INSERT INTO results SELECT 'minutes_comptees', count = 120 FROM public.usage_counters WHERE metric = 'voice_seconds';
