@@ -7,6 +7,7 @@ import { ensureDefaultPaymentMethod, syncSubscription } from "./_lib/stripeSync.
 import { upgradeSubscription } from "./_lib/upgrade.js"
 import { sendSmsMetered, smsConfigured } from "./_lib/sms.js"
 import { reportError } from "./_lib/monitoring.js"
+import { handleEquipeInvite } from "./_lib/equipe.js"
 
 /* update45 · compte artisan : abonnement Stripe, réglages sensibles (clé Cal.com), recherche SIRET,
    acceptation des CGV, état d'usage. Une seule fonction Vercel pour rester sous la limite du plan. */
@@ -334,6 +335,10 @@ export async function handleAccount(authorization?: string, body?: unknown, head
       const to = String(input.to || a?.telephone || a?.entreprise_telephone || "")
       const r = await sendSmsMetered({ artisanId: userId, to, body: "Akno : ceci est un SMS de test. Vos SMS clients sont prêts.", kind: "test", sender: a?.sms_sender || a?.entreprise_nom || a?.nom_entreprise }, ent.quotas.sms)
       return r.ok ? { status: 200, body: { ok: true } } : { status: r.skipped ? 503 : 502, body: { error: r.error } }
+    }
+    if (action === "equipe_invite") { // update65 · invitation SMS d'un membre de l'équipe
+      const ent = await loadEntitlements(supabase, userId)
+      return await handleEquipeInvite(supabase, userId, input, { send: x => sendSmsMetered(x, ent.quotas.sms), consume, day: dayKey(), url: appUrl() })
     }
     return { status: 400, body: { error: "Action inconnue." } }
   } catch (e) {

@@ -7,7 +7,7 @@ import { useC } from "../ui"
 import ChMap, { TILES, type MapApi, type MapLayer } from "./ChMap"
 import ChantierForm, { type FormReq } from "./ChantierForm"
 import { ChCard, ChDetail } from "./parts"
-import { chState, loadChantiers, takeNewRequest, teamOf, useChantiers, type Chantier } from "../../lib/chantiers"
+import { chState, loadChantiers, takeNewRequest, takeOpenRequest, teamOf, useChantiers, type Chantier } from "../../lib/chantiers"
 import { STATUS_COLOR, effectiveStatus, type ChStatus } from "../../lib/chantierCalc"
 import { FRANCE, reverseAddress, searchAddress } from "../../lib/geo"
 import { CO } from "../../lib/devisDoc"
@@ -44,6 +44,9 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
   useEffect(() => { if (takeNewRequest()) setForm({}); const f = () => { if (takeNewRequest()) setForm({}) }; addEventListener("akno-chantier-new", f); return () => removeEventListener("akno-chantier-new", f) }, [])
 
   const all = useMemo(() => [...st.rows].sort(sortCh), [st.rows])
+  // update65 · ouverture d'un chantier précis (fiche membre, fiche client)
+  const openReq = useRef<string | null>(null), [openTick, setOpenTick] = useState(0)
+  useEffect(() => { const f = () => { const id = takeOpenRequest(); if (id) { openReq.current = id; setOpenTick(t => t + 1) } }; f(); addEventListener("akno-chantier-open", f); return () => removeEventListener("akno-chantier-open", f) }, [])
   const counts = useMemo(() => { const n = { in_progress: 0, upcoming: 0, done: 0 } as Record<ChStatus, number>; for (const c of all) n[effectiveStatus(c)]++; return n }, [all])
   const list = useMemo(() => filter === "all" ? all : all.filter(c => effectiveStatus(c) === filter), [all, filter])
   const cur = list.find(c => c.id === sel) || null
@@ -66,6 +69,16 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
     if (!list.length) { setSel(null); return }
     if (!sel || !list.some(c => c.id === sel)) { setSel(list[0].id); if (!placedOnce.current || sc.current) flyTo(list[0], { instant: !placedOnce.current }); placedOnce.current = true; sc.current?.scrollTo({ left: 0 }) }
   }, [st.ready, list]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const id = openReq.current; if (!id || !st.ready) return
+    const c = all.find(x => x.id === id); if (!c) { openReq.current = null; return }
+    if (filter !== "all") setFilterS("all")
+    setDraft(null); setSel(id); placedOnce.current = true
+    // la demande reste en attente tant qu'elle n'est pas exécutée (un rechargement des chantiers relance simplement le minuteur)
+    const t = setTimeout(() => { if (openReq.current !== id) return; openReq.current = null; scrollToId(id, false); flyTo(chState().rows.find(x => x.id === id) || c, { open: true, instant: true }); setSheet(true) }, 80)
+    return () => clearTimeout(t)
+  }, [st.ready, all, openTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // aucun chantier : carte centrée sur l'adresse de l'entreprise (géocodée une fois, mise en cache) ou sur la France
   useEffect(() => {
@@ -101,8 +114,9 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
     const el = box.querySelector<HTMLElement>(`[data-ch="${id}"]`); if (!el) return
     box.scrollTo({ left: el.offsetLeft - (box.clientWidth - el.offsetWidth) / 2, behavior: smooth && !reduce ? "smooth" : "auto" })
   }, [reduce])
+  const sheetOpen = useRef(false); sheetOpen.current = sheet
   const settle = useCallback(() => {
-    const box = sc.current; if (!box) return
+    const box = sc.current; if (!box || sheetOpen.current) return // carrousel en sortie sous la fiche : ne change pas la sélection
     const mid = box.scrollLeft + box.clientWidth / 2
     let best: HTMLElement | null = null, bd = 1e9
     box.querySelectorAll<HTMLElement>("[data-ch]").forEach(el => { const d = Math.abs(el.offsetLeft + el.offsetWidth / 2 - mid); if (d < bd) { bd = d; best = el } })

@@ -11,7 +11,8 @@
     "test:twilio": "esbuild scripts/test-twilio.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-twilio.mjs --log-level=warning && node /tmp/akno-test-twilio.mjs",
     "test:receptionist": "esbuild scripts/test-receptionist.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-receptionist.mjs --log-level=warning && node /tmp/akno-test-receptionist.mjs",
     "test:factures": "esbuild scripts/test-factures.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-factures.mjs --log-level=warning && node /tmp/akno-test-factures.mjs",
-    "test:chantiers": "esbuild scripts/test-chantiers.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-chantiers.mjs --log-level=warning && node /tmp/akno-test-chantiers.mjs"
+    "test:chantiers": "esbuild scripts/test-chantiers.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-chantiers.mjs --log-level=warning && node /tmp/akno-test-chantiers.mjs",
+    "test:equipe": "esbuild scripts/test-equipe.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-equipe.mjs --log-level=warning && node /tmp/akno-test-equipe.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

@@ -6,7 +6,7 @@ import { PhoneCall, CalendarDays, Repeat2, Receipt, Search, X, ChevronRight } fr
 import type { St } from "../lib/store"
 
 export type K = "rec" | "ag" | "rel" | "dev"
-export type P = K | "set" | "fac" | "ch"
+export type P = K | "set" | "fac" | "ch" | "eq"
 /** update62 · pages d'agent (blob, couleur, configurateur) — « fac » (Factures) et « ch » (Chantiers) n'en sont pas. */
 export const isK = (p: P): p is K => p === "rec" || p === "ag" || p === "rel" || p === "dev"
 export const A = {

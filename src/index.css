@@ -278,3 +278,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 @media (prefers-reduced-motion: reduce) { .ch-big, .ch-label, .ch-drop, .ch-me-halo { animation: none !important; } }
 .ch-carousel { scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 .ch-carousel::-webkit-scrollbar { display: none; }
+/* update65 · Équipe : filets fins décalés entre les lignes d'un encart */
+.eq-sep { position: relative; }
+.eq-sep + .eq-sep::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: 0.5px; background: rgba(255,255,255,.1); pointer-events: none; }
+.eq-sep.eq-sep-av + .eq-sep::before, .eq-sep + .eq-sep.eq-sep-av::before { left: 62px; }

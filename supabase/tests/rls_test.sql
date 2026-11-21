@@ -124,10 +124,31 @@ DO $$ BEGIN
   EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u64_dates_coherentes', true);
   END;
 END $$;
+-- ===== update65 : accès à l'app, invitation, e-mail, date d'entrée =====
+UPDATE public.employes SET email = 'julien@exemple.fr', hired_on = '2021-03-03', access_role = 'chef', invite_status = 'pending', invited_at = now(), invite_count = 1 WHERE first_name = 'Julien';
+INSERT INTO results SELECT 'u65_acces_invitation_enregistres', access_role = 'chef' AND invite_status = 'pending' AND hired_on = '2021-03-03' FROM public.employes WHERE first_name = 'Julien';
+DO $$ BEGIN
+  BEGIN
+    UPDATE public.employes SET access_role = 'patron' WHERE first_name = 'Julien';
+    INSERT INTO results VALUES ('u65_role_inconnu_refuse', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u65_role_inconnu_refuse', true);
+  END;
+  BEGIN
+    INSERT INTO public.employes (artisan_id, first_name, invite_status) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Sans role', 'pending');
+    INSERT INTO results VALUES ('u65_invitation_sans_role_refusee', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u65_invitation_sans_role_refusee', true);
+  END;
+  BEGIN
+    UPDATE public.employes SET email = 'pas-un-email' WHERE first_name = 'Julien';
+    INSERT INTO results VALUES ('u65_email_invalide_refuse', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u65_email_invalide_refuse', true);
+  END;
+END $$;
 -- ===== Artisan B =====
 SELECT set_config('request.jwt.claims', '{"sub":"bbbbbbbb-0000-0000-0000-000000000002","role":"authenticated"}', false);
 INSERT INTO results SELECT 'u64_B_ne_voit_pas_chantiers_A', count(*) = 0 FROM public.chantiers;
 INSERT INTO results SELECT 'u64_B_ne_voit_pas_equipe_A', (SELECT count(*) FROM public.employes) = 0 AND (SELECT count(*) FROM public.chantier_employes) = 0;
+UPDATE public.employes SET access_role = 'admin', invite_status = NULL, email = 'pirate@exemple.fr';
 INSERT INTO public.employes (artisan_id, first_name) VALUES ('bbbbbbbb-0000-0000-0000-000000000002', 'Bob');
 DO $$ BEGIN
   BEGIN
@@ -200,6 +221,7 @@ DELETE FROM public.devis WHERE client_nom = 'Client Z';
 INSERT INTO results SELECT 'u61_devis_non_signe_supprimable', NOT EXISTS (SELECT 1 FROM public.devis WHERE client_nom = 'Client Z') AND NOT EXISTS (SELECT 1 FROM public.signature_events WHERE event = 'envoi');
 INSERT INTO results SELECT 'A_intact_apres_B', count(*) = 1 FROM public.calls WHERE nom_client = 'Client A';
 INSERT INTO results SELECT 'u64_A_chantier_intact', count(*) = 1 FROM public.chantiers WHERE title = 'Salle de bain A';
+INSERT INTO results SELECT 'u65_A_acces_intact', access_role = 'chef' AND invite_status = 'pending' AND email = 'julien@exemple.fr' FROM public.employes WHERE first_name = 'Julien';
 INSERT INTO results SELECT 'A_devis_intacts', count(*) = 2 FROM public.devis;
 INSERT INTO results SELECT 'minutes_comptees', count = 120 FROM public.usage_counters WHERE metric = 'voice_seconds';
 SELECT test, ok FROM results ORDER BY ok, test;

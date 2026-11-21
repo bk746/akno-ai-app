@@ -3,16 +3,21 @@
 import { useSyncExternalStore } from "react"
 import { supabase } from "./supabase"
 import type { ChStatus } from "./chantierCalc"
+import type { AccessRole } from "./equipeCalc"
+import { api } from "./accountApi"
 
 export type Chantier = {
   id: string; title: string; client_id: string | null; client_nom: string | null; client_telephone: string | null
   address: string | null; lat: number | null; lng: number | null; start_date: string | null; end_date: string | null
   status: ChStatus; progress_override: number | null; notes: string | null; devis_id: string | null; created_at?: string; updated_at?: string
 }
-export type Employe = { id: string; first_name: string; last_name: string | null; role: string | null; phone: string | null; photo_path: string | null }
-export type ChState = { ready: boolean; missing: boolean; error: string; rows: Chantier[]; employes: Employe[]; links: { chantier_id: string; employe_id: string }[] }
+export type Employe = { id: string; first_name: string; last_name: string | null; role: string | null; phone: string | null; photo_path: string | null
+  /* update65 (migration 20261121_12, facultatif tant qu'elle n'est pas appliquée) */
+  email?: string | null; hired_on?: string | null; access_role?: AccessRole | null; invite_status?: "pending" | "accepted" | null; invited_at?: string | null; created_at?: string | null }
+/** ext : colonnes update65 présentes (e-mail, date d'entrée, accès à l'app, invitation). */
+export type ChState = { ready: boolean; missing: boolean; ext: boolean; error: string; rows: Chantier[]; employes: Employe[]; links: { chantier_id: string; employe_id: string }[] }
 
-let state: ChState = { ready: false, missing: false, error: "", rows: [], employes: [], links: [] }
+let state: ChState = { ready: false, missing: false, ext: false, error: "", rows: [], employes: [], links: [] }
 const subs = new Set<() => void>()
 const emit = (p: Partial<ChState>) => { state = { ...state, ...p }; subs.forEach(f => f()) }
 export const chState = () => state
@@ -28,14 +33,16 @@ export function loadChantiers(): Promise<void> {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { emit({ ready: true }); return }
-      const [c, e, l] = await Promise.all([
+      const [c, e, l, x] = await Promise.all([
         supabase.from("chantiers").select("*").eq("artisan_id", user.id).order("start_date", { ascending: true, nullsFirst: false }).limit(1000),
-        supabase.from("employes").select("id, first_name, last_name, role, phone, photo_path").eq("artisan_id", user.id).order("first_name").limit(500),
+        supabase.from("employes").select("*").eq("artisan_id", user.id).order("first_name").limit(500),
         supabase.from("chantier_employes").select("chantier_id, employe_id").eq("artisan_id", user.id).limit(5000),
+        // update65 : la migration 20261121_12 est-elle appliquée ? (sinon champs masqués, repli propre)
+        supabase.from("employes").select("id, email, hired_on, access_role, invite_status, invited_at").limit(1),
       ])
       if (isMissing(c.error) || isMissing(e.error) || isMissing(l.error)) { emit({ ready: true, missing: true, error: "" }); return }
       if (c.error || e.error || l.error) { emit({ ready: true, error: "Chantiers indisponibles pour le moment." }); return }
-      emit({ ready: true, missing: false, error: "", rows: (c.data || []) as Chantier[], employes: (e.data || []) as Employe[], links: (l.data || []) as ChState["links"] })
+      emit({ ready: true, missing: false, ext: !x.error, error: "", rows: (c.data || []) as Chantier[], employes: (e.data || []) as Employe[], links: (l.data || []) as ChState["links"] })
     } catch { emit({ ready: true, error: "Chantiers indisponibles (hors ligne ?)." }) }
     finally { inflight = null }
   })()
@@ -75,15 +82,34 @@ export async function deleteChantier(id: string) {
   return ""
 }
 
-export async function saveEmploye(id: string | null, v: Omit<Employe, "id">): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+export type EmpInput = Omit<Employe, "id" | "created_at" | "invited_at">
+const EXT = ["email", "hired_on", "access_role", "invite_status"] as const
+export async function saveEmploye(id: string | null, v: EmpInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: "Session expirée." }
-  const row = { first_name: v.first_name.trim(), last_name: v.last_name?.trim() || null, role: v.role?.trim() || null, phone: v.phone?.trim() || null, photo_path: v.photo_path || null }
-  const r = id ? await supabase.from("employes").update(row).eq("id", id).select("id").maybeSingle() : await supabase.from("employes").insert({ ...row, artisan_id: user.id }).select("id").maybeSingle()
-  if (r.error || !r.data) return { ok: false, error: fr(r.error) || "Enregistrement impossible." }
-  const eid = (r.data as { id: string }).id, e: Employe = { id: eid, ...row }
-  emit({ employes: (state.employes.some(x => x.id === eid) ? state.employes.map(x => x.id === eid ? e : x) : [...state.employes, e]).sort((a, b) => a.first_name.localeCompare(b.first_name, "fr")) })
-  return { ok: true, id: eid }
+  const row: Record<string, unknown> = { first_name: v.first_name.trim(), last_name: v.last_name?.trim() || null, role: v.role?.trim() || null, phone: v.phone?.trim() || null, photo_path: v.photo_path || null }
+  if (state.ext) { row.email = v.email?.trim() || null; row.hired_on = v.hired_on || null; row.access_role = v.access_role || null; row.invite_status = v.access_role ? (v.invite_status || null) : null }
+  const r = id ? await supabase.from("employes").update(row).eq("id", id).select("*").maybeSingle() : await supabase.from("employes").insert({ ...row, artisan_id: user.id }).select("*").maybeSingle()
+  if (r.error || !r.data) return { ok: false, error: /email/i.test(r.error?.message || "") ? "Adresse e-mail invalide." : fr(r.error) || "Enregistrement impossible." }
+  const e = { ...(state.employes.find(x => x.id === (r.data as Employe).id) || {}), ...row, ...(r.data as Employe) } as Employe
+  for (const k of EXT) if (!state.ext) delete (e as Record<string, unknown>)[k]
+  emit({ employes: (state.employes.some(x => x.id === e.id) ? state.employes.map(x => x.id === e.id ? e : x) : [...state.employes, e]).sort((a, b) => a.first_name.localeCompare(b.first_name, "fr")) })
+  return { ok: true, id: e.id }
+}
+/** update65 · Envoie (ou renvoie) l'invitation SMS d'accès à l'app — action « equipe_invite » de /api/account (infra SMS existante). */
+export async function inviteEmploye(id: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await api("/api/account", { action: "equipe_invite", employe_id: id })
+  if (r.ok) { const at = typeof r.invited_at === "string" ? r.invited_at : new Date().toISOString(); emit({ employes: state.employes.map(x => x.id === id ? { ...x, invite_status: "pending", invited_at: at } : x) }); return { ok: true } }
+  return { ok: false, error: r.status === 503 ? "Invitation enregistrée, mais les SMS ne sont pas encore activés sur votre compte." : r.error || "Invitation non envoyée." }
+}
+/** update65 · Change le niveau d'accès (null = retirer l'accès). */
+export async function setAccess(id: string, role: AccessRole | null) {
+  const prev = state.employes
+  const p = { access_role: role, invite_status: role ? (prev.find(x => x.id === id)?.invite_status || "pending") : null }
+  emit({ employes: prev.map(x => x.id === id ? { ...x, ...p } : x) })
+  const { error } = await supabase.from("employes").update(p).eq("id", id)
+  if (error) { emit({ employes: prev }); return fr(error) || "Modification impossible." }
+  return ""
 }
 export async function deleteEmploye(id: string) {
   const ph = state.employes.find(x => x.id === id)?.photo_path
@@ -132,3 +158,7 @@ export const empShort = (e: Employe) => `${e.first_name}${e.last_name ? " " + e.
 let pendingNew = false
 export const requestNewChantier = () => { pendingNew = true; dispatchEvent(new Event("akno-chantier-new")) }
 export const takeNewRequest = () => { const p = pendingNew; pendingNew = false; return p }
+/* update65 · Ouvrir la fiche d'un chantier depuis ailleurs (fiche membre, fiche client). */
+let pendingOpen: string | null = null
+export const requestOpenChantier = (id: string) => { pendingOpen = id; dispatchEvent(new Event("akno-chantier-open")) }
+export const takeOpenRequest = () => { const p = pendingOpen; pendingOpen = null; return p }

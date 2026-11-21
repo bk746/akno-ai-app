@@ -6,11 +6,11 @@
    Fermeture : ×, tap sur le fond, glisser vers le bas, Échap, bouton retour Android (entrée d'historique). */
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion, type PanInfo } from "motion/react"
-import { CalendarDays, CreditCard, FileText, Lock, MapPin, Pencil, Plus, UserRound } from "lucide-react"
+import { CalendarDays, CreditCard, FileText, Lock, MapPin, Plus, UserRound, Users } from "lucide-react"
 import type { P } from "../ui"
 import { lastDocMode } from "../../lib/facturesLite"
 
-export type CreateKind = "rdv" | "devis" | "facture" | "chantier" | "note" | "contact"
+export type CreateKind = "rdv" | "devis" | "facture" | "chantier" | "equipe" | "contact"
 type Tab = "rec" | "ag" | "ch" | "fac"
 
 const Ico = ({ d }: { d: React.ReactNode }) => <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{d}</svg>
@@ -22,11 +22,11 @@ const ICONS: Record<Tab, React.ReactNode> = {
 }
 const LABEL: Record<Tab, string> = { rec: "Réception", ag: "Agenda", ch: "Chantiers", fac: "Factures" }
 /** Onglet actif : Devis et Factures vivent dans l'onglet Factures. Relance et Réglages : aucun onglet. */
-export const tabOf = (p: P): Tab | null => p === "rec" || p === "ag" || p === "ch" ? p : p === "fac" || p === "dev" ? "fac" : null
+export const tabOf = (p: P): Tab | null => p === "rec" || p === "ag" || p === "ch" ? p : p === "eq" ? "ch" : p === "fac" || p === "dev" ? "fac" : null // update65 : Équipe vit sous Chantiers
 
 const TILES: { k: CreateKind; l: string; I: typeof CalendarDays }[] = [
   { k: "rdv", l: "Nouveau RDV", I: CalendarDays }, { k: "devis", l: "Nouveau devis", I: FileText }, { k: "facture", l: "Nouvelle facture", I: CreditCard },
-  { k: "chantier", l: "Nouveau chantier", I: MapPin }, { k: "note", l: "Note", I: Pencil }, { k: "contact", l: "Contact", I: UserRound },
+  { k: "chantier", l: "Nouveau chantier", I: MapPin }, { k: "equipe", l: "Équipe", I: Users }, { k: "contact", l: "Contact", I: UserRound },
 ]
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
 const sheetIn = { type: "spring" as const, stiffness: 420, damping: 31, mass: .9 } // léger dépassement
