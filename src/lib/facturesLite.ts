@@ -41,3 +41,10 @@ export function refreshFactures(): Promise<void> {
 export const useFacturesLite = () => useSyncExternalStore(f => { subs.add(f); return () => { subs.delete(f) } }, () => state, () => state)
 /** Pastille de l'onglet Factures : factures émises non payées (dont en retard). 0 = pastille masquée. */
 export const unpaidCount = (s: State) => (s.rows || []).filter(isUnpaid).length
+
+/** Lecture ponctuelle (hors React), ex. réponses de l'assistant. */
+export const factureState = () => state
+/* update63 · dernier mode choisi dans l'onglet Factures (Devis | Factures) */
+const DOC_KEY = "akno-docmode"
+export const lastDocMode = (): "dev" | "fac" => { try { return localStorage.getItem(DOC_KEY) === "fac" ? "fac" : "dev" } catch { return "dev" } }
+export const rememberDocMode = (m: "dev" | "fac") => { try { localStorage.setItem(DOC_KEY, m) } catch { /* navigation privée */ } }

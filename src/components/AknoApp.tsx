@@ -48,7 +48,7 @@ import UpdateButton from "./UpdateButton"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
 import MobileNav, { type CreateKind } from "./nav/MobileNav"
-import { dueOf, isLate, isUnpaid, refreshFactures, unpaidCount, useFacturesLite, type FactureLite } from "../lib/facturesLite"
+import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
@@ -114,7 +114,7 @@ function Num({ n, u, money }: { n: number; u?: string; money?: boolean }) {
   return <span aria-label={`${n}${u ? " " + u : ""}`} className="inline-flex items-baseline gap-[.12em]"><span>{t}</span>{u && <span className="text-[.42em] font-normal tracking-[-0.01em] text-white/45">{u}</span>}</span>
 }
 /* update62 · En-tête mobile commun : retour (pages hors onglets), logo, mise à jour, assistant, accès Réglages (initiales).
-   Devis et Factures : sélecteur Devis / Factures (les deux pages vivent dans l'onglet Factures). */
+   update63 : le sélecteur Devis | Factures est dans la page unifiée (sous le bot bleu). */
 function MobileHead({ k }: { k?: K }) {
   const { page, go } = useC(), rr = useRights()
   const back = page === "rel" || page === "set"
@@ -123,31 +123,31 @@ function MobileHead({ k }: { k?: K }) {
     <img src="/logo.png" alt="Akno" className="h-[25px] w-auto" />
     <div className="ml-auto flex items-center gap-2"><UpdateButton sm />{k && <Capsule k={k} sm />}
       {page !== "set" && <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Réglages" title="Réglages" onClick={() => go("set")} className="ml-1 flex h-9 w-9 items-center justify-center rounded-full [-webkit-tap-highlight-color:transparent]"><Me size={30} /></motion.button>}</div></div>
-    {(page === "dev" || page === "fac") && <div className="mt-4 px-5"><FacSeg /></div>}</>
-}
-function FacSeg() {
-  const { page, go } = useC()
-  const items: [P, string][] = [["dev", "Devis"], ["fac", "Factures"]]
-  return <div role="tablist" aria-label="Devis ou factures" className="grid h-10 grid-cols-2 rounded-full bg-white/[.07] p-1">
-    {items.map(([id, l]) => { const on = page === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => !on && go(id)} className={`relative rounded-full text-[14px] font-semibold transition-colors duration-200 [-webkit-tap-highlight-color:transparent] ${on ? "text-white" : "text-white/55"}`}>
-      {on && <motion.span layoutId="fac-seg" transition={spring} className="absolute inset-0 rounded-full bg-white/[.14] shadow-[inset_0_1px_0_rgba(255,255,255,.08)]" />}<span className="relative">{l}</span></motion.button> })}
-  </div>
+    </>
 }
 /* Gabarit unique de page : blob + chiffre clé + actions rondes + sections */
-function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any }) {
+const DOC_ORDER = (x?: string) => x === "fac" ? 1 : 0
+const swapV = { enter: (d: number) => ({ opacity: 0, x: d * 28 }), center: { opacity: 1, x: 0 }, exit: (d: number) => ({ opacity: 0, x: -d * 28 }) }
+const swapT = { x: { type: "spring" as const, stiffness: 420, damping: 38 }, opacity: { duration: .18, ease: [.25, .1, .25, 1] as const } }
+function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string }) {
   const { desk, s, setChat } = useC(), on = k ? s.settings.agents[k] : true
+  // update63 · contenu interchangeable (Devis | Factures) : fondu + glissement, le haut de page (bot) ne bouge pas
+  const prevKey = useRef(bodyKey), dir = useRef(1)
+  if (bodyKey !== prevKey.current) { dir.current = DOC_ORDER(bodyKey) >= DOC_ORDER(prevKey.current) ? 1 : -1; prevKey.current = bodyKey }
+  const swap = (node: ReactNode, cls: string) => <div className="relative"><AnimatePresence mode="popLayout" initial={false} custom={dir.current}><motion.div key={bodyKey} custom={dir.current} variants={swapV} initial="enter" animate="center" exit="exit" transition={swapT} className={cls}>{node}</motion.div></AnimatePresence></div>
   const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${A[k].c === "#E6E6E6" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
   const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
   const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-4 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`${desk ? "mt-1 text-[52px]" : "mt-3 text-[44px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const LB = L && <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block cursor-pointer select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{L}</button>
   const foot = null
-  if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0"><QA items={actions} /></div></motion.div><div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div>{foot}</motion.div></div>
+  if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0">{bodyKey === undefined ? <QA items={actions} /> : swap(<QA items={actions} />, "")}</div></motion.div>{mid && <motion.div variants={rise} className="mt-8">{mid}</motion.div>}{bodyKey === undefined ? <div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div> : swap(children, "mt-10 grid grid-cols-2 items-start gap-6")}{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
     <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
     <MobileHead k={k} />
     <motion.div variants={rise} className="mt-6 flex flex-col items-center px-5">{LB}{H}</motion.div>
-    <motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
-    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
+    {mid && <motion.div variants={rise} className="mt-6 px-5">{mid}</motion.div>}
+    {bodyKey === undefined ? <><motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
+    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div></> : swap(<><div className="mt-7 px-4"><QA items={actions} /></div><div className="mt-5 flex flex-col gap-8 px-4">{children}</div></>, "")}{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
 const meName = (s: St) => s.settings.name?.trim() || s.settings.company?.trim() || s.settings.email?.split("@")[0] || "Mon compte"
@@ -468,7 +468,8 @@ function RelP() {
 
 /* ---------------- Devis ---------------- */
 const MO = ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"]
-function Dev() {
+/* update63 · contenu du mode Devis de la page unifiée Devis | Factures (même bot bleu) */
+function useDevisView(active: boolean) {
   const { s, set, modal, q, toast } = useC(), c = A.dev.c
   const ds = [...s.devis].filter(d => match(q, d.client, d.objet, String(d.num))).sort((a, b) => b.num - a.num)
   const val = s.devis.filter(d => d.status === "val"), sent = s.devis.filter(d => d.status !== "brouillon")
@@ -492,31 +493,34 @@ function Dev() {
   const DRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />
   const todo = ds.filter(d => (d.status === "brouillon" && !d.ai) || d.status === "att" || d.status === "env")
   const aval = ds.filter(toValidate), { desk } = useC()
-  /* Pop-up : brouillon IA à valider, sinon dernière réponse client (accepté / refusé) */
+  /* Pop-up : brouillon IA à valider, sinon dernière réponse client (accepté / refusé) — au premier affichage du mode Devis */
+  const popped = useRef(false)
   useEffect(() => {
+    if (!active || popped.current) return
+    popped.current = true
     const first = [...s.devis].sort((a, b) => b.num - a.num).find(toValidate)
     if (first) { const t = setTimeout(() => modal({ kind: "aiPop", data: first }), 450); return () => clearTimeout(t) }
     const reply = [...s.devis].filter(d => d.repliedAt && (d.status === "val" || d.status === "ref")).sort((a, b) => (b.repliedAt || "").localeCompare(a.repliedAt || ""))[0]
     if (!reply) return
     try { if (sessionStorage.getItem("akno-seen-" + reply.id)) return } catch { }
     const t = setTimeout(() => modal({ kind: "clientReply", data: reply }), 450); return () => clearTimeout(t)
-  }, [])
+  }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
   const VRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Regarder le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Circ><Blob c={c} s={20} /></Circ>} t={<span className="flex items-center gap-2"><span className="truncate">{d.client}</span></span>} s={`N° ${d.num} · brouillon généré par Akno`} r={eur(d.amount)} rs={<Chip c={c}>Brouillon — à valider</Chip>} />
   const replies = ds.filter(d => d.reply || d.status === "sans" || ((d.status === "val" || d.status === "ref") && !!d.repliedAt))
   const replyL = (d: Devis) => d.status === "val" && d.repliedAt ? "Accepté" : d.status === "ref" && d.repliedAt ? "Refusé" : d.status === "sans" ? "Sans réponse" : d.reply ? "Réponse client" : ST[d.status][0]
   const ReplyRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={d.reply || `N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={d.status === "val" ? GREEN : d.status === "ref" ? RED : c}>{replyL(d)}</Chip>} />
   const avalS = aval.length > 0 && <Section t={<span className="flex items-center gap-2">À valider<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{aval.length}</span></span>} aside="Devis générés par l'IA"><List>{aval.map(VRow)}</List></Section>
   const replyS = replies.length > 0 && <Section t={<span className="flex items-center gap-2">Réponses clients<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{replies.length}</span></span>} aside="Acceptation, refus ou message"><List>{replies.map(ReplyRow)}</List></Section>
-  return <Shell k="dev" fig={<Num n={cur} u="€" money />} sub={`validés ce mois · ${val.length} devis sur ${sent.length} envoyés`} actions={[
+  return { fig: <Num n={cur} u="€" money />, sub: `validés ce mois · ${val.length} devis sur ${sent.length} envoyés`, actions: [
     { I: Plus, l: "Nouveau", on: () => modal({ kind: "devis" }) }, { I: Send, l: "Envoyer", on: send, dis: !pend || pend.status !== "brouillon" },
-    { I: Repeat2, l: "Relancer", on: () => modal({ kind: "rel", data: { name: (s.devis.find(d => d.status === "env") || pend)?.client || "" } }) }, { I: ArrowUp, l: "Exporter", on: exp }]}>
+    { I: Repeat2, l: "Relancer", on: () => modal({ kind: "rel", data: { name: (s.devis.find(d => d.status === "env") || pend)?.client || "" } }) }, { I: ArrowUp, l: "Exporter", on: exp }] as QAi[], body: <>
     {avalS && (desk ? <div className="col-span-2">{avalS}</div> : avalS)}
     {replyS && (desk ? <div className="col-span-2">{replyS}</div> : replyS)}
     <Col><Section t="À suivre" aside={todo.length ? `${todo.length} devis` : undefined}><List I={Check} empty="Aucun devis en attente.">{todo.map(FRow)}</List></Section>
       <PrestaCard />
       <Section t="Montant validé" aside="6 derniers mois"><Chart c={c} label="Total" value={eur(tot)} v={m} l={mL} sel={5} /></Section></Col>
     <Col><Section t="Tous les devis" more={() => modal({ kind: "devisList" })}><List>{ds.map(DRow)}</List></Section></Col>
-  </Shell>
+  </> }
 }
 
 /* update52 : accès à la bibliothèque de prestations depuis la page Devis */
@@ -534,21 +538,40 @@ function PrestaCard() {
 const F_LABEL: Record<string, string> = { facture: "Facture", acompte: "Facture d'acompte", situation: "Situation", solde: "Facture de solde", avoir: "Avoir" }
 const F_ST: Record<string, [string, string]> = { brouillon: ["Brouillon", GREY], emise: ["Émise", AMBER], envoyee: ["Envoyée", AMBER], payee: ["Payée", GREEN], annulee: ["Annulée", GREY] }
 const fLabel = (f: FactureLite) => f.type === "situation" && f.situation_numero ? `Situation n° ${f.situation_numero}` : F_LABEL[f.type] || "Facture"
-function FacP() {
-  const { modal, go } = useC(), st = useFacturesLite()
+/* update63 · contenu du mode Factures de la page unifiée */
+function useFacturesView() {
+  const { modal, setChat } = useC(), st = useFacturesLite()
   useEffect(() => { void refreshFactures() }, [])
   const rows = st.rows || [], unpaid = rows.filter(isUnpaid), late = unpaid.filter(isLate).length
   const total = unpaid.reduce((a, f) => a + dueOf(f), 0), others = rows.filter(f => !isUnpaid(f)).slice(0, 8)
   const FRow = (f: FactureLite, i: number) => { const [l, c] = isLate(f) ? ["En retard", RED] : F_ST[f.statut] || F_ST.brouillon
     return <Row key={f.id} first={i === 0} label={`Ouvrir ${f.numero || "brouillon"}`} onClick={() => modal({ kind: "factures", data: { id: f.id } })} lead={<Ic I={Receipt} />} t={`${fLabel(f)} ${f.numero || "(brouillon)"}`} s={f.client_nom || "Client à renseigner"} r={e2(f.type === "avoir" ? -dueOf(f) : dueOf(f))} rs={<Chip c={c}>{l}</Chip>} /> }
-  return <Shell lead={<span className="flex h-[88px] w-[88px] items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.14)]"><Receipt size={34} strokeWidth={1.5} /></span>}
-    label={late ? <><Dot c={RED} />{late} en retard</> : <>Factures</>} fig={<Num n={Math.round(total)} u="€" money />}
-    sub={st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}`} actions={[
+  return { fig: <Num n={Math.round(total)} u="€" money />,
+    sub: st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}${late ? ` · ${late} en retard` : ""}`, actions: [
       { I: Plus, l: "Nouvelle", on: () => modal({ kind: "factures", data: { create: true } }) }, { I: Receipt, l: "Toutes", on: () => modal({ kind: "factures" }) },
-      { I: FileSignature, l: "Devis", on: () => go("dev") }]}>
+      { I: Sparkles, l: "Assistant", on: () => setChat(true) }] as QAi[], body: <>
     <Col><Section t="À encaisser" aside={unpaid.length ? e2(total) : undefined}><List I={Check} empty={st.error ? "Factures indisponibles pour le moment." : "Aucune facture en attente de paiement."}>{unpaid.map(FRow)}</List></Section></Col>
     <Col><Section t="Récentes" more={rows.length ? () => modal({ kind: "factures" }) : undefined}><List empty="Aucune facture pour l'instant.">{others.map(FRow)}</List></Section></Col>
-  </Shell>
+  </> }
+}
+/* update63 · Page unifiée Devis | Factures : un seul bot bleu, le sélecteur ne change que le contenu dessous */
+function DevFac() {
+  // pendant l'animation de sortie (page suivante déjà active), on garde le dernier mode : ni saut de contenu ni mémorisation erronée
+  const { page } = useC(), own = page === "dev" || page === "fac", last = useRef<"dev" | "fac">(page === "fac" ? "fac" : "dev")
+  if (own) last.current = page === "fac" ? "fac" : "dev"
+  const mode = last.current
+  const dv = useDevisView(own && mode === "dev"), fv = useFacturesView(), v = mode === "dev" ? dv : fv
+  useEffect(() => { if (own) rememberDocMode(mode) }, [mode, own])
+  return <Shell k="dev" fig={v.fig} sub={v.sub} actions={v.actions} mid={<DocSwitch mode={mode} />} bodyKey={mode}>{v.body}</Shell>
+}
+function DocSwitch({ mode }: { mode: "dev" | "fac" }) {
+  const navigate = useNavigate(), { desk } = useC()
+  const items: ["dev" | "fac", string, string][] = [["dev", "Devis", "/devis"], ["fac", "Factures", "/factures"]]
+  return <div role="tablist" aria-label="Devis ou factures" className={`relative grid h-11 grid-cols-2 rounded-full bg-white/[.07] p-1 ${desk ? "w-[280px]" : "mx-auto w-full max-w-[340px]"}`}>
+    {items.map(([id, l, url]) => { const on = mode === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => { if (!on) navigate(url + location.search, { replace: true }) }}
+      className={`relative rounded-full text-[15px] font-semibold outline-none transition-colors duration-200 [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-white/40 ${on ? "text-white" : "text-white/55 hover:text-white/80"}`}>
+      {on && <motion.span layoutId="doc-seg" transition={spring} className="absolute inset-0 rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,.10)]" style={{ background: `linear-gradient(180deg, ${A.dev.c}55, ${A.dev.c}33)` }} />}<span className="relative">{l}</span></motion.button> })}
+  </div>
 }
 /* ---------------- update62 · Chantiers (page d'attente, aucun contenu encore) ---------------- */
 function ChP() {
@@ -955,7 +978,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "pw") return <PwSheet close={close} />
   if (m.kind === "entreprise") return <EntrepriseSheet close={close} />
   if (m.kind === "abonnement") return <AbonnementSheet close={close} />
-  if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} startNew={!!d?.create} /></Suspense>
+  if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} startNew={!!d?.create} clients={ctInfos(s)} /></Suspense>
   if (m.kind === "conformite") return <ConformiteSheet close={close} />
   if (m.kind === "leads") return rr.clients ? <LeadsSheet close={close} /> : null
   if (m.kind === "reception") return rr.reception ? <ReceptionSheet close={close} /> : null
@@ -1003,6 +1026,23 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
 }
 
 /* ---------------- Assistant (moteur local, src/lib/assistant.ts) ---------------- */
+/* update63 · même bot bleu en mode Factures : suggestions dédiées + réponses simples (à encaisser, en retard, nouvelle facture, facturer un devis) */
+const FAC_CHIPS = ["Factures à encaisser", "Factures en retard", "Crée une facture", "Facturer un devis", "Combien reste à encaisser ?", "Devis à valider"]
+function factureReply(raw: string): { text: string; acts?: RAct[]; chips?: string[]; create?: boolean } | null {
+  const n = raw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  if (!/factur|impaye|encaiss/.test(n)) return null
+  if (/(cree|creer|nouvelle|fais|faire|prepare|ouvre)\b.*factur/.test(n) && !/devis/.test(n)) return { text: "J'ouvre une nouvelle facture : renseignez le client et les lignes, puis « Émettre ».", create: true }
+  if (/devis/.test(n) && /factur/.test(n)) return { text: "Pour facturer un devis : ouvrez-le (mode Devis), puis « Créer la facture », « Acompte » ou « Situation d'avancement ». Les acomptes déjà facturés sont déduits automatiquement.", acts: [{ l: "Voir les devis", k: "go", v: "dev" }], chips: ["Factures à encaisser"] }
+  if (!/(encaiss|retard|impaye|attente|a payer|en cours|non payee|reste)/.test(n)) return null
+  const st = factureState(), rows = st.rows || []
+  if (st.rows === null) return { text: "Je charge vos factures… redemandez-moi dans un instant." }
+  const late = /retard/.test(n)
+  const list = rows.filter(f => late ? isLate(f) : isUnpaid(f))
+  if (!list.length) return { text: late ? "Aucune facture en retard. 👍" : "Aucune facture à encaisser : tout est payé.", chips: ["Crée une facture"] }
+  const tot = list.reduce((a, f) => a + dueOf(f), 0)
+  const lines = list.slice(0, 6).map(f => `• ${f.numero || "brouillon"} · ${f.client_nom || "client ?"} · ${e2(dueOf(f))}${isLate(f) ? " (en retard)" : ""}`).join("\n")
+  return { text: `${list.length} facture${list.length > 1 ? "s" : ""} ${late ? "en retard" : "à encaisser"} · ${e2(tot)}\n${lines}${list.length > 6 ? `\n… et ${list.length - 6} autre${list.length - 6 > 1 ? "s" : ""}` : ""}`, acts: [{ l: "Voir les factures", k: "go", v: "fac", primary: true }], chips: late ? ["Factures à encaisser"] : ["Factures en retard"] }
+}
 function Chat() {
   const { s, set, desk, setChat, page, go, modal, toast } = useC()
   const k: K = isK(page) ? page : "dev", c = A[k].c
@@ -1021,6 +1061,9 @@ function Chat() {
   }
   const send = (text: string) => { if (!text.trim() || busy) return; set(x => ({ ...x, chat: [...x.chat, { id: uid(), from: "me", text }] })); setV(""); setBusy(true)
     setTimeout(async () => {
+      // update63 · mode Factures : questions simples sur les factures (le moteur local ne connaît que les devis)
+      const fa = factureReply(text)
+      if (fa) { pend.current = null; set(x => ({ ...x, chat: [...x.chat, { id: uid(), from: "ai", text: fa.text, acts: fa.acts, chips: fa.chips }] })); if (fa.create) modal({ kind: "factures", data: { create: true } }); setBusy(false); return }
       const cur = sRef.current, r = answer(text, cur, { today: TODAY, now: NOW, pending: pend.current, me: meName(cur) })
       pend.current = r.pending === undefined ? (r.intent.endsWith(":ask") ? pend.current : null) : r.pending
       let txt = r.text; if (r.fallback) { const ext = await askExternal(text, cur, { today: TODAY, now: NOW }); if (ext) txt = ext }
@@ -1040,7 +1083,7 @@ function Chat() {
   const DCard = ({ m }: { m: Msg }) => { const dv = m.devisId ? s.devis.find(d => d.id === m.devisId) : undefined, cd = dv || m.card; if (!cd) return null; const stt = dv ? ST[dv.status][0] : "Brouillon"
     return <div className={`mt-3 rounded-[16px] bg-white/[.06] p-4`}><div className="flex justify-between gap-2 text-[12px] text-white/40"><span className="truncate">N° {cd.num} · {short(cd.client)}</span><span className="shrink-0">{stt}</span></div><div className={`mt-1 ${desk ? "text-[22px]" : "text-[20px]"} font-light tracking-[-0.03em]`}>{eur(cd.amount)}</div>
       <div className="mt-3 flex gap-2">{(!dv || dv.status === "brouillon") && <button onClick={() => { validate(m); toast(`Devis ${cd.num} validé · en attente d'envoi`) }} className="flex h-8 flex-1 items-center justify-center rounded-full bg-white text-[12.5px] font-medium text-black">Valider</button>}<button onClick={() => { if (dv) { go("dev"); modal({ kind: "devisEdit", data: dv }) } else modal({ kind: "devis", data: { client: cd.client, objet: cd.objet, amount: cd.amount } }) }} className="flex h-8 flex-1 items-center justify-center rounded-full border border-white/10 text-[12.5px] text-white/70">Modifier</button></div></div> }
-  const chips = HELP_CHIPS
+  const facMode = page === "fac", chips = facMode ? FAC_CHIPS : HELP_CHIPS
   const ChatItem = ({ x, first }: { x: RItem; first?: boolean }) => { const open = () => { if (x.k === "client" || x.k === "call" || x.k === "rel") modal({ kind: "client", data: { name: x.name || x.t, call: x.k === "call" ? x.id : undefined } }); else if (x.k === "devis") { const dv = s.devis.find(d => d.id === x.id); if (dv) modal({ kind: "devisPrev", data: dv }) } else { const e = s.events.find(y => y.id === x.id); if (e) modal({ kind: "ev", data: e }) } }
     const I = x.k === "rdv" ? CalendarDays : x.k === "devis" ? Receipt : x.k === "rel" ? Repeat2 : x.k === "call" ? PhoneCall : null
     return <button onClick={open} className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-white/[.04] ${first ? "" : "border-t border-white/[.06]"}`}>{I ? <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/70"><I size={15} strokeWidth={1.6} /></span> : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-[11px] font-semibold text-white/85">{x.t.replace(/^(M\.|Mme)\s*/, "").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase()}</span>}
@@ -1059,7 +1102,7 @@ function Chat() {
       <DCard m={m} />{m.action && <button onClick={() => go(m.action as P)} className="mt-2 flex items-center gap-1 text-[12.5px] text-white/50 hover:text-white">Ouvrir {A[m.action as K].tab}<ChevronRight size={13} /></button>}</>} />)}
     {busy && <div className="flex gap-1 pl-10">{[0, 1, 2].map(i => <motion.span key={i} className="h-1.5 w-1.5 rounded-full bg-white/40" animate={{ opacity: [.2, 1, .2] }} transition={{ duration: 1, repeat: Infinity, delay: i * .15 }} />)}</div>}
     <div ref={end} /></div>
-  const input = <form onSubmit={e => { e.preventDefault(); send(v) }} className="flex h-12 shrink-0 items-center gap-2 rounded-full bg-white/[.07] pl-4 pr-1.5"><input aria-label="Message" value={v} onChange={e => setV(e.target.value)} placeholder="Écrire à l'assistant…" className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-white/30" /><Mic size={17} strokeWidth={1.5} className="shrink-0 text-white/40" /><button aria-label="Envoyer" disabled={!v.trim() || busy} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-60" style={{ background: c, color: c === "#E6E6E6" ? "#000" : "#fff" }}><ArrowUp size={16} strokeWidth={1.8} /></button></form>
+  const input = <form onSubmit={e => { e.preventDefault(); send(v) }} className="flex h-12 shrink-0 items-center gap-2 rounded-full bg-white/[.07] pl-4 pr-1.5"><input aria-label="Message" value={v} onChange={e => setV(e.target.value)} placeholder={facMode ? "Une question sur vos factures ou devis…" : "Écrire à l'assistant…"} className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-white/30" /><Mic size={17} strokeWidth={1.5} className="shrink-0 text-white/40" /><button aria-label="Envoyer" disabled={!v.trim() || busy} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-60" style={{ background: c, color: c === "#E6E6E6" ? "#000" : "#fff" }}><ArrowUp size={16} strokeWidth={1.8} /></button></form>
   if (desk) return <motion.aside initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} className="flex w-[380px] shrink-0 flex-col border-l border-white/[.06] bg-[#0B0B0C]">
     <div className="flex h-16 shrink-0 items-center border-b border-white/[.06] px-5">{head}</div>{msgs}<div className="p-5">{input}</div></motion.aside>
   return <><motion.div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setChat(false)} />
@@ -1142,10 +1185,11 @@ function AknoApp() {
     else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
   }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
-  const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP, fac: FacP, ch: ChP }[page]
+  const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: DevFac, set: SetP, fac: DevFac, ch: ChP }[page]
+  const pkey = page === "fac" ? "dev" : page // update63 : Devis ↔ Factures sans re-monter la page (le bot reste en place)
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
-    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></motion.div></AnimatePresence><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={pkey} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
+      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={pkey} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></motion.div></AnimatePresence><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} />}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />

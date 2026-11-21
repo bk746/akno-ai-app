@@ -248,3 +248,11 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .akno-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 4px rgba(255,255,255,.08)}
 .akno-range::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5)}
 .akno-range:focus-visible{outline:none}.akno-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(47,123,255,.5)}
+
+/* update63 · listes groupées iOS : séparateur fin décalé entre les lignes (sauf la première) */
+.ig > .ig-row, .ig > * > .ig-row, .ig .ig-row { position: relative; }
+.ig .ig-row + .ig-row::before, .ig > * + * > .ig-row:first-child::before, .ig > * + .ig-row::before, .ig > :not(:first-child) > div > .ig-row:first-child::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: 1px; transform: scaleY(.5); transform-origin: top; background: rgba(255, 255, 255, .16); pointer-events: none; }
+/* barre du bas des éditeurs : s'efface quand le clavier est ouvert (pas de saut de mise en page) */
+.kb-hide { transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .18s ease; }
+.kb-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .kb-hide { transition: none; } }

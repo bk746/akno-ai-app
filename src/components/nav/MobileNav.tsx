@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion, type PanInfo } from "motion/react"
 import { CalendarDays, CreditCard, FileText, Lock, MapPin, Pencil, Plus, UserRound } from "lucide-react"
 import type { P } from "../ui"
+import { lastDocMode } from "../../lib/facturesLite"
 
 export type CreateKind = "rdv" | "devis" | "facture" | "chantier" | "note" | "contact"
 type Tab = "rec" | "ag" | "ch" | "fac"
@@ -89,7 +90,9 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate }: { pa
   const pageRef = useRef(page)
   useEffect(() => { if (pageRef.current !== page) { pageRef.current = page; if (openRef.current && !closing.current) { pushed.current = false; pending.current = null; setOpen(false) } } }, [page])
   const toggle = () => { const now = Date.now(); if (now - lastToggle.current < 220) return; lastToggle.current = now; if (openRef.current) hide(); else show() }
-  const tapTab = (t: Tab) => { if (openRef.current) hide(() => go(t)); else go(t) }
+  // update63 · l'onglet Factures rouvre le dernier mode choisi (Devis ou Factures) ; déjà dans l'onglet : rien ne bouge
+  const dest = (t: Tab): P => t === "fac" ? lastDocMode() : t
+  const tapTab = (t: Tab) => { const run = () => { if (tabOf(pageRef.current) !== t) go(dest(t)) }; if (openRef.current) hide(run); else run() }
   const pick = (k: CreateKind) => hide(() => onCreate(k))
   const onDragEnd = (_: unknown, i: PanInfo) => { if (i.offset.y > 90 || i.velocity.y > 600) hide() }
   const active = tabOf(page)

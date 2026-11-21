@@ -24,12 +24,12 @@ export function NumField({ value, onChange, suffix, min = 0, max, ariaLabel, cla
 }
 
 /** − valeur + : pour les heures et les quantités (gros boutons au doigt sur mobile). */
-export function Stepper({ value, onChange, step = 0.5, suffix, ariaLabel, big }: { value: number; onChange: (n: number) => void; step?: number; suffix?: string; ariaLabel: string; big?: boolean }) {
+export function Stepper({ value, onChange, step = 0.5, suffix, ariaLabel, big, soft }: { value: number; onChange: (n: number) => void; step?: number; suffix?: string; ariaLabel: string; big?: boolean; soft?: boolean /* update63 : style iOS sans bordure, 16 px */ }) {
   const h = big ? "h-11" : "h-10", w = big ? "w-11" : "w-9"
   const dec = () => onChange(Math.max(0, Math.round((value - step) * 100) / 100)), inc = () => onChange(Math.round((value + step) * 100) / 100)
-  return <div className={`flex ${h} items-stretch overflow-hidden rounded-[12px] border border-white/[.08] bg-white/[.04] focus-within:border-[#3FD0C9]/70`}>
+  return <div className={`flex ${h} items-stretch overflow-hidden rounded-[12px] ${soft ? "bg-white/[.06] focus-within:shadow-[inset_0_0_0_1px_rgba(47,107,255,.5)]" : "border border-white/[.08] bg-white/[.04] focus-within:border-[#3FD0C9]/70"}`}>
     <button type="button" tabIndex={-1} aria-label={`Diminuer ${ariaLabel}`} onClick={dec} className={`flex ${w} shrink-0 items-center justify-center text-white/55 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.1]`}><Minus size={15} strokeWidth={2} /></button>
-    <label className="flex min-w-0 flex-1 items-center justify-center gap-1"><NumField decimals={1} value={value} onChange={n => onChange(n ?? 0)} ariaLabel={ariaLabel} className="min-w-0 max-w-[64px] flex-1" inputClass={`!h-full !rounded-none !border-0 !bg-transparent !px-0 ${suffix ? "!text-right" : "!text-center"}`} />{suffix && <span className="shrink-0 pr-1 text-[12.5px] text-white/40">{suffix}</span>}</label>
+    <label className="flex min-w-0 flex-1 items-center justify-center gap-1"><NumField decimals={1} value={value} onChange={n => onChange(n ?? 0)} ariaLabel={ariaLabel} className="min-w-0 max-w-[64px] flex-1" inputClass={`!h-full !rounded-none !border-0 !bg-transparent !px-0 ${suffix ? "!text-right" : "!text-center"}${soft ? " !text-[16px]" : ""}`} />{suffix && <span className="shrink-0 pr-1 text-[12.5px] text-white/40">{suffix}</span>}</label>
     <button type="button" tabIndex={-1} aria-label={`Augmenter ${ariaLabel}`} onClick={inc} className={`flex ${w} shrink-0 items-center justify-center text-white/55 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.1]`}><Plus size={15} strokeWidth={2} /></button>
   </div>
 }

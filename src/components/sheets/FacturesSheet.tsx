@@ -6,8 +6,11 @@ import { api } from "../../lib/accountApi"
 import { CO, e2, missingLegal } from "../../lib/devisDoc"
 import { NATURE, TYPE_LABEL, downloadFacture, downloadFactureXml, factureFile, factureTotals, type FLine, type Facture } from "../../lib/facturePdf"
 import { fmtPct } from "../../../api/_lib/factureCalc"
+import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Reveal, ival, type Contact } from "../form/grouped"
+import { NumField, Stepper } from "../devis/fields"
 
-/* update46 · Factures : brouillon → émise (numéro légal) → envoyée → payée, avoirs, relances d'impayés validées par l'artisan. */
+/* update46 · Factures : brouillon → émise (numéro légal) → envoyée → payée, avoirs, relances d'impayés validées par l'artisan.
+   update63 · éditeur de facture au style iOS (sections Client, Chantier, Prestations, Conditions), même logique et mêmes champs. */
 type Rel = { id: string; facture_id: string; niveau: number; statut: string; sujet: string | null; corps: string | null; prepared_at: string }
 const ST: Record<string, [string, string]> = { brouillon: ["Brouillon", GREY], emise: ["Émise", AMBER], envoyee: ["Envoyée", AMBER], payee: ["Payée", GREEN], annulee: ["Annulée", GREY] }
 const NIV = ["", "Rappel courtois", "Relance", "Relance ferme", "Mise en demeure"]
@@ -21,7 +24,7 @@ export async function createFactureFromDevis(devisId: string, type: "facture" | 
   return api("/api/devis", { action: "facture_from_devis", devis_id: devisId, type, ...(type === "situation" ? { avancement: pourcentage } : { pourcentage }) })
 }
 
-export default function FacturesSheet({ close, openId, startNew }: { close: () => void; openId?: string; startNew?: boolean }) {
+export default function FacturesSheet({ close, openId, startNew, clients = [] }: { close: () => void; openId?: string; startNew?: boolean; clients?: Contact[] }) {
   const [rows, setRows] = useState<Facture[] | null>(null), [rels, setRels] = useState<Rel[]>([])
   const [tab, setTab] = useState<"todo" | "all" | "paid">("all"), [open, setOpen] = useState<string | null>(openId || null), [err, setErr] = useState("")
   const load = useCallback(async () => {
@@ -50,7 +53,7 @@ export default function FacturesSheet({ close, openId, startNew }: { close: () =
   // update62 · bouton « + » → « Nouvelle facture » : ouvre directement un brouillon (même parcours que le bouton du bas)
   const started = useRef(false)
   useEffect(() => { if (startNew && rows !== null && !err && !started.current) { started.current = true; void newBlank() } }, [startNew, rows, err]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (open && rows) { const f = rows.find(x => x.id === open); if (f) return <FactureDetail f={f} rels={rels.filter(r => r.facture_id === f.id)} close={() => { setOpen(null); void load() }} reload={load} openOther={id => { void load().then(() => setOpen(id)) }} /> }
+  if (open && rows) { const f = rows.find(x => x.id === open); if (f) return <FactureDetail clients={clients} f={f} rels={rels.filter(r => r.facture_id === f.id)} close={() => { setOpen(null); void load() }} reload={load} openOther={id => { void load().then(() => setOpen(id)) }} /> }
   const unpaid = (rows || []).filter(x => (x.statut === "emise" || x.statut === "envoyee") && x.type !== "avoir")
   const list = (rows || []).filter(x => tab === "all" ? true : tab === "paid" ? x.statut === "payee" : late(x) || rels.some(r => r.facture_id === x.id) || x.statut === "brouillon")
   return <Sheet title="Factures" sub={rows ? `${unpaid.length} à encaisser · ${e2(unpaid.reduce((a, x) => a + due(x), 0))}` : "Chargement…"} c="#FFFFFF" onClose={close} footer={<Btn primary className="w-full" onClick={newBlank}><Plus size={18} />Nouvelle facture</Btn>}>
@@ -62,12 +65,15 @@ export default function FacturesSheet({ close, openId, startNew }: { close: () =
     {err && <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{err}</p>}
   </Sheet>
 }
+const FRow = ({ l, v, strong }: { l: string; v: string; strong?: boolean }) => <div className={`ig-row flex min-h-11 items-center justify-between gap-3 py-2 pl-4 pr-4 ${strong ? "text-[16px] font-semibold" : "text-[15px]"}`}><span className={strong ? "text-white" : "text-white/55"}>{l}</span><span className={`tabular-nums ${strong ? "text-white" : "text-white/85"}`}>{v}</span></div>
 
-function FactureDetail({ f, rels, close, reload, openOther }: { f: Facture; rels: Rel[]; close: () => void; reload: () => Promise<void>; openOther: (id: string) => void }) {
-  const { toast } = useC()
+function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Facture; rels: Rel[]; close: () => void; reload: () => Promise<void>; openOther: (id: string) => void; clients: Contact[] }) {
+  const { toast, desk } = useC()
   const draft = !f.numero
   const [d, setD] = useState<Facture>(f), [busy, setBusy] = useState(""), [err, setErr] = useState(""), [mode, setMode] = useState("Virement")
   const [rel, setRel] = useState<Rel | null>(rels[0] || null)
+  const [pickC, setPickC] = useState(false), [coordOpen, setCoordOpen] = useState(() => !(f.client_nom?.trim() && (f.client_email || f.client_telephone || f.client_adresse)))
+  const [siteDiff, setSiteDiff] = useState(() => !!f.adresse_chantier && f.adresse_chantier !== f.client_adresse)
   useEffect(() => { setD(f) }, [f])
   const set = (p: Partial<Facture>) => { setD({ ...d, ...p }); setErr("") }
   const setLine = (i: number, p: Partial<FLine>) => set({ lignes: d.lignes.map((x, j) => j === i ? { ...x, ...p } : x) })
@@ -131,46 +137,75 @@ function FactureDetail({ f, rels, close, reload, openOther }: { f: Facture; rels
   const [stl, stc] = late(f) ? ["En retard", RED] : ST[f.statut] || ST.brouillon
   const ro = !draft
   const v = (k: keyof Facture) => ({ value: String(d[k] ?? ""), disabled: ro, onChange: (e: { target: { value: string } }) => set({ [k]: e.target.value } as Partial<Facture>) })
+  const sum = <div className="mb-2.5 flex items-baseline justify-between gap-3 px-1" aria-label={`Total ${e2(t.ttc)} TTC`}>
+    <span className="truncate text-[12px] tabular-nums text-white/45">HT {e2(t.ht)}{!CO.tvaNA && ` · TVA ${e2(t.tva)}`}{(t.acompte > 0 || t.retenue > 0) && ` · net ${e2(t.net)}`}</span>
+    <span className="shrink-0 text-[19px] font-semibold tabular-nums tracking-[-0.02em]">{e2(t.ttc)}<span className="ml-1 text-[12px] font-medium text-white/45">TTC</span></span>
+  </div>
   return <Sheet title={`${label(f)} ${f.numero || ""}`.trim()} sub={<Chip c={stc}>{stl}</Chip>} c="#FFFFFF" onClose={close}
-    footer={draft
+    footer={<div className="kb-hide">{sum}{draft
       ? <div className="flex gap-2"><Btn className="flex-1" disabled={!!busy} onClick={() => run("save", async () => { if (await saveDraft()) { toast("Brouillon enregistré"); await reload() } })}>Enregistrer</Btn><Btn primary className="flex-1" disabled={!!busy} onClick={emit}>{busy === "emit" ? "Émission…" : "Émettre"}</Btn></div>
-      : <div className="flex gap-2"><Btn className="flex-1" disabled={!!busy} onClick={download}><Download size={17} />{busy === "pdf" ? "…" : "PDF"}</Btn>{f.statut !== "annulee" && <Btn primary className="flex-1" disabled={!!busy} onClick={send}><Send size={17} />{busy === "send" ? "Envoi…" : f.envoyee_le ? "Renvoyer" : "Envoyer"}</Btn>}</div>}>
-    {draft && miss.length > 0 && <div className="mb-4 rounded-[16px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-4 py-3 text-[13.5px] text-white/80">Mentions manquantes (Paramètres › Entreprise) : {miss.join(", ")}.</div>}
+      : <div className="flex gap-2"><Btn className="flex-1" disabled={!!busy} onClick={download}><Download size={17} />{busy === "pdf" ? "…" : "PDF"}</Btn>{f.statut !== "annulee" && <Btn primary className="flex-1" disabled={!!busy} onClick={send}><Send size={17} />{busy === "send" ? "Envoi…" : f.envoyee_le ? "Renvoyer" : "Envoyer"}</Btn>}</div>}</div>}>
+    {draft && miss.length > 0 && <div className="mb-5 rounded-[14px] bg-[#FFB340]/[.09] px-4 py-3 text-[13.5px] text-white/80">Mentions manquantes (Paramètres › Entreprise) : {miss.join(", ")}.</div>}
     {rel && <Card className="mb-4 p-4">
       <div className="flex items-center gap-2 text-[15px] font-medium"><BellRing size={17} className="text-[#FFB340]" />{NIV[rel.niveau] || "Relance"} à valider</div>
       <input className={`${inp} mt-3`} value={rel.sujet || ""} onChange={e => setRel({ ...rel, sujet: e.target.value })} aria-label="Objet" />
       <textarea className={`${inp} mt-2 h-48 py-3 leading-snug`} value={rel.corps || ""} onChange={e => setRel({ ...rel, corps: e.target.value })} aria-label="Message" />
       <div className="mt-3 flex gap-2"><Btn className="flex-1" disabled={!!busy} onClick={ignoreRel}>Ignorer</Btn><Btn primary className="flex-1" disabled={!!busy} onClick={sendRel}>{busy === "rel" ? "Envoi…" : "Valider et envoyer"}</Btn></div>
     </Card>}
-    <div className="space-y-3">
-      <F l="Client"><input className={inp} placeholder="Nom ou raison sociale" {...v("client_nom")} /></F>
-      <div className="grid grid-cols-2 gap-2"><F l="E-mail"><input className={inp} type="email" value={d.client_email || ""} onChange={e => set({ client_email: e.target.value })} /></F><F l="Téléphone"><input className={inp} type="tel" {...v("client_telephone")} /></F></div>
-      <F l="Adresse du client"><input className={inp} {...v("client_adresse")} /></F>
-      <F l="Adresse du chantier (si différente)"><input className={inp} {...v("adresse_chantier")} /></F>
-      <div className="flex items-center gap-3 px-1 text-[14px]"><Tg on={!!d.client_pro} onClick={() => !ro && set({ client_pro: !d.client_pro })} label="Client professionnel" />Client professionnel (SIREN, pénalités de retard, 40 €)</div>
-      {d.client_pro && <div className="grid grid-cols-2 gap-2"><F l="SIREN du client"><input className={inp} inputMode="numeric" {...v("client_siren")} /></F><F l="TVA du client"><input className={inp} {...v("client_tva")} /></F></div>}
-      {d.client_pro && !CO.tvaNA && <div className="flex items-center gap-3 px-1 text-[14px]"><Tg on={!!d.autoliquidation} onClick={() => !ro && set({ autoliquidation: !d.autoliquidation })} label="Autoliquidation" />Sous-traitance BTP : autoliquidation de la TVA</div>}
-      <div className="grid grid-cols-[1.4fr_1fr] gap-2"><F l="Objet"><input className={inp} {...v("objet")} /></F><F l="Date des travaux"><input className={inp} type="date" {...v("date_execution")} /></F></div>
-      <F l="Nature des opérations"><select className={inp} value={d.nature || "services"} disabled={ro} onChange={e => set({ nature: e.target.value })}>{Object.entries(NATURE).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></F>
-      {!CO.tvaNA && <div className="flex items-center gap-3 px-1 text-[14px]"><Tg on={!!d.tva_sur_debits} onClick={() => !ro && set({ tva_sur_debits: !d.tva_sur_debits })} label="TVA sur les débits" />Option pour le paiement de la TVA d'après les débits</div>}
-      {f.type !== "avoir" && f.type !== "acompte" && <div className="flex items-center gap-3 px-1 text-[14px]"><Tg on={Number(d.retenue_garantie_pct) > 0} onClick={() => !ro && set({ retenue_garantie_pct: Number(d.retenue_garantie_pct) > 0 ? 0 : 5 })} label="Retenue de garantie" />Retenue de garantie {Number(d.retenue_garantie_pct) > 0 ? fmtPct(Number(d.retenue_garantie_pct)) : "(5 % max)"}</div>}
-      {f.type === "situation" && f.avancement_pct != null && <div className={`px-1 ${tx.cap}`}>Avancement cumulé : {fmtPct(Number(f.avancement_pct))}{f.devis_numero ? ` · devis n° ${f.devis_numero}` : ""}</div>}
-      <div className={`px-1 pt-2 ${tx.cap}`}>Lignes</div>
-      {d.lignes.map((x, i) => <Card key={i} className="space-y-2 p-3">
-        <div className="flex gap-2"><input className={inp} placeholder="Désignation" value={x.l} disabled={ro} onChange={e => setLine(i, { l: e.target.value })} />{!ro && <button aria-label="Supprimer la ligne" className="px-2 text-white/40" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={17} /></button>}</div>
-        <div className="grid grid-cols-[minmax(0,1fr)_1fr_1.3fr_1fr] gap-2"><input className={inp} type="number" step="0.01" aria-label="Quantité" value={x.q} disabled={ro} onChange={e => setLine(i, { q: Number(e.target.value) })} /><input className={inp} aria-label="Unité" value={x.u || "u"} disabled={ro} onChange={e => setLine(i, { u: e.target.value })} /><input className={inp} type="number" step="0.01" aria-label="Prix unitaire HT" value={x.pu} disabled={ro} onChange={e => setLine(i, { pu: Number(e.target.value) })} /><select className={inp} aria-label="TVA" value={x.tv ?? 20} disabled={ro || CO.tvaNA || !!d.autoliquidation} onChange={e => setLine(i, { tv: Number(e.target.value) })}>{[20, 10, 5.5, 2.1, 0].map(r => <option key={r} value={r}>{String(r).replace(".", ",")} %</option>)}</select></div>
-      </Card>)}
-      {!ro && <Btn className="w-full" onClick={() => set({ lignes: [...d.lignes, { l: "", q: 1, u: "u", pu: 0, tv: 10 }] })}><Plus size={17} />Ajouter une ligne</Btn>}
-      <Card className="space-y-1.5 p-4 text-[14px]">
-        <div className="flex justify-between text-white/60"><span>Total HT</span><span>{e2(t.ht)}</span></div>
-        {t.rates.map(r => <div key={r.r} className="flex justify-between text-white/60"><span>TVA {String(r.r).replace(".", ",")} %</span><span>{e2(r.tva)}</span></div>)}
-        {CO.tvaNA && <div className="text-[12.5px] text-white/45">TVA non applicable, art. 293 B du CGI</div>}
-        <div className="flex justify-between font-semibold"><span>Total TTC</span><span>{e2(t.ttc)}</span></div>
-        {t.acompte > 0 && <div className="flex justify-between text-white/60"><span>Acomptes déduits</span><span>- {e2(t.acompte)}</span></div>}
-        {t.retenue > 0 && <div className="flex justify-between text-white/60"><span>Retenue de garantie</span><span>- {e2(t.retenue)}</span></div>}
-        {(t.acompte > 0 || t.retenue > 0) && <div className="flex justify-between font-semibold"><span>Net à payer</span><span>{e2(t.net)}</span></div>}
-        {f.date_echeance && <div className={tx.cap}>Échéance : {new Date(f.date_echeance + "T12:00:00").toLocaleDateString("fr-FR")}</div>}
-      </Card>
+    <div className="space-y-7 [&_.ig]:!bg-[#1C1C1F] [&_.ig-card]:!bg-[#1C1C1F]">
+      <IGroup title="Client" id="fa-g-client">
+        <ClientRow value={d.client_nom || ""} phone={d.client_telephone || ""} email={d.client_email || ""} onOpen={() => setPickC(true)} disabled={ro} />
+        <DisclosureRow open={coordOpen} onToggle={() => setCoordOpen(o => !o)} title="Coordonnées" sub={[d.client_telephone, d.client_email, d.client_adresse].filter(Boolean).join(" · ") || "E-mail, téléphone, adresse"} />
+        <Reveal open={coordOpen}><div>
+          <IRow label="E-mail" htmlFor="fa-email"><input id="fa-email" className={ival} type="email" inputMode="email" autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="Pour l'envoi de la facture" value={d.client_email || ""} onChange={e => set({ client_email: e.target.value })} /></IRow>
+          <IRow label="Téléphone" htmlFor="fa-tel"><input id="fa-tel" className={ival} type="tel" inputMode="tel" autoComplete="tel" placeholder="06 12 34 56 78" {...v("client_telephone")} /></IRow>
+          <IRow label="Adresse" htmlFor="fa-addr"><input id="fa-addr" className={ival} autoComplete="street-address" autoCapitalize="words" placeholder="N°, rue, code postal, ville" {...v("client_adresse")} /></IRow>
+        </div></Reveal>
+        <IToggleRow label="Client professionnel" sub="SIREN, pénalités de retard, indemnité de 40 €" on={!!d.client_pro} disabled={ro} onChange={() => !ro && set({ client_pro: !d.client_pro })} />
+        <Reveal open={!!d.client_pro}><div>
+          <IRow label="SIREN" htmlFor="fa-siren"><input id="fa-siren" className={ival} inputMode="numeric" autoComplete="off" placeholder="9 chiffres" {...v("client_siren")} /></IRow>
+          <IRow label="N° TVA" htmlFor="fa-tva"><input id="fa-tva" className={ival} autoComplete="off" autoCapitalize="characters" placeholder="FR…" {...v("client_tva")} /></IRow>
+          {!CO.tvaNA && <IToggleRow label="Autoliquidation" sub="Sous-traitance BTP : autoliquidation de la TVA" on={!!d.autoliquidation} disabled={ro} onChange={() => !ro && set({ autoliquidation: !d.autoliquidation })} />}
+        </div></Reveal>
+      </IGroup>
+      <IGroup title="Chantier" id="fa-g-chantier" foot={f.type === "situation" && f.avancement_pct != null ? `Avancement cumulé : ${fmtPct(Number(f.avancement_pct))}${f.devis_numero ? ` · devis n° ${f.devis_numero}` : ""}` : undefined}>
+        <IRow label="Objet" htmlFor="fa-objet"><input id="fa-objet" className={ival} placeholder="Ex. Remplacement chauffe-eau" autoCapitalize="sentences" {...v("objet")} /></IRow>
+        <IToggleRow label="Identique à l'adresse client" sub={!siteDiff ? (d.client_adresse || "Adresse du client à compléter") : undefined} on={!siteDiff} disabled={ro} onChange={on => { if (ro) return; setSiteDiff(!on); if (on) set({ adresse_chantier: "" }) }} />
+        <Reveal open={siteDiff}><IRow label="Adresse" htmlFor="fa-site"><input id="fa-site" className={ival} autoComplete="street-address" autoCapitalize="words" placeholder="Adresse du chantier" {...v("adresse_chantier")} /></IRow></Reveal>
+        <IRow label="Travaux le" htmlFor="fa-date"><input id="fa-date" className={ival + " text-left"} type="date" {...v("date_execution")} /></IRow>
+        <IRow label="Nature" htmlFor="fa-nature"><select id="fa-nature" className={ival + " appearance-none"} value={d.nature || "services"} disabled={ro} onChange={e => set({ nature: e.target.value })}>{Object.entries(NATURE).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></IRow>
+      </IGroup>
+      <section>
+        <div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations{d.lignes.length > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {d.lignes.length} ligne{d.lignes.length > 1 ? "s" : ""}</span>}</div>
+        <div className="space-y-2.5">
+          {d.lignes.map((x, i) => <div key={i} className="ig-card rounded-[18px] bg-[#141416] p-3">
+            <div className="flex items-start gap-1"><input className="h-10 min-w-0 flex-1 rounded-[10px] bg-transparent px-1.5 text-[16px] font-medium text-white outline-none caret-[#2F6BFF] placeholder:font-normal placeholder:text-white/28 focus:bg-white/[.05] disabled:text-white/80" placeholder="Désignation" value={x.l} disabled={ro} onChange={e => setLine(i, { l: e.target.value })} />{!ro && <button type="button" aria-label="Supprimer la ligne" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/35 transition-colors hover:text-[#FF9B96] active:bg-white/[.06]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={17} /></button>}</div>
+            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+              <div><div className="mb-1 px-1 text-[12px] text-white/40">Quantité</div>{ro ? <div className="flex h-11 items-center px-1 text-[16px] tabular-nums text-white/80">{String(x.q).replace(".", ",")}</div> : <Stepper big soft step={1} value={Number(x.q) || 0} onChange={q => setLine(i, { q })} ariaLabel="Quantité" />}</div>
+              <div><div className="mb-1 px-1 text-[12px] text-white/40">Prix unitaire HT</div>{ro ? <div className="flex h-11 items-center justify-end px-1 text-[16px] tabular-nums text-white/80">{e2(Number(x.pu) || 0)}</div> : <NumField value={Number(x.pu) || 0} onChange={n => setLine(i, { pu: n ?? 0 })} suffix="€" ariaLabel="Prix unitaire HT" inputClass="!h-11 !border-0 !bg-white/[.06] !text-[16px]" />}</div>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input className="h-10 w-[92px] rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none disabled:text-white/60" aria-label="Unité" value={x.u || "u"} disabled={ro} onChange={e => setLine(i, { u: e.target.value })} />
+              <select className="h-10 w-[92px] appearance-none rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none [color-scheme:dark] disabled:text-white/60" aria-label="TVA" value={x.tv ?? 20} disabled={ro || CO.tvaNA || !!d.autoliquidation} onChange={e => setLine(i, { tv: Number(e.target.value) })}>{[20, 10, 5.5, 2.1, 0].map(r => <option key={r} value={r}>{String(r).replace(".", ",")} %</option>)}</select>
+              <div className="ml-auto text-right"><div className="text-[11.5px] text-white/35">Total HT</div><div className="text-[17px] font-semibold tabular-nums">{e2(Math.round((Number(x.q) || 0) * (Number(x.pu) || 0) * 100) / 100)}</div></div>
+            </div>
+          </div>)}
+          {!ro && <button type="button" className="ig-card flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[#141416] text-[15.5px] font-medium text-[#7EA6FF] transition-colors active:bg-white/[.06]" onClick={() => set({ lignes: [...d.lignes, { l: "", q: 1, u: "u", pu: 0, tv: 10 }] })}><Plus size={17} strokeWidth={2.2} />Ajouter une ligne</button>}
+        </div>
+      </section>
+      {(!CO.tvaNA || (f.type !== "avoir" && f.type !== "acompte")) && <IGroup title="Conditions" id="fa-g-cond">
+        {!CO.tvaNA && <IToggleRow label="TVA sur les débits" sub="Option pour le paiement de la TVA d'après les débits" on={!!d.tva_sur_debits} disabled={ro} onChange={() => !ro && set({ tva_sur_debits: !d.tva_sur_debits })} />}
+        {f.type !== "avoir" && f.type !== "acompte" && <IToggleRow label="Retenue de garantie" sub={Number(d.retenue_garantie_pct) > 0 ? fmtPct(Number(d.retenue_garantie_pct)) + " du TTC" : "5 % maximum"} on={Number(d.retenue_garantie_pct) > 0} disabled={ro} onChange={() => !ro && set({ retenue_garantie_pct: Number(d.retenue_garantie_pct) > 0 ? 0 : 5 })} />}
+      </IGroup>}
+      <IGroup title="Total" id="fa-g-total" foot={f.date_echeance ? `Échéance : ${new Date(f.date_echeance + "T12:00:00").toLocaleDateString("fr-FR")}` : undefined}>
+        <FRow l="Total HT" v={e2(t.ht)} />
+        {t.rates.map(r => <FRow key={r.r} l={`TVA ${String(r.r).replace(".", ",")} %`} v={e2(r.tva)} />)}
+        {CO.tvaNA && <FRow l="TVA non applicable, art. 293 B du CGI" v="" />}
+        <FRow l="Total TTC" v={e2(t.ttc)} strong />
+        {t.acompte > 0 && <FRow l="Acomptes déduits" v={`- ${e2(t.acompte)}`} />}
+        {t.retenue > 0 && <FRow l="Retenue de garantie" v={`- ${e2(t.retenue)}`} />}
+        {(t.acompte > 0 || t.retenue > 0) && <FRow l="Net à payer" v={e2(t.net)} strong />}
+      </IGroup>
       {!draft && f.type !== "avoir" && <Card className="space-y-1 p-4 text-[13.5px]"><div className="font-medium">Virement bancaire</div>{CO.iban ? <><div className="text-white/70">IBAN {CO.iban}{CO.bic ? ` · BIC ${CO.bic}` : ""}</div><div className="text-white/70">Référence : <b>{f.reference_paiement || f.numero}</b></div></> : <div className="text-[#FFB340]">Ajoutez votre IBAN dans Paramètres › Entreprise pour qu'il figure sur la facture.</div>}</Card>}
       {!draft && <Card className="space-y-2 p-4 text-[13px]">
         <div className="flex items-center gap-2 font-medium"><ShieldCheck size={16} className="text-[#30D158]" />Facture électronique verrouillée</div>
@@ -186,5 +221,11 @@ function FactureDetail({ f, rels, close, reload, openOther }: { f: Facture; rels
       {draft && <button className="w-full py-2 text-[13.5px] text-[#FF9B96]" onClick={delDraft}>Supprimer le brouillon</button>}
     </div>
     {err && <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{err}</p>}
+    <div aria-hidden className="h-10" />
+    <ContactSheet open={pickC} desk={desk} clients={clients} current={d.client_nom || ""} onClose={() => setPickC(false)} onPick={(c, isNew) => {
+      setPickC(false)
+      if (isNew) { set({ client_nom: c.name }); setCoordOpen(true) }
+      else { const nx = { client_nom: c.name, client_email: c.email || d.client_email, client_telephone: c.phone || d.client_telephone, client_adresse: c.addr || d.client_adresse }; set(nx); setCoordOpen(!(nx.client_email || nx.client_telephone || nx.client_adresse)) }
+    }} />
   </Sheet>
 }
