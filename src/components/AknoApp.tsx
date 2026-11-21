@@ -31,6 +31,7 @@ import { digitsFr, formatPhonePairs } from "../lib/phone"
 import { draftDevisFromCall, sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
+import { ClientFactures, FicheEditor, useFiche } from "./sheets/ClientFiche"
 import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, registerPushWorker, sendTestNotification, updateAppBadge } from "../lib/push"
 import Login from "./Login"
 import Flow from "./onboarding/Flow"
@@ -260,10 +261,10 @@ function ctInfos(s: St): CtInfo[] {
 const lastL = (d: string) => !d ? "—" : d === TODAY ? "aujourd'hui" : d === addDays(TODAY, -1) ? "hier" : dd(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short", ...(d.slice(0, 4) !== TODAY.slice(0, 4) ? { year: "numeric" } : {}) })
 const CtRow = ({ x, first, onOpen }: { x: Ct; first?: boolean; onOpen: () => void }) => <Row first={first} label={`Fiche ${x.name}`} onClick={onOpen} lead={<Av n={x.name} />} t={x.name} s={<>{x.phone}<br />{x.calls} appel{x.calls > 1 ? "s" : ""} · dernier contact {lastL(x.last)}</>} r={<TBtn I={Phone} label={`Appeler ${x.name}`} href={`tel:${x.phone.replace(/ /g, "")}`} />} />
 function ContactsSheet({ close }: { close: () => void }) {
-  const { s, modal } = useC(), [q2, setQ2] = useState(""), all = contacts(s).filter(x => match(q2, x.name, x.phone, x.phone.replace(/ /g, ""))).sort((a, b) => sortN(a.name).localeCompare(sortN(b.name)))
+  const { s, modal } = useC(), [q2, setQ2] = useState(""), emails = new Map(ctInfos(s).map(c => [c.name.toLowerCase(), c.email || ""])), all = contacts(s).filter(x => match(q2, x.name, x.phone, x.phone.replace(/ /g, ""), emails.get(x.name.toLowerCase()) || "")).sort((a, b) => sortN(a.name).localeCompare(sortN(b.name)))
   const groups: [string, Ct[]][] = []; all.forEach(x => { const L = sortN(x.name)[0]?.toUpperCase() || "#"; const g = groups.find(g => g[0] === L); g ? g[1].push(x) : groups.push([L, [x]]) })
-  return <Sheet title="Contacts" sub={`${contacts(s).length} contacts depuis le début`} c={A.rec.c} onClose={close}>
-    <div className="relative mb-5"><Search size={16} strokeWidth={1.6} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/40" /><input autoFocus value={q2} onChange={e => setQ2(e.target.value)} placeholder="Rechercher un nom ou un numéro" className={`${inp} pl-11`} aria-label="Rechercher un contact" /></div>
+  return <Sheet title="Clients" sub={`${contacts(s).length} clients et contacts depuis le début`} c={A.rec.c} onClose={close}>
+    <div className="relative mb-5"><Search size={16} strokeWidth={1.6} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/40" /><input autoFocus value={q2} onChange={e => setQ2(e.target.value)} placeholder="Nom, numéro ou e-mail" className={`${inp} pl-11`} aria-label="Rechercher un client" /></div>
     {groups.length ? <div className="space-y-5">{groups.map(([L, xs]) => <div key={L}><div className={`mb-2 px-1 text-[13px] font-semibold text-white/45`}>{L}</div><List>{xs.map((x, i) => <CtRow key={x.key} x={x} first={i === 0} onOpen={() => modal({ kind: "client", data: { name: x.name } })} />)}</List></div>)}</div>
       : <List empty="Aucun contact ne correspond">{[]}</List>}
   </Sheet>
@@ -567,7 +568,7 @@ function SetP() {
     { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => recLock ? openUpgrade("reception") : modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
-      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
+      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => modal({ kind: "contacts" })} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><Row first label="Ma réceptionniste" onClick={() => modal({ kind: "studio" })} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Ma réceptionniste" s={`Voix ${voiceInfo(prof?.reception_config?.voice).name} · script, prestations, FAQ`} r={<Chev />} /><S I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
@@ -678,8 +679,11 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
   }
   const past = ev ? ev.date < TODAY || (ev.date === TODAY && ev.start + ev.dur <= NOW) : false
   const st: [string, string] = ev ? (past ? ["Passé", GREY] : ["À venir", A.ag.c]) : call ? callSt(call) : devis.some(d => d.status === "att") ? ["Devis en attente", AMBER] : ["Client", GREY]
-  const rawPhone = cl?.phone || ev?.phone || call?.phone || tel(name)
-  const raw = rawPhone.replace(/ /g, ""), ph = raw.replace(/(\d\d)(?=\d)/g, "$1 "), addr = cl?.addr || ev?.addr || call?.addr
+  // update61 : fiche client complète (coordonnées modifiables, notes, SIREN) — table client_fiches
+  const { fiche, available: ficheOk, reload: reloadFiche } = useFiche(nm)
+  const rawPhone = fiche?.telephone || cl?.phone || ev?.phone || call?.phone || tel(name)
+  const raw = rawPhone.replace(/ /g, ""), ph = raw.replace(/(\d\d)(?=\d)/g, "$1 "), addr = fiche?.adresse || cl?.addr || ev?.addr || call?.addr
+  const email = fiche?.email || cl?.email || devis.find(d => d.email)?.email
   const hist = [...calls.map(x => ({ t: `Appel · ${x.tag || x.topic}`, w: `${x.day || "Aujourd'hui"} ${x.time}`, I: Phone, o: 0 + (x.day ? 1 : 0) })),
     ...rels.map(r => ({ t: `${r.type} · ${r.canal}`, w: `${r.date} · ${RS[r.status][0]}`, I: Send, o: 2 })),
     ...devis.map(d => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0], I: Receipt, o: 3 }))].sort((a, b) => a.o - b.o)
@@ -687,13 +691,16 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
   return <Sheet title="Fiche client" c={A.rec.c} onClose={close}>
     <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1 flex flex-wrap items-center gap-2"><Chip c={st[1]}>{st[0]}</Chip>{call?.callback && !/^À rappeler/.test(st[0]) && <Chip c={call.urgent ? RED : AMBER}>À rappeler</Chip>}{call?.wantDevis && <Chip c={A.dev.c}>Devis demandé</Chip>}</div>{call?.callback && call.rappelAt && <div className={`mt-1 ${tx.cap}`}>Rappel souhaité · {call.rappelAt}</div>}</div></div>
     <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}<CQA I={Receipt} l="Devis" onClick={() => modal({ kind: "devis", data: { client: nm, objet: ev?.topic || call?.besoin || call?.topic } })} /></div>
-    <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{cl?.email && <KV I={Mail} l="E-mail" v={cl.email} href={`mailto:${cl.email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
+    <div className="mt-6 overflow-hidden rounded-[20px] bg-white/[.04]"><KV I={Phone} l="Téléphone" v={ph} href={`tel:${raw}`} />{email && <KV I={Mail} l="E-mail" v={email} href={`mailto:${email}`} />}{addr && <KV I={MapPin} l="Adresse" v={addr} />}</div>
+    <FicheEditor name={nm} fiche={fiche} available={ficheOk} defaults={{ phone: ph, email, addr }} onSaved={reloadFiche} />
     {cl && <div className="relative mt-3 h-[180px] overflow-hidden rounded-[20px] border border-white/[.06] bg-[#0A0A0B]"><iframe title={`Carte · ${cl.addr}`} src={osm(cl)} loading="lazy" className="h-full w-full border-0 [filter:invert(.92)_hue-rotate(180deg)_saturate(.6)_brightness(.9)]" /><span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">Position approximative</span></div>}
     {ev && <><H>Rendez-vous</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{ev.topic}</div><Chip c={past ? GREY : A.ag.c}>{past ? "Passé" : "À venir"}</Chip></div><div className={`mt-1 ${tx.cap}`}>{fmtD(ev.date)} · {hh(ev.start)} – {hh(ev.start + ev.dur)}</div>{(ev.notes || ev.addr) && <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{[ev.notes, ev.addr].filter(Boolean).join(" · ")}</p>}</div></>}
     {call && <><H>Motif du dernier appel</H><div className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[15px] font-medium">{call.besoin || call.topic}</div><span className={tx.cap}>{call.day ? "hier " : ""}{call.time}</span></div>{call.callback && <div className="mt-2"><Chip c={call.urgent ? RED : AMBER}>À rappeler{call.rappelAt ? ` · ${call.rappelAt}` : ""}</Chip></div>}{call.wantDevis && <div className="mt-2"><Chip c={A.dev.c}>Devis demandé</Chip></div>}<p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{call.note}</p>{playable && <div className="mt-3"><CallInline call={playable} onMic={() => { close(); setChat(true) }} /></div>}<Btn className="mt-3 w-full" disabled={genBusy} onClick={() => void generateDevis()}><Receipt size={15} strokeWidth={1.5} />{genBusy ? "Génération…" : existingDv ? "Voir le devis" : "Générer un devis"}</Btn>{genErr && <div className="mt-2 text-[13px] text-[#FF9B96]">{genErr}</div>}</div></>}
     {(devis.length > 0 || evs.length > 0) && <><H>Devis et rendez-vous</H><div className="overflow-hidden rounded-[20px] bg-white/[.04]">
       {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
       {evs.map((e, i) => <Row key={e.id} first={!devis.length && i === 0} label={`RDV ${e.topic}`} onClick={() => modal({ kind: "ev", data: e })} lead={<Ic I={CalendarDays} />} t={e.topic} s={`${fmtD(e.date)} · ${hh(e.start)} – ${hh(e.start + e.dur)}`} r={<Chev />} />)}</div></>}
+    <ClientFactures name={nm} onOpen={id => modal({ kind: "factures", data: { id } })} />
+    {calls.length > 0 && <><H>Appels et enregistrements ({calls.length})</H><div className="space-y-2">{calls.map(c => <div key={c.id} className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[14.5px] font-medium">{c.besoin || c.topic}</div><span className={`shrink-0 ${tx.cap}`}>{c.day || "Aujourd'hui"} {c.time}{c.dur ? ` · ${c.dur}` : ""}</span></div>{c.note && <p className="mt-1 line-clamp-3 text-[13.5px] leading-relaxed text-white/55">{c.note}</p>}{c.recording && <div className="mt-2.5"><CallInline call={c} onMic={() => { close(); setChat(true) }} /></div>}</div>)}</div></>}
     {hist.length > 0 && <><H>Historique</H><div className="relative pl-2">{hist.map((h, i) => <div key={i} className="relative flex gap-3 pb-4 last:pb-0">{i < hist.length - 1 && <span className="absolute left-[15px] top-8 bottom-0 w-px bg-white/[.08]" />}<span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><h.I size={14} strokeWidth={SW} /></span><div className="min-w-0 pt-1"><div className="truncate text-[14px]">{h.t}</div><div className={tx.cap}>{h.w}</div></div></div>)}</div></>}
   </Sheet>
 }
@@ -704,10 +711,11 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
   const { s, set, toast, modal } = useC()
   const prof = useProfile().p, delays = relDelays(prof?.relance_delais)
   const [factBusy, setFactBusy] = useState(false)
-  const toFacture = async (type: "facture" | "acompte") => {
+  const toFacture = async (type: "facture" | "acompte" | "situation") => {
     if (!isUuidL(String(dv.id))) { toast("Enregistrez d'abord le devis"); return }
     let pct: number | undefined
     if (type === "acompte") { const r = prompt("Pourcentage d'acompte ?", "30"); if (!r) return; pct = Number(r.replace(",", ".")); if (!(pct > 0 && pct <= 100)) { toast("Pourcentage invalide"); return } }
+    if (type === "situation") { const r = prompt("Avancement cumulé des travaux (en %) ?", "50"); if (!r) return; pct = Number(r.replace(",", ".").replace("%", "")); if (!(pct > 0 && pct <= 100)) { toast("Pourcentage invalide"); return } }
     setFactBusy(true)
     const { createFactureFromDevis } = await import("./sheets/FacturesSheet")
     const r = await createFactureFromDevis(String(dv.id), type, pct)
@@ -726,7 +734,21 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
   const ht = lines.reduce((a, x) => a + Number(x.q) * Number(x.pu), 0)
   const tax = CO.tvaNA ? 0 : lines.reduce((a, x) => a + Number(x.q) * Number(x.pu) * (Number(x.tv ?? tv) / 100), 0)
   const doc = buildDoc({ ...dv, lines }, cl, tv, TODAY)
-  const download = () => import("../lib/devisPdf").then(x => { x.downloadPdf(doc); toast(`Devis-${dv.num}.pdf téléchargé`) })
+  // update61 : preuve de signature électronique (signature tracée, horodatage, empreinte, journal)
+  const [signed, setSigned] = useState<import("../lib/devisPdf").SignProof | null>(null)
+  useEffect(() => {
+    if (dv.status !== "val" || !isUuidL(String(dv.id))) { setSigned(null); return }
+    let on = true
+    void (async () => {
+      const { data } = await supabase.from("devis").select("*").eq("id", String(dv.id)).maybeSingle()
+      const r = data as { signe_le?: string; accepte_nom?: string; accepte_ip?: string; accepte_ua?: string; signature_png?: string; document_hash?: string; certifie_tva_reduite?: boolean } | null
+      if (!on || !r?.signe_le) return
+      const { data: ev } = await supabase.from("signature_events").select("event, at, ip, ua, event_hash, prev_hash, document_hash").eq("devis_id", String(dv.id)).order("id")
+      if (on) setSigned({ nom: r.accepte_nom || "", at: r.signe_le, ip: r.accepte_ip, ua: r.accepte_ua, png: r.signature_png, hash: r.document_hash || "", certifTva: r.certifie_tva_reduite, events: (ev || []) as never })
+    })()
+    return () => { on = false }
+  }, [dv.id, dv.status])
+  const download = () => import("../lib/devisPdf").then(x => { x.downloadPdf(doc, signed || undefined); toast(`Devis-${dv.num}${signed ? "-signe" : ""}.pdf téléchargé`) })
   const send = async () => {
     const to = email.trim()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) { setMailErr("Indiquez l'e-mail du client pour l'envoi."); return }
@@ -745,7 +767,8 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
   const stopRem = () => { set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, remindersOff: true } : y), rels: x.rels.map(r => r.devisId === dv.id && r.status === "prog" ? { ...r, status: "pause" } : r) })); toast("Relances de ce devis arrêtées") }
   return <Sheet title={`Devis N° ${dv.num}`} sub={draft ? "Brouillon — à valider" : ST[dv.status][0]} c={A.dev.c} onClose={onClose} footer={draft ? <Btn primary c={A.dev.c} className="w-full" disabled={busy} onClick={send}><Send size={16} />{busy ? "Envoi…" : "Valider et envoyer"}</Btn> : <Btn className="w-full" onClick={onClose}>Fermer</Btn>}>
     {!draft && (dv.status === "val" || dv.status === "ref" || dv.status === "sans" || dv.reply) && <div className="mb-4 rounded-[16px] bg-white/[.04] px-4 py-3 text-[13.5px] text-white/80">
-      {dv.status === "val" && dv.repliedAt && <div>Accepté par le client le {when(dv.repliedAt)}.</div>}
+      {dv.status === "val" && dv.repliedAt && <div>{signed ? `Signé électroniquement par ${signed.nom} le ${when(signed.at)}.` : `Accepté par le client le ${when(dv.repliedAt)}.`}</div>}
+      {signed && <div className="mt-1 break-all text-[11.5px] text-white/40">Empreinte SHA-256 : {signed.hash} · {signed.events?.length || 0} entrée{(signed.events?.length || 0) > 1 ? "s" : ""} au journal de preuve</div>}
       {dv.status === "ref" && dv.repliedAt && <div>Refusé par le client le {when(dv.repliedAt)}.</div>}
       {dv.status === "sans" && <div>Sans réponse après les relances automatiques.</div>}
       {dv.reply && <div className={`${dv.repliedAt || dv.status === "sans" ? "mt-2" : ""} text-white/70`}>« {dv.reply} »</div>}
@@ -764,10 +787,10 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     </>}
     {draft && missingLegal("devis").length > 0 && <button type="button" onClick={() => modal({ kind: "entreprise" })} className="mb-3 block w-full rounded-[14px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-4 py-3 text-left text-[13px] text-white/80">Mentions obligatoires manquantes : {missingLegal("devis").join(", ")}. <span className="font-medium text-white">Compléter</span></button>}
     {mailErr && <div className="mb-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{mailErr}</div>}
-    {dv.status === "val" && <div className="mb-3 grid grid-cols-2 gap-2"><Btn primary c={A.dev.c} disabled={factBusy} onClick={() => toFacture("facture")}><Receipt size={16} />{factBusy ? "…" : "Créer la facture"}</Btn><Btn disabled={factBusy} onClick={() => toFacture("acompte")}>Facture d'acompte</Btn></div>}
-    <DevisPaper d={doc} />
-    <div className="mt-3"><Btn className="w-full" onClick={download}><Download size={15} strokeWidth={1.5} />Télécharger PDF</Btn></div>
-    {dv.token && !draft && <div className="mt-2"><Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${location.origin}/accept/${dv.token}`); toast("Lien d'acceptation copié") }}>Copier le lien client</Btn></div>}
+    {dv.status === "val" && <div className="mb-3 grid grid-cols-2 gap-2"><Btn primary c={A.dev.c} disabled={factBusy} onClick={() => toFacture("facture")}><Receipt size={16} />{factBusy ? "…" : "Créer la facture"}</Btn><Btn disabled={factBusy} onClick={() => toFacture("acompte")}>Acompte</Btn><Btn className="col-span-2" disabled={factBusy} onClick={() => toFacture("situation")}>Situation d'avancement</Btn></div>}
+    <DevisPaper d={doc} sig={signed || undefined} />
+    <div className="mt-3"><Btn className="w-full" onClick={download}><Download size={15} strokeWidth={1.5} />{signed ? "PDF signé + certificat" : "Télécharger PDF"}</Btn></div>
+    {dv.token && !draft && <div className="mt-2"><Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${location.origin}/accept/${dv.token}`); toast("Lien de signature copié") }}>Copier le lien de signature</Btn></div>}
     {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
   </Sheet>
 }

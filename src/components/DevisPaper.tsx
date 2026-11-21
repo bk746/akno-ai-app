@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import { CO, MENTIONS, contactLine, devisGratuitLabel, e2, legalLine, legalName, pct, qty, totals, type DDoc } from "../lib/devisDoc"
 
-const TEAL = "#0E8F8F"
 /* Aperçu A4 (794 × 1123 px à 96 dpi), mis à l'échelle de la largeur disponible */
-export default function DevisPaper({ d }: { d: DDoc }) {
+/** update61 : couleur d'accent et pied de page personnalisés (Réglages → Entreprise), signature électronique affichée une fois signée. */
+export default function DevisPaper({ d, sig }: { d: DDoc; sig?: { nom: string; at: string; png?: string | null } }) {
+  const TEAL = /^#[0-9a-f]{6}$/i.test(CO.accent) ? CO.accent : "#0E8F8F"
   const wrap = useRef<HTMLDivElement>(null), inner = useRef<HTMLDivElement>(null), [k, setK] = useState(.45), [h, setH] = useState(1123), [, setLogo] = useState(0)
   useEffect(() => { const f = () => setLogo(x => x + 1); addEventListener("akno-logo", f); return () => removeEventListener("akno-logo", f) }, [])
   const [cl1, cl2] = contactLine()
@@ -40,8 +41,8 @@ export default function DevisPaper({ d }: { d: DDoc }) {
         {d.notes && <div className="mt-6 rounded-[8px] bg-[#F6F6F8] p-4 text-[12px]"><div className={cap} style={{ color: TEAL }}>Remarques</div><div className="mt-1 whitespace-pre-line">{d.notes}</div></div>}
         <div className="mt-7 space-y-2.5 text-[11px]">{MENTIONS(d).map(([a, b]) => <div key={a}><div className="font-semibold" style={{ color: TEAL }}>{a}</div><div className={mut}>{b}</div></div>)}</div>
         <div className="mt-7 flex items-start justify-between gap-6"><div className="text-[11px]"><div className="text-[13px] font-semibold" style={{ color: TEAL }}>{devisGratuitLabel()}</div><div className={`max-w-[300px] ${mut}`}>Le client reconnaît avoir pris connaissance du présent devis et en accepte les conditions.</div></div>
-          <div className="h-[130px] w-[320px] rounded-[8px] border border-[#D2D2D7] p-3.5 text-[11px]"><div className="text-[13px] font-semibold">Bon pour accord</div><div className={`mt-1 ${mut}`}>Date : ____ / ____ / ________</div><div className={`mt-1 ${mut}`}>Signature précédée de la mention manuscrite « Devis reçu avant l'exécution des travaux, bon pour accord »</div></div></div>
-        <div className={`mt-8 flex justify-between border-t border-[#E4E4E8] pt-2.5 text-[10px] ${mut}`}><span>{[legalName(), CO.siret && `SIRET ${CO.siret}`, CO.rm].filter(Boolean).join(" · ")}</span><span>Page 1 / 1</span></div>
+          <div className="min-h-[130px] w-[320px] rounded-[8px] border border-[#D2D2D7] p-3.5 text-[11px]"><div className="text-[13px] font-semibold">Bon pour accord</div>{sig ? <><div className={`mt-1 ${mut}`}>« Devis reçu avant l'exécution des travaux, bon pour accord »</div><div className="mt-1 font-semibold">Signé électroniquement par {sig.nom}</div><div className={mut}>le {new Date(sig.at).toLocaleString("fr-FR", { timeZone: "Europe/Paris" })}</div>{sig.png && <img src={sig.png} alt="Signature du client" className="mt-1 h-[48px] object-contain object-left" />}</> : <><div className={`mt-1 ${mut}`}>Date : ____ / ____ / ________</div><div className={`mt-1 ${mut}`}>Signature précédée de la mention manuscrite « Devis reçu avant l'exécution des travaux, bon pour accord »</div></>}</div></div>
+        <div className={`mt-8 flex justify-between border-t border-[#E4E4E8] pt-2.5 text-[10px] ${mut}`}><span>{CO.pied || [legalName(), CO.siret && `SIRET ${CO.siret}`, CO.rm].filter(Boolean).join(" · ")}</span><span>Page 1 / 1</span></div>
       </div>
     </div>
   </div>

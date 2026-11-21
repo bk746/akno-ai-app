@@ -72,11 +72,51 @@ DO $$ BEGIN
   END;
 END $$;
 
+
+-- ===== update61 : numérotation sans trou, empreinte, modèles, fiches clients, journal de signature =====
+INSERT INTO public.factures (artisan_id, client_nom, lignes) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Vide', '[]');
+DO $$ BEGIN
+  BEGIN
+    PERFORM public.emettre_facture(id) FROM public.factures WHERE client_nom = 'Vide';
+    INSERT INTO results VALUES ('u61_emission_vide_refusee', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u61_emission_vide_refusee', true);
+  END;
+END $$;
+INSERT INTO public.factures (artisan_id, client_nom, type, lignes, total_ht, total_ttc) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Client S', 'situation', '[{"l":"Situation","q":1,"u":"forfait","pu":500,"tv":10}]', 500, 550);
+INSERT INTO results SELECT 'u61_pas_de_trou_F0002', public.emettre_facture(id) = 'F-' || extract(year FROM now() AT TIME ZONE 'Europe/Paris') || '-0002' FROM public.factures WHERE client_nom = 'Client S';
+INSERT INTO results SELECT 'u61_situation_n1', situation_numero = 1 AND reference_paiement = numero FROM public.factures WHERE client_nom = 'Client S';
+INSERT INTO public.factures (artisan_id, client_nom, type, lignes, total_ht, total_ttc, facture_origine_id) SELECT 'aaaaaaaa-0000-0000-0000-000000000001', 'Client S', 'avoir', lignes, total_ht, total_ttc, id FROM public.factures WHERE client_nom = 'Client S' AND type = 'situation';
+INSERT INTO results SELECT 'u61_avoir_A0003', public.emettre_facture(id) = 'A-' || extract(year FROM now() AT TIME ZONE 'Europe/Paris') || '-0003' FROM public.factures WHERE type = 'avoir';
+INSERT INTO results SELECT 'u61_empreintes', count(*) = 2 AND count(DISTINCT chaine_hash) = 2 AND bool_and(length(document_hash) = 64) FROM public.factures WHERE client_nom = 'Client S';
+INSERT INTO public.factures (artisan_id, client_nom, client_pro, lignes) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Pro sans SIREN', true, '[{"l":"x","q":1,"u":"u","pu":10,"tv":20}]');
+DO $$ BEGIN
+  BEGIN
+    PERFORM public.emettre_facture(id) FROM public.factures WHERE client_nom = 'Pro sans SIREN';
+    INSERT INTO results VALUES ('u61_siren_client_pro_obligatoire', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u61_siren_client_pro_obligatoire', true);
+  END;
+  BEGIN
+    UPDATE public.factures SET retenue_garantie_pct = 1 WHERE client_nom = 'Client S' AND type = 'situation';
+    INSERT INTO results VALUES ('u61_situation_figee', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u61_situation_figee', true);
+  END;
+  BEGIN
+    INSERT INTO public.signature_events (artisan_id, devis_id, event, event_hash) SELECT artisan_id, id, 'signature', 'x' FROM public.devis LIMIT 1;
+    INSERT INTO results VALUES ('u61_journal_signature_serveur_seul', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u61_journal_signature_serveur_seul', true);
+  END;
+END $$;
+INSERT INTO public.devis_modeles (artisan_id, nom, lignes) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Remplacement ballon', '[{"l":"Ballon 200 L","q":1,"pu":900,"tv":10}]');
+INSERT INTO public.client_fiches (artisan_id, cle, nom, notes) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'client a', 'Client A', 'Code portail 1234');
+INSERT INTO results SELECT 'u61_modele_et_fiche_crees', (SELECT count(*) FROM public.devis_modeles) = 1 AND (SELECT count(*) FROM public.client_fiches) = 1;
+
 -- ===== Artisan B =====
 SELECT set_config('request.jwt.claims', '{"sub":"bbbbbbbb-0000-0000-0000-000000000002","role":"authenticated"}', false);
 INSERT INTO results SELECT 'B_ne_voit_pas_calls_A', count(*) = 0 FROM public.calls;
 INSERT INTO results SELECT 'B_ne_voit_pas_devis_A', count(*) = 0 FROM public.devis;
 INSERT INTO results SELECT 'B_ne_voit_pas_factures_A', count(*) = 0 FROM public.factures;
+INSERT INTO results SELECT 'u61_B_ne_voit_pas_modeles_A', count(*) = 0 FROM public.devis_modeles;
+INSERT INTO results SELECT 'u61_B_ne_voit_pas_fiches_A', count(*) = 0 FROM public.client_fiches;
 INSERT INTO results SELECT 'B_voit_sa_seule_fiche', count(*) = 1 FROM public.artisans;
 INSERT INTO results SELECT 'B_storage_isole', count(*) = 0 FROM storage.objects;
 UPDATE public.calls SET nom_client = 'pirate';
@@ -96,6 +136,38 @@ DO $$ BEGIN
 END $$;
 RESET ROLE;
 SELECT set_config('request.jwt.claims', '', false);
+-- update61 : facture émise non supprimable même avec la clé serveur ; devis signé figé
+DO $$ BEGIN
+  BEGIN
+    DELETE FROM public.factures WHERE numero IS NOT NULL;
+    INSERT INTO results VALUES ('u61_facture_emise_jamais_supprimee', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u61_facture_emise_jamais_supprimee', true);
+  END;
+END $$;
+UPDATE public.devis SET signe_le = now(), document_hash = repeat('a', 64), accepte_nom = 'Client A' WHERE client_nom = 'Client A';
+INSERT INTO public.signature_events (artisan_id, devis_id, event, event_hash) SELECT artisan_id, id, 'signature', repeat('b', 64) FROM public.devis WHERE client_nom = 'Client A';
+DO $$ BEGIN
+  BEGIN
+    DELETE FROM public.signature_events;
+    INSERT INTO results VALUES ('u61_journal_ajout_seul', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u61_journal_ajout_seul', true);
+  END;
+END $$;
+UPDATE public.devis SET statut = 'val', total_ttc = 1, lignes = '[{"l":"modifié"}]'::jsonb, accepte_nom = 'Autre', signe_le = NULL WHERE client_nom = 'Client A';
+INSERT INTO results SELECT 'u61_devis_signe_fige', count(*) = 1 FROM public.devis WHERE client_nom = 'Client A' AND total_ttc IS DISTINCT FROM 1 AND NOT coalesce(lignes @> '[{"l":"modifié"}]'::jsonb, false) AND accepte_nom = 'Client A' AND signe_le IS NOT NULL;
+INSERT INTO results SELECT 'u61_devis_signe_statut_modifiable', count(*) = 1 FROM public.devis WHERE client_nom = 'Client A' AND statut = 'val';
+-- update61 : un devis signé ne se supprime pas ; un devis non signé (avec journal d'envoi) se supprime normalement
+DO $$ BEGIN
+  BEGIN
+    DELETE FROM public.devis WHERE client_nom = 'Client A';
+    INSERT INTO results VALUES ('u61_devis_signe_non_supprimable', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u61_devis_signe_non_supprimable', true);
+  END;
+END $$;
+INSERT INTO public.devis (artisan_id, numero, client_nom, statut) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', '99999', 'Client Z', 'env');
+INSERT INTO public.signature_events (artisan_id, devis_id, event, event_hash) SELECT artisan_id, id, 'envoi', repeat('c', 64) FROM public.devis WHERE client_nom = 'Client Z';
+DELETE FROM public.devis WHERE client_nom = 'Client Z';
+INSERT INTO results SELECT 'u61_devis_non_signe_supprimable', NOT EXISTS (SELECT 1 FROM public.devis WHERE client_nom = 'Client Z') AND NOT EXISTS (SELECT 1 FROM public.signature_events WHERE event = 'envoi');
 INSERT INTO results SELECT 'A_intact_apres_B', count(*) = 1 FROM public.calls WHERE nom_client = 'Client A';
 INSERT INTO results SELECT 'A_devis_intacts', count(*) = 2 FROM public.devis;
 INSERT INTO results SELECT 'minutes_comptees', count = 120 FROM public.usage_counters WHERE metric = 'voice_seconds';

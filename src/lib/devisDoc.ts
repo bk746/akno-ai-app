@@ -12,7 +12,13 @@ export const CO = {
   validite: 30, conditions: "", taux: null as number | null,
   logo: "" as string, logoPath: "",
   ins: { by: "", pol: "", zone: "", addr: "" },
+  // update61 : virement, TVA sur les débits, personnalisation des documents
+  bic: "", tvaDebits: false, accent: "#0E8F8F", pied: "",
 }
+/** Couleur d'accent des documents (Réglages → Entreprise), « #RRGGBB » → [r, g, b]. */
+export const accentRgb = (): [number, number, number] => { const m = /^#?([0-9a-f]{6})$/i.exec(CO.accent || ""); const h = m ? m[1] : "0E8F8F"; return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)] }
+/** SIREN = 9 premiers chiffres du SIRET. */
+export const sirenOf = (siret?: string) => { const d = String(siret || "").replace(/\D/g, ""); return d.length >= 9 ? d.slice(0, 9) : "" }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function setCO(a: Record<string, any>) {
   const tarifs = a.tarifs && typeof a.tarifs === "object" ? a.tarifs as { devisGratuit?: boolean } : {}
@@ -26,6 +32,7 @@ export function setCO(a: Record<string, any>) {
     conditions: typeof a.devis_conditions === "string" ? a.devis_conditions.trim() : "",
     taux: (() => { const v = (tarifs as { tauxHoraire?: unknown }).tauxHoraire; const n = v == null || v === "" ? NaN : Number(String(v).replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null })(),
   })
+  Object.assign(CO, { bic: a.bic || "", tvaDebits: !!a.tva_sur_debits, accent: /^#[0-9a-f]{6}$/i.test(String(a.devis_couleur || "")) ? String(a.devis_couleur) : "#0E8F8F", pied: typeof a.devis_pied === "string" ? a.devis_pied.trim() : "" })
   Object.assign(CO.ins, { by: a.assurance_nom || "", pol: a.assurance_numero || "", zone: a.assurance_zone || "", addr: a.assurance_adresse || "" })
   const path = a.logo_path || ""
   if (path !== CO.logoPath) { CO.logoPath = path; CO.logo = ""; if (path) void loadLogo(path) }
@@ -59,7 +66,9 @@ export function missingLegal(kind: "devis" | "facture" = "devis") {
   if (!CO.siret) m.push("SIRET")
   if (!CO.tvaNA && !CO.tva) m.push("n° de TVA (ou « TVA non applicable »)")
   if (!CO.ins.by || !CO.ins.pol) m.push("assurance décennale / RC pro")
-  if (kind === "facture" && !CO.iban) m.push("IBAN (conseillé)")
+  else if (!CO.ins.zone) m.push("couverture géographique de l'assurance")
+  if (!CO.mediateur) m.push("médiateur de la consommation")
+  if (kind === "facture" && !CO.iban) m.push("IBAN (paiement par virement)")
   return m
 }
 export type DLine = { l: string; q: number; u: string; pu: number; tv: number; k?: string; d?: string }
@@ -105,6 +114,12 @@ export const MENTIONS = (d: DDoc) => {
   out.push(["Validité", `Devis valable ${d.validite} jours, jusqu'au ${d.valid}. ${devisGratuitLabel()}. Les prix sont fermes pour la durée de validité.`])
   out.push(["Droit de rétractation", "Si le client est un particulier et que le devis est signé à distance ou hors établissement, il dispose d'un délai de 14 jours pour se rétracter (art. L221-18 du Code de la consommation). Les travaux ne commencent avant la fin de ce délai qu'à sa demande expresse."])
   if (CO.tvaNA) out.push(["TVA", "TVA non applicable, art. 293 B du CGI."])
+  const red = !CO.tvaNA ? [...new Set(d.lines.filter(x => x.k !== "sec" && (x.tv === 10 || x.tv === 5.5)).map(x => x.tv))] : []
+  if (red.length) out.push(["Certification du client (TVA à taux réduit)", tvaReduiteDevis(red.includes(5.5))])
   if (CO.mediateur) out.push(["Médiation de la consommation", `En cas de litige, le client particulier peut recourir gratuitement au médiateur : ${CO.mediateur} (art. L612-1 du Code de la consommation).`])
   return out
 }
+
+/** update61 · Certification du taux réduit (loi n° 2025-127, art. 41 ; BOI-TVA-LIQ-30-20-90-40) : remplace l'attestation 1300/1301-SD. */
+export const tvaReduiteDevis = (energie: boolean) => `En signant ce devis, le client certifie, en qualité de preneur de la prestation, que les travaux réalisés concernent des locaux à usage d'habitation achevés depuis plus de deux ans, qu'ils n'auront pas pour effet, sur une période de deux ans au plus, de concourir à la production d'un immeuble neuf au sens du 2° du 2 du I de l'article 257 du CGI, ni d'entraîner une augmentation de la surface de plancher des locaux existants supérieure à 10 %${energie ? " et, pour les postes à 5,5 %, qu'ils ont la nature de travaux de rénovation énergétique (art. 278-0 bis A du CGI)" : ""} (art. 279-0 bis du CGI).`
+export const tvaReduiteFacture = (energie: boolean) => `Par le règlement de la présente facture, le client certifie, en qualité de preneur de la prestation, que les travaux réalisés concernent des locaux à usage d'habitation achevés depuis plus de deux ans, qu'ils n'ont pas eu pour effet, sur une période de deux ans au plus, de concourir à la production d'un immeuble neuf au sens du 2° du 2 du I de l'article 257 du CGI, ni d'entraîner une augmentation de la surface de plancher des locaux existants supérieure à 10 %${energie ? " et, pour les postes à 5,5 %, qu'ils ont la nature de travaux de rénovation énergétique" : ""}.`

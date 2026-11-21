@@ -1,9 +1,14 @@
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
-import { CO, MENTIONS, contactLine, devisGratuitLabel, e2, legalLine, legalName, pct, qty, totals, type DDoc } from "./devisDoc"
+import { CO, MENTIONS, accentRgb, contactLine, devisGratuitLabel, e2, legalLine, legalName, pct, qty, totals, type DDoc } from "./devisDoc"
 
-export function makePdf(d: DDoc): jsPDF {
-  const t = totals(d), pdf = new jsPDF({ unit: "mm", format: "a4" }), W = 210, M = 16, TEAL: [number, number, number] = [14, 143, 143], INK: [number, number, number] = [20, 20, 22], MUT: [number, number, number] = [110, 110, 118]
+/** update61 · Preuve de signature électronique (journal de la page publique de signature). */
+export type SignProof = { png?: string | null; nom: string; at: string; ip?: string | null; ua?: string | null; hash: string; certifTva?: boolean | null; events?: { event: string; at: string; ip?: string | null; ua?: string | null; event_hash: string; prev_hash?: string | null; document_hash?: string | null }[] }
+const frDT = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " (heure de Paris)"
+const EV: Record<string, string> = { envoi: "Devis envoyé", ouverture: "Devis consulté", consentement: "Consentement « Bon pour accord » coché", signature: "Signature électronique apposée", refus: "Devis refusé" }
+
+export function makePdf(d: DDoc, sig?: SignProof): jsPDF {
+  const t = totals(d), pdf = new jsPDF({ unit: "mm", format: "a4" }), W = 210, M = 16, TEAL: [number, number, number] = accentRgb(), INK: [number, number, number] = [20, 20, 22], MUT: [number, number, number] = [110, 110, 118]
   const txt = (s: string, x: number, y: number, o: { sz?: number; b?: boolean; c?: number[]; al?: "right" | "left" | "center"; w?: number } = {}) => { pdf.setFont("helvetica", o.b ? "bold" : "normal"); pdf.setFontSize(o.sz || 9); pdf.setTextColor(...((o.c || INK) as [number, number, number])); const lines = o.w ? pdf.splitTextToSize(s, o.w) : s; pdf.text(lines, x, y, { align: o.al || "left" }); return Array.isArray(lines) ? lines.length : 1 }
   pdf.setFillColor(...TEAL); pdf.rect(0, 0, W, 2.2, "F")
   // logo de l'artisan (Réglages → Entreprise) ; sans logo, le bloc texte prend la place
@@ -37,10 +42,44 @@ export function makePdf(d: DDoc): jsPDF {
   MENTIONS(d).forEach(([h, s]) => { const n = pdf.splitTextToSize(s, W - 2 * M).length; if (y + 5 + n * 3.5 > 272) { pdf.addPage(); y = 20 } txt(h, M, y, { sz: 7.5, b: true, c: TEAL }); txt(s, M, y + 3.8, { sz: 7.5, c: MUT, w: W - 2 * M }); y += 5.5 + n * 3.4 })
   if (y + 40 > 278) { pdf.addPage(); y = 20 }
   y += 2; pdf.setDrawColor(210, 210, 215); pdf.roundedRect(W - M - 85, y, 85, 36, 2, 2)
-  txt("Bon pour accord", W - M - 81, y + 6, { sz: 9, b: true }); txt("Date : ____ / ____ / ________", W - M - 81, y + 12, { sz: 8, c: MUT }); txt("Signature précédée de la mention manuscrite", W - M - 81, y + 17, { sz: 7, c: MUT }); txt("« Devis reçu avant l'exécution des travaux, bon pour accord »", W - M - 81, y + 21, { sz: 7, c: MUT })
+  txt("Bon pour accord", W - M - 81, y + 6, { sz: 9, b: true })
+  if (sig) {
+    txt(`« Devis reçu avant l'exécution des travaux, bon pour accord »`, W - M - 81, y + 11, { sz: 7, c: MUT })
+    txt(`Signé électroniquement par ${sig.nom}`, W - M - 81, y + 15.5, { sz: 7.5, b: true })
+    txt(`le ${frDT(sig.at)}`, W - M - 81, y + 19.5, { sz: 7, c: MUT })
+    if (sig.png) { try { pdf.addImage(sig.png, "PNG", W - M - 81, y + 21, 40, 13, undefined, "FAST") } catch { /* image facultative */ } }
+  } else { txt("Date : ____ / ____ / ________", W - M - 81, y + 12, { sz: 8, c: MUT }); txt("Signature précédée de la mention manuscrite", W - M - 81, y + 17, { sz: 7, c: MUT }); txt("« Devis reçu avant l'exécution des travaux, bon pour accord »", W - M - 81, y + 21, { sz: 7, c: MUT }) }
   txt(devisGratuitLabel(), M, y + 6, { sz: 9, b: true, c: TEAL }); txt("Le client reconnaît avoir pris connaissance du présent devis et en accepte les conditions.", M, y + 11, { sz: 7.5, c: MUT, w: W - 2 * M - 95 })
+  if (sig) certificate(pdf, d, sig, txt, { W, M, ACC: TEAL, MUT })
   const n = pdf.getNumberOfPages()
-  for (let i = 1; i <= n; i++) { pdf.setPage(i); pdf.setDrawColor(228, 228, 232); pdf.line(M, 284, W - M, 284); txt([legalName(), CO.siret && `SIRET ${CO.siret}`, CO.rm].filter(Boolean).join(" · "), M, 288.5, { sz: 6.5, c: MUT }); txt(`Page ${i} / ${n}`, W - M, 288.5, { sz: 6.5, c: MUT, al: "right" }) }
+  for (let i = 1; i <= n; i++) { pdf.setPage(i); pdf.setDrawColor(228, 228, 232); pdf.line(M, 284, W - M, 284); txt(CO.pied || [legalName(), CO.siret && `SIRET ${CO.siret}`, CO.rm].filter(Boolean).join(" · "), M, 288.5, { sz: 6.5, c: MUT, w: W - 2 * M - 22 }); txt(`Page ${i} / ${n}`, W - M, 288.5, { sz: 6.5, c: MUT, al: "right" }) }
   return pdf
 }
-export const downloadPdf = (d: DDoc) => makePdf(d).save(`Devis-${d.num}.pdf`)
+export const downloadPdf = (d: DDoc, sig?: SignProof) => makePdf(d, sig).save(`Devis-${d.num}${sig ? "-signe" : ""}.pdf`)
+
+type Txt = (s: string, x: number, y: number, o?: { sz?: number; b?: boolean; c?: number[]; al?: "right" | "left" | "center"; w?: number }) => number
+/** Page « Certificat de signature électronique » : identité déclarée, horodatage, IP, navigateur, empreinte SHA-256, journal chaîné. */
+function certificate(pdf: jsPDF, d: DDoc, sig: SignProof, txt: Txt, k: { W: number; M: number; ACC: [number, number, number]; MUT: [number, number, number] }) {
+  const { W, M, ACC, MUT } = k
+  pdf.addPage(); pdf.setFillColor(...ACC); pdf.rect(0, 0, W, 2.2, "F")
+  txt("Certificat de signature électronique", M, 22, { sz: 16, b: true })
+  txt(`Devis n° ${d.num} — ${legalName() || "Entreprise"} · client : ${d.client.name}`, M, 29, { sz: 9.5, c: MUT })
+  let y = 40
+  const row = (a: string, b: string) => { txt(a, M, y, { sz: 8, b: true, c: ACC }); const n = txt(b, M + 52, y, { sz: 8.5, w: W - 2 * M - 52 }); y += Math.max(6, n * 4.2 + 1.8) }
+  row("Signataire (nom déclaré)", sig.nom)
+  row("Date et heure", frDT(sig.at))
+  const sev = [...(sig.events || [])].reverse().find(e => e.event === "signature")
+  row("Adresse IP", sig.ip || sev?.ip || "—")
+  row("Navigateur", (sig.ua || sev?.ua || "—").slice(0, 240))
+  row("Empreinte du devis", `SHA-256 ${sig.hash}`)
+  row("Procédé", "Signature électronique simple au sens du règlement (UE) n° 910/2014 « eIDAS » (art. 3 et 25) : signature tracée à l'écran, nom saisi, case « Bon pour accord » cochée, horodatage serveur et journal de preuve chaîné (art. 1366 et 1367 du Code civil).")
+  if (sig.certifTva) row("Taux réduit de TVA", "Le client a certifié les conditions du taux réduit (mention reproduite sur le devis).")
+  if (sig.png) { txt("Signature", M, y + 2, { sz: 8, b: true, c: ACC }); try { pdf.addImage(sig.png, "PNG", M + 52, y - 3, 60, 20, undefined, "FAST") } catch { /* */ } y += 24 }
+  y += 4; txt("Journal de preuve (chaque entrée inclut l'empreinte de la précédente)", M, y, { sz: 9, b: true }); y += 6
+  for (const e of sig.events || []) {
+    if (y > 268) { pdf.addPage(); y = 20 }
+    txt(`${frDT(e.at)} · ${EV[e.event] || e.event}${e.ip ? ` · IP ${e.ip}` : ""}`, M, y, { sz: 8 })
+    txt(`empreinte ${e.event_hash}`, M, y + 3.8, { sz: 6.5, c: MUT }); y += 9
+  }
+  y += 4; txt("Pour vérifier l'intégrité : recalculer l'empreinte SHA-256 du contenu du devis (numéro, client, lignes, totaux) et la comparer à celle ci-dessus. Le document et son journal sont conservés par l'artisan pendant au moins 10 ans.", M, y, { sz: 7.5, c: MUT, w: W - 2 * M })
+}

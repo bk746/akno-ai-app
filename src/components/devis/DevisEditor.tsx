@@ -5,7 +5,7 @@
    - aucune disparition silencieuse : toute erreur d'enregistrement est affichée en français */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react"
-import { X, Plus, GripVertical, MoreHorizontal, Copy, ArrowUp, ArrowDown, Trash2, BookmarkPlus, Clock, Package, Tag, Layers, Eye, Send, Check, AlertCircle, Loader2, Search, ChevronDown, AlignLeft, Download, User, MapPin } from "lucide-react"
+import { X, Plus, GripVertical, MoreHorizontal, Copy, ArrowUp, ArrowDown, Trash2, BookmarkPlus, Clock, Package, Tag, Layers, Eye, Send, Check, AlertCircle, Loader2, Search, ChevronDown, AlignLeft, Download, User, MapPin, LayoutTemplate } from "lucide-react"
 import { useC } from "../ui"
 import DevisPaper from "../DevisPaper"
 import { CO, buildDoc, missingLegal } from "../../lib/devisDoc"
@@ -15,6 +15,7 @@ import type { Devis } from "../../lib/store"
 import type { Prestation } from "../../lib/prestations"
 import { NumField, Seg, Stepper, Menu, MenuItem, MenuSep, Kbd, isMac, TEAL, TEAL_T, field } from "./fields"
 import { PrestaForm, PrestaPicker, tauxDef } from "./Prestations"
+import Modeles, { type Modele } from "./Modeles"
 
 export type EditorReq = { initial?: Devis; prefill?: { client?: string; objet?: string; amount?: number; phone?: string; addr?: string; email?: string } }
 export type CtInfo = { name: string; phone?: string; email?: string; addr?: string }
@@ -46,6 +47,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
   const [id, setId] = useState<string | null>(init?.id && /^[0-9a-f-]{36}$/i.test(init.id) ? init.id : null)
   const [num, setNum] = useState<number | null>(init?.num || null)
   const [st, setSt] = useState<SaveSt>(init ? "saved" : "new"), [err, setErr] = useState(""), [savedAt, setSavedAt] = useState<number | null>(null)
+  const [modeles, setModeles] = useState(false) // update61 : modèles de devis
   const [picker, setPicker] = useState(false), [preview, setPreview] = useState(false), [form, setForm] = useState<{ initial: any } | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null), [condOpen, setCondOpen] = useState(false)
   const docRef = useRef(doc), idRef = useRef(id), numRef = useRef(num), saving = useRef<Promise<boolean> | null>(null), again = useRef(false), lastJson = useRef(init ? JSON.stringify(serialize(base)) : "")
@@ -118,6 +120,11 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
 
   /* ---------- édition ---------- */
   const set = (p: Partial<Doc>) => setDoc(d => ({ ...d, ...p }))
+  const applyModele = (m: Modele, mode: "replace" | "append") => {
+    const { items, meta } = fromStored(m.lignes, tv0)
+    setDoc(d => mode === "replace" ? { ...d, items, meta: { ...d.meta, ...meta, site: d.meta.site }, objet: d.objet || m.objet || m.nom } : { ...d, items: [...d.items, ...items] })
+    setModeles(false); toast(mode === "replace" ? `Modèle « ${m.nom} » appliqué` : `Lignes de « ${m.nom} » ajoutées`)
+  }
   const setMeta = (p: Partial<DevisMeta>) => setDoc(d => ({ ...d, meta: { ...d.meta, ...p } }))
   const setItems = (f: (xs: EdLine[]) => EdLine[]) => setDoc(d => ({ ...d, items: f(d.items) }))
   const patch = (lineId: string, p: Partial<EdLine>) => setItems(xs => xs.map(x => x.id === lineId ? { ...x, ...p } : x))
@@ -172,8 +179,10 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
         <div className="flex items-center gap-2"><span className="truncate text-[16px] font-semibold tracking-[-0.02em]">{num ? `Devis N° ${num}` : "Nouveau devis"}</span>{doc.client.trim() && desk && <span className="truncate text-[14px] text-white/40">· {doc.client}</span>}</div>
         <Status />
       </div>
+      {desk && <button type="button" onClick={() => setModeles(true)} className="flex h-10 items-center gap-2 rounded-full bg-white/[.07] px-4 text-[14px] font-medium text-white/85 transition-colors hover:bg-white/[.11]"><LayoutTemplate size={16} strokeWidth={1.7} />Modèles</button>}
       {desk && <button type="button" onClick={() => setPreview(true)} className="flex h-10 items-center gap-2 rounded-full bg-white/[.07] px-4 text-[14px] font-medium text-white/85 transition-colors hover:bg-white/[.11]"><Eye size={16} strokeWidth={1.7} />Aperçu<Kbd>{mk} P</Kbd></button>}
       {desk && <button type="button" onClick={() => void send()} className="flex h-10 items-center gap-2 rounded-full px-5 text-[14px] font-semibold text-white transition-[filter] hover:brightness-110" style={{ background: TEAL }}><Send size={15} strokeWidth={1.9} />Valider et envoyer</button>}
+      {!desk && <button type="button" aria-label="Modèles de devis" onClick={() => setModeles(true)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[.07] text-white/80"><LayoutTemplate size={18} strokeWidth={1.7} /></button>}
       {!desk && <button type="button" aria-label="Aperçu du devis" onClick={() => setPreview(true)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[.07] text-white/80"><Eye size={18} strokeWidth={1.7} /></button>}
     </div>
   </div>
@@ -266,6 +275,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
       </div>
     </>}
 
+    <AnimatePresence>{modeles && <Modeles desk={desk} current={{ objet: doc.objet, lignes: serialize(doc).lines }} onClose={() => setModeles(false)} onApply={applyModele} />}</AnimatePresence>
     <AnimatePresence>{picker && <PrestaPicker desk={desk} onClose={() => setPicker(false)} onPick={p => fromPresta(p)} onNew={() => { setPicker(false); setForm({ initial: {} }) }} />}</AnimatePresence>
     <AnimatePresence>{form && <PrestaForm initial={form.initial} title={form.initial?.libelle ? "Enregistrer comme prestation" : undefined} onCancel={() => setForm(null)} onDone={p => { setForm(null); if (p) { toast(`« ${p.libelle} » ajoutée à vos prestations`); if (!form.initial?.libelle) fromPresta(p) } }} />}</AnimatePresence>
     <AnimatePresence>{preview && <motion.div className="fixed inset-0 z-[55] flex flex-col bg-black/85 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setPreview(false)}>

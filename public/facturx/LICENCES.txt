@@ -1,0 +1,7 @@
+Ressources embarquées dans les factures Factur-X (PDF/A-3) générées par Akno.
+
+- DroidSans.ttf, DroidSans-Bold.ttf : polices Droid Sans, (c) Google / Ascender Corp.,
+  licence Apache 2.0 (https://www.apache.org/licenses/LICENSE-2.0). Utilisées parce que
+  PDF/A impose des polices intégrées au document.
+- sRGB2014.icc : profil ICC sRGB v2 de l'International Color Consortium (https://www.color.org),
+  redistribution libre sans modification. Sert d'« OutputIntent » obligatoire en PDF/A.

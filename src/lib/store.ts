@@ -124,6 +124,7 @@ export function dbErrorFr(e: { code?: string; message?: string } | null | undefi
     return `Une information obligatoire manque pour ${what}${lab[col] ? ` : ${lab[col]}` : ""}. Vos saisies restent sur cet appareil.`
   }
   if (code === "23514") return `Une valeur n'est pas acceptée par la base pour ${what}.`
+  if (code === "P0001" && /Devis|Facture|facture|journal/.test(msg)) return msg // règles métier de la base (ex. devis signé non supprimable), déjà rédigées en français
   if (code === "PGRST301" || /JWT/i.test(msg)) return "Votre session a expiré. Reconnectez-vous pour enregistrer."
   return `Erreur pendant ${what}. Réessayez dans un instant.`
 }

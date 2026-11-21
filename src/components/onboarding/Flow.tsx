@@ -18,6 +18,7 @@ import { Blob } from "../ui"
 import { EASE, Field, Ghost, Spinner, Submit } from "../auth/fields"
 import FlowShell, { AlertBox, FlowSteps } from "../auth/FlowShell"
 import Offres from "../billing/Offres"
+import { MButton, MChoice, MInput, MScreen, MSub, MTitle } from "./Mobile"
 import { LockSetup } from "../Lock"
 
 type Step = "vous" | "offre" | "entreprise" | "code" | "app"
@@ -97,75 +98,78 @@ function Problem({ msg, retry }: { msg: string; retry: () => void }) {
 const OutBtn = () => <button type="button" onClick={signOut} className="flex h-9 items-center gap-2 rounded-full border border-white/[.12] px-3.5 text-[13.5px] font-medium text-white/75 transition-colors hover:border-white/25 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"><LogOut size={15} strokeWidth={1.9} /><span className="hidden sm:inline">Se déconnecter</span></button>
 const rise = (i: number) => ({ initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, transition: { duration: .4, ease: EASE, delay: .04 * i } })
 
-/* ---------------- 2. Parlons de vous ---------------- */
+/* ---------------- 2. update61 · Métier → Prénom et entreprise → « C'est prêt » (maquette) ---------------- */
+const METIERS_M = ["Plombier", "Électricien", "Maçon", "Menuisier", "Peintre", "Autre"]
 function Vous({ p, ses }: { p: Profile | null; ses: Session }) {
   const reduce = useReducedMotion()
   const meta = (ses.user.user_metadata || {}) as Record<string, unknown>
   const guessPrenom = s(p?.prenom) || s(meta.prenom) || s(meta.given_name) || s(meta.full_name || meta.name).split(/\s+/)[0] || ""
   const m0 = s(p?.entreprise_metier) || s(meta.metier)
+  const [screen, setScreen] = useState<"metier" | "nom" | "pret">(m0 ? "nom" : "metier")
+  const [metier, setMetier] = useState(m0 ? (METIERS_M.includes(m0) ? m0 : "Autre") : ""), [autre, setAutre] = useState(m0 && !METIERS_M.includes(m0) ? m0 : "")
   const [prenom, setPrenom] = useState(guessPrenom), [entreprise, setEntreprise] = useState(s(p?.entreprise_nom) || s(p?.nom_entreprise) || s(meta.entreprise))
-  const [metier, setMetier] = useState(m0 && !METIERS.includes(m0) ? "Autre" : m0), [autre, setAutre] = useState(m0 && !METIERS.includes(m0) ? m0 : "")
-  const [tel, setTel] = useState(fmtTel(s(p?.telephone) || s(meta.telephone))), [cgv, setCgv] = useState(!!s(p?.cgv_version))
+  const [tel, setTel] = useState(fmtTel(s(p?.telephone) || s(meta.telephone)))
   const needCgv = !s(p?.cgv_version)
   const [busy, setBusy] = useState(false), [errs, setErrs] = useState<Record<string, string>>({}), [alert, setAlert] = useState("")
-  const [scope, animate] = useAnimate<HTMLFormElement>()
+  const [scope, animate] = useAnimate<HTMLDivElement>()
   const clear = (k: string) => { if (errs[k]) setErrs(({ [k]: _, ...r }) => r); setAlert("") }
+  const shake = (x: Record<string, string>) => { setErrs(x); if (!reduce && scope.current) void animate(scope.current, { x: [0, -9, 8, -6, 4, -2, 0] }, { duration: .45 }); setTimeout(() => scope.current?.querySelector<HTMLElement>(`[data-f="${Object.keys(x)[0]}"]`)?.focus(), 30) }
+  const nextMetier = () => {
+    if (!metier) return shake({ metier: "Choisissez votre métier." })
+    if (metier === "Autre" && !autre.trim()) return shake({ autre: "Indiquez votre métier." })
+    setErrs({}); setScreen("nom")
+  }
   const submit = async (ev: FormEvent) => {
     ev.preventDefault(); if (busy) return
     const x: Record<string, string> = {}
     if (!prenom.trim()) x.prenom = "Indiquez votre prénom."
     if (!entreprise.trim()) x.entreprise = "Indiquez le nom de votre entreprise."
     if (tel.trim() && digitsFr(tel).length !== 10) x.tel = "Numéro à 10 chiffres, par exemple 06 12 34 56 78."
-    if (needCgv && !cgv) x.cgv = "Acceptez les conditions pour continuer."
-    if (Object.keys(x).length) { setErrs(x); if (!reduce && scope.current) void animate(scope.current, { x: [0, -9, 8, -6, 4, -2, 0] }, { duration: .45 }); setTimeout(() => scope.current?.querySelector<HTMLElement>(`[data-f="${Object.keys(x)[0]}"]`)?.focus(), 30); return }
+    if (Object.keys(x).length) return shake(x)
     setBusy(true); setAlert("")
     const met = metier === "Autre" ? autre.trim() : metier
     const row = { id: ses.user.id, email: ses.user.email || p?.email || null, prenom: prenom.trim(), nom_entreprise: entreprise.trim(), entreprise_nom: entreprise.trim(), entreprise_metier: met || null, telephone: tel.trim() || null }
     const { error } = await supabase.from("artisans").upsert(row, { onConflict: "id" })
     if (error) { console.error("[Akno · profil]", error); setBusy(false); setAlert("Enregistrement impossible. Vérifiez votre connexion, puis réessayez."); return }
+    // Acceptation des CGV : mention « En continuant, vous acceptez les CGV… » sur l'écran d'accueil et ci-dessous
     if (needCgv) {
       const r = await api("/api/account", { action: "accept_cgv", version: CGV_VERSION })
       if (!r.ok) { setBusy(false); setAlert(r.error || "Acceptation des conditions impossible. Réessayez."); return }
     }
-    dispatchEvent(new Event("akno-refresh")) // recharge la fiche → étape suivante
+    setBusy(false); setScreen("pret")
   }
-  return <FlowShell right={<OutBtn />}>
-    <motion.div {...rise(0)}><FlowSteps i={1} className="mb-7" /></motion.div>
-    <motion.h1 {...rise(1)} className="text-[30px] font-semibold leading-[1.1] tracking-[-0.035em] text-balance">Parlons de vous</motion.h1>
-    <motion.p {...rise(2)} className="mt-2.5 text-[15px] leading-[1.5] text-white/50 text-pretty">Akno s'en sert pour vous présenter au téléphone et sur vos devis.</motion.p>
-    <motion.form {...rise(3)} ref={scope} onSubmit={submit} noValidate className="mt-8 space-y-5">
-      <div className="grid gap-5 sm:grid-cols-2">
-        <Field data-f="prenom" label="Prénom" name="given-name" autoComplete="given-name" placeholder="Julien" value={prenom} onChange={e => { setPrenom(e.target.value); clear("prenom") }} error={errs.prenom} required />
-        <Field data-f="entreprise" label="Entreprise" name="organization" autoComplete="organization" placeholder="Martin Plomberie" value={entreprise} onChange={e => { setEntreprise(e.target.value); clear("entreprise") }} error={errs.entreprise} required />
+  const trans = { initial: { opacity: 0, x: reduce ? 0 : 18 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: reduce ? 0 : -18 }, transition: { duration: .26, ease: EASE } }
+  const out = <button type="button" onClick={signOut} className="text-[13px] font-medium text-white/40 hover:text-white/70">Se déconnecter</button>
+  return <AnimatePresence mode="wait" initial={false}>
+    {screen === "metier" && <motion.div key="metier" {...trans}><MScreen back={signOut} footer={<MButton onClick={nextMetier}>Continuer</MButton>}>
+      <div ref={scope}>
+        <MTitle>Votre métier ?</MTitle>
+        <div className="mt-6" data-f="metier" tabIndex={-1}><MChoice options={METIERS_M} value={metier} onChange={v => { setMetier(v); clear("metier") }} /></div>
+        {errs.metier && <p className="mt-2 px-1 text-[13px] text-[#FF6B61]">{errs.metier}</p>}
+        <AnimatePresence initial={false}>{metier === "Autre" && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden"><div className="pt-3"><MInput data-f="autre" autoFocus placeholder="Couvreur, carreleur, chauffagiste…" aria-label="Votre métier" value={autre} onChange={e => { setAutre(e.target.value); clear("autre") }} error={errs.autre} /></div></motion.div>}</AnimatePresence>
       </div>
-      {/* update50 · une liste déroulante au lieu de 13 pastilles : même choix, écran plus calme */}
-      <div className="group/f">
-        <label htmlFor="metier" className="mb-2 flex items-baseline gap-1.5 px-0.5 text-[13px] font-medium text-white/70 transition-colors group-focus-within/f:text-white">Métier <span className="font-normal text-white/35">facultatif</span></label>
-        <div className="relative">
-          <select id="metier" name="metier" value={metier} onChange={e => setMetier(e.target.value)} className={`h-12 w-full appearance-none rounded-[12px] border border-white/[.09] bg-[#0E0E10] pl-4 pr-11 text-[15.5px] outline-none transition-[border-color,box-shadow,background-color] duration-200 [color-scheme:dark] hover:border-white/[.16] focus:border-white/45 focus:bg-[#121214] focus:shadow-[0_0_0_4px_rgba(255,255,255,.07)] ${metier ? "text-white" : "text-white/25"}`}>
-            <option value="">Choisir votre métier</option>
-            {METIERS.map(m => <option key={m} value={m} className="text-white">{m}</option>)}
-          </select>
-          <ChevronDown aria-hidden size={17} strokeWidth={1.8} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/40" />
+    </MScreen></motion.div>}
+    {screen === "nom" && <motion.div key="nom" {...trans}><form onSubmit={submit} noValidate>
+      <MScreen back={() => setScreen("metier")} footer={<><MButton type="submit" busy={busy}>Continuer</MButton><div className="mt-3 text-center">{out}</div></>}>
+        <div ref={scope}>
+          <MTitle>Vous êtes ?</MTitle>
+          <MSub>Akno s'en sert pour vous présenter au téléphone et sur vos devis.</MSub>
+          <div className="mt-6 space-y-2.5">
+            <MInput data-f="prenom" name="given-name" autoComplete="given-name" placeholder="Prénom" aria-label="Prénom" value={prenom} onChange={e => { setPrenom(e.target.value); clear("prenom") }} error={errs.prenom} />
+            <MInput data-f="entreprise" name="organization" autoComplete="organization" placeholder="Nom de l'entreprise" aria-label="Entreprise" value={entreprise} onChange={e => { setEntreprise(e.target.value); clear("entreprise") }} error={errs.entreprise} />
+            <MInput data-f="tel" name="tel" type="tel" autoComplete="tel" inputMode="tel" placeholder="Portable (facultatif)" aria-label="Téléphone portable" value={tel} onChange={e => { setTel(fmtTel(e.target.value)); clear("tel") }} error={errs.tel} />
+          </div>
+          <AnimatePresence initial={false}>{alert && <div className="mt-4"><AlertBox key={alert} t={alert} /></div>}</AnimatePresence>
+          {needCgv && <p className="mt-5 text-[12px] leading-[1.5] text-white/35">En continuant, vous acceptez les <a href="/cgv" target="_blank" rel="noreferrer" className="underline decoration-white/25 underline-offset-2">CGV</a>, le <a href="/dpa" target="_blank" rel="noreferrer" className="underline decoration-white/25 underline-offset-2">contrat de traitement des données</a> et la <a href="/confidentialite" target="_blank" rel="noreferrer" className="underline decoration-white/25 underline-offset-2">Politique de confidentialité</a>.</p>}
         </div>
-        <AnimatePresence initial={false}>{metier === "Autre" && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: .25, ease: EASE }} className="overflow-hidden">
-          <div className="pt-3"><Field label="Votre métier" name="metier-autre" placeholder="Façadier, vitrier, paysagiste…" value={autre} onChange={e => setAutre(e.target.value)} /></div>
-        </motion.div>}</AnimatePresence>
-      </div>
-      <Field data-f="tel" label="Téléphone portable" name="tel" type="tel" autoComplete="tel" inputMode="tel" placeholder="06 12 34 56 78" hint="Pour vous transférer les appels urgents." value={tel} onChange={e => { setTel(fmtTel(e.target.value)); clear("tel") }} error={errs.tel} />
-      {needCgv && <div>
-        <label className="group/c flex cursor-pointer items-start gap-3 text-[13px] leading-[1.55] text-white/55">
-          <input data-f="cgv" type="checkbox" checked={cgv} onChange={e => { setCgv(e.target.checked); clear("cgv") }} aria-invalid={errs.cgv ? true : undefined} className="peer sr-only" />
-          <span aria-hidden className={`mt-[1px] flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-white/60 ${cgv ? "border-white bg-white text-black" : errs.cgv ? "border-[#FF453A]/80" : "border-white/25 group-hover/c:border-white/45"}`}>
-            <motion.span initial={false} animate={{ scale: cgv ? 1 : 0, opacity: cgv ? 1 : 0 }} transition={{ type: "spring", stiffness: 600, damping: 30 }}><Check size={13} strokeWidth={3} /></motion.span></span>
-          <span>J'accepte les <a href="/cgv" target="_blank" rel="noreferrer" className="text-white/80 underline decoration-white/30 underline-offset-2 hover:decoration-white">CGV</a>, le <a href="/dpa" target="_blank" rel="noreferrer" className="text-white/80 underline decoration-white/30 underline-offset-2 hover:decoration-white">contrat de traitement des données</a> et la <a href="/confidentialite" target="_blank" rel="noreferrer" className="text-white/80 underline decoration-white/30 underline-offset-2 hover:decoration-white">politique de confidentialité</a>.</span>
-        </label>
-        {errs.cgv && <p className="mt-2 pl-[30px] text-[12.5px] text-[#FF6B61]">{errs.cgv}</p>}
-      </div>}
-      <AnimatePresence initial={false}>{alert && <AlertBox key={alert} t={alert} />}</AnimatePresence>
-      <div className="pt-1"><Submit busy={busy} busyLabel="Enregistrement…">Continuer</Submit></div>
-    </motion.form>
-  </FlowShell>
+      </MScreen>
+    </form></motion.div>}
+    {screen === "pret" && <motion.div key="pret" {...trans}><MScreen center footer={<MButton onClick={() => dispatchEvent(new Event("akno-refresh"))}>Commencer</MButton>}>
+      <motion.div initial={{ scale: .7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 200, damping: 16 }}><Blob c="#E6E6E6" s={124} /></motion.div>
+      <h1 className="mt-9 text-[28px] font-semibold tracking-[-0.035em]">C'est prêt, {prenom.trim().split(/\s+/)[0]}.</h1>
+      <p className="mt-2 max-w-[260px] text-[15px] leading-[1.5] text-white/50">Vos appels, devis et chantiers, au même endroit.</p>
+    </MScreen></motion.div>}
+  </AnimatePresence>
 }
 
 /* ---------------- 4. Entreprise et mentions légales ---------------- */

@@ -1,15 +1,17 @@
-/* update49 · Étape 1 du parcours : un seul écran pour se connecter OU créer son compte.
+/* update61 · Accueil au style de la maquette : Bienvenue (Apple / Google / e-mail) → « Votre e-mail » → mot de passe.
+   update49 · Étape 1 du parcours : un seul écran pour se connecter OU créer son compte.
    Google / Apple (supabase.auth.signInWithOAuth) + e-mail et mot de passe.
    Les infos « vous » (prénom, entreprise, métier, téléphone, CGV) sont demandées à l'étape suivante,
    pour tout le monde (e-mail, Google ou Apple). Mot de passe oublié / nouveau mot de passe : Login.tsx (inchangés). */
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { AnimatePresence, MotionConfig, motion, useAnimate, useReducedMotion } from "motion/react"
-import { MailCheck } from "lucide-react"
+import { Eye, EyeOff, MailCheck } from "lucide-react"
 import { supabase } from "../../lib/supabase"
 import { Blob } from "../ui"
-import { EASE, Field, Ghost, PasswordField, Spinner, Strength, Submit } from "./fields"
+import { EASE, Ghost, Spinner, Strength } from "./fields"
 import { authErrorFr } from "./authErrors"
-import FlowShell, { AlertBox, FlowSteps, Outline } from "./FlowShell"
+import FlowShell, { AlertBox, Outline } from "./FlowShell"
+import { MButton, MInput, MScreen, MSub, MTitle } from "../onboarding/Mobile"
 
 type Mode = "signup" | "login"
 type Provider = "google" | "apple"
@@ -17,8 +19,9 @@ type Alert = { t: string; action?: { l: string; on: () => void } } | null
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const RESEND_S = 45
 const ENV = (import.meta.env || {}) as Record<string, string | undefined>
-/** Boutons masqués tant que la variable ne vaut pas "1" (le provider doit d'abord être configuré dans Supabase). */
-export const SHOW: Record<Provider, boolean> = { google: ENV.VITE_AUTH_GOOGLE === "1", apple: ENV.VITE_AUTH_APPLE === "1" }
+/** update61 : boutons toujours affichés (maquette) ; s'ils ne sont pas encore activés dans Supabase, un message clair s'affiche au clic.
+    Mettre VITE_AUTH_GOOGLE=0 / VITE_AUTH_APPLE=0 pour les masquer. */
+export const SHOW: Record<Provider, boolean> = { google: ENV.VITE_AUTH_GOOGLE !== "0", apple: ENV.VITE_AUTH_APPLE !== "0" }
 const NAME: Record<Provider, string> = { google: "Google", apple: "Apple" }
 const home = () => location.origin + "/"
 
@@ -50,11 +53,13 @@ function oauthReturnError(): string {
 const GoogleG = () => <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" /><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" /><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z" /><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" /></svg>
 const AppleLogo = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.48.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65zM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.02.61-2.67 1.37-.58.67-1.09 1.76-.96 2.8 1.02.08 2.06-.52 2.69-1.28z" /></svg>
 
+type Screen = "welcome" | "email" | "password"
 export default function AuthScreen({ initial = "signup", onForgot }: { initial?: Mode; onForgot: () => void }) {
   const reduce = useReducedMotion()
   const [mode, setMode] = useState<Mode>(initial)
+  const [screen, setScreen] = useState<Screen>("welcome")
   const [sent, setSent] = useState(false)
-  const [email, setEmail] = useState(""), [pw, setPw] = useState("")
+  const [email, setEmail] = useState(""), [pw, setPw] = useState(""), [showPw, setShowPw] = useState(false)
   const [busy, setBusy] = useState<"" | "form" | Provider>(""), [errs, setErrs] = useState<{ email?: string; pw?: string }>({}), [alert, setAlert] = useState<Alert>(null)
   const [cool, setCool] = useState(0), [resent, setResent] = useState("")
   const [scope, animate] = useAnimate<HTMLDivElement>()
@@ -65,22 +70,28 @@ export default function AuthScreen({ initial = "signup", onForgot }: { initial?:
   const shake = () => { if (!reduce && scope.current) void animate(scope.current, { x: [0, -9, 8, -6, 4, -2, 0] }, { duration: .45, ease: "easeOut" }) }
   const fail = (e: typeof errs, a: Alert = null) => { setErrs(e); setAlert(a); shake(); const f = Object.keys(e)[0]; if (f) setTimeout(() => root.current?.querySelector<HTMLElement>(`[data-f="${f}"]`)?.focus(), 30) }
   const switchMode = (m: Mode) => { if (m === mode) return; setMode(m); setErrs({}); setAlert(null) }
+  const go = (sc: Screen) => { setScreen(sc); setErrs({}); setAlert(null) }
 
   const oauth = async (p: Provider) => {
     if (busy) return
     setBusy(p); setAlert(null)
     const on = await providerEnabled(p)
-    if (on === false) { setBusy(""); fail({}, { t: `La connexion avec ${NAME[p]} n'est pas encore activée sur Akno. Utilisez votre e-mail et un mot de passe en attendant.` }); return }
+    if (on === false) { setBusy(""); fail({}, { t: `La connexion avec ${NAME[p]} n'est pas encore activée sur Akno. Continuez avec votre e-mail en attendant.`, action: { l: "Continuer avec un e-mail", on: () => { switchMode("signup"); go("email") } } }); return }
     const { error } = await supabase.auth.signInWithOAuth({ provider: p, options: { redirectTo: home() } })
     if (error) { setBusy(""); fail({}, { t: /not enabled|unsupported provider/i.test(error.message) ? `La connexion avec ${NAME[p]} n'est pas encore activée sur Akno.` : authErrorFr(error, "login") }) }
     // Sinon : le navigateur part chez Google / Apple, puis revient sur l'app connecté.
   }
 
+  const nextFromEmail = (e: FormEvent) => {
+    e.preventDefault()
+    if (!EMAIL_RE.test(email.trim())) return fail({ email: "Saisissez une adresse e-mail valide." })
+    go("password")
+  }
   const submit = async (e: FormEvent) => {
     e.preventDefault(); if (busy) return
     setAlert(null)
     const em = email.trim(), x: typeof errs = {}
-    if (!EMAIL_RE.test(em)) x.email = "Saisissez une adresse e-mail valide."
+    if (!EMAIL_RE.test(em)) { go("email"); return fail({ email: "Saisissez une adresse e-mail valide." }) }
     if (mode === "signup" ? pw.length < 8 : !pw) x.pw = mode === "signup" ? "8 caractères minimum." : "Saisissez votre mot de passe."
     if (Object.keys(x).length) return fail(x)
     setBusy("form")
@@ -91,16 +102,14 @@ export default function AuthScreen({ initial = "signup", onForgot }: { initial?:
         return
       }
       // update50 · le déclencheur SQL d'inscription (handle_new_user) écrit prenom / nom_entreprise, colonnes NOT NULL :
-      // sans ces métadonnées il insérait NULL → erreur 500 → « Connexion au serveur impossible ».
-      // Valeurs vides (un espace, ignoré partout grâce à trim) en attendant l'étape « Parlons de vous », qui les remplace.
-      // Correctif côté base : supabase/migrations/20261117_06_update50_signup_trigger.sql (indispensable pour Google / Apple).
+      // valeurs vides (un espace, ignoré partout grâce à trim) en attendant les écrans « métier » et « prénom ».
       const { data, error } = await supabase.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: home(), data: { prenom: " ", entreprise: " " } } })
       // Avec la protection anti-énumération, un e-mail déjà inscrit revient sans erreur mais avec identities = []
       const exists = error ? /^(user_already_exists|email_exists|identity_already_exists)$/.test(String(error.code)) || /already/i.test(error.message) : !!data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0
       if (exists) fail({}, { t: "Un compte existe déjà avec cet e-mail.", action: { l: "Se connecter", on: () => switchMode("login") } })
-      else if (error) { const t = authErrorFr(error, "signup"); if (error.code === "weak_password") fail({ pw: t }); else if (error.code === "email_address_invalid") fail({ email: t }); else fail({}, { t }) }
+      else if (error) { const t = authErrorFr(error, "signup"); if (error.code === "weak_password") fail({ pw: t }); else if (error.code === "email_address_invalid") { go("email"); fail({ email: t }) } else fail({}, { t }) }
       else if (!data.session) { setCool(RESEND_S); setSent(true) }
-      // Avec session : AknoRoot passe seul à l'étape suivante (« Parlons de vous »).
+      // Avec session : AknoRoot passe seul à l'étape suivante (métier, prénom, « C'est prêt »).
     } catch (err) { fail({}, { t: authErrorFr(err, mode) }) }
     finally { setBusy(b => b === "form" ? "" : b) }
   }
@@ -110,45 +119,61 @@ export default function AuthScreen({ initial = "signup", onForgot }: { initial?:
     catch (e) { setAlert({ t: authErrorFr(e, "resend") }) } finally { setBusy("") }
   }
 
-  const providers = (Object.keys(SHOW) as Provider[]).filter(p => SHOW[p])
-  const trans = { initial: { opacity: 0, y: 12, filter: "blur(4px)" }, animate: { opacity: 1, y: 0, filter: "blur(0px)" }, exit: { opacity: 0, y: -8, filter: "blur(4px)" }, transition: { duration: .32, ease: EASE } }
+  const trans = { initial: { opacity: 0, x: reduce ? 0 : 18 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: reduce ? 0 : -18 }, transition: { duration: .26, ease: EASE } }
   const signup = mode === "signup"
+  const alertBox = <AnimatePresence initial={false}>{alert && <div className="mt-4"><AlertBox key={alert.t} t={alert.t} action={alert.action} /></div>}</AnimatePresence>
 
-  return <MotionConfig reducedMotion="user"><div ref={root}><FlowShell>
-    <div ref={scope}>
-      <AnimatePresence mode="wait" initial={false}>
-        {sent ? <motion.div key="sent" {...trans}><Sent email={email.trim()} cool={cool} busy={busy === "form"} resent={resent} alert={alert} onResend={resend} onBack={() => setSent(false)} onLogin={() => { setSent(false); switchMode("login") }} /></motion.div>
-        : <motion.div key="form" {...trans}>
-          <div className="mb-8 h-4">{signup ? <FlowSteps i={0} /> : null}</div>
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div key={mode} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: .22, ease: EASE }}>
-              <h1 className="text-[30px] font-semibold leading-[1.1] tracking-[-0.035em] text-balance">{signup ? "Créez votre espace Akno" : "Bon retour sur Akno"}</h1>
-              <p className="mt-2.5 text-[15px] leading-[1.5] text-white/50 text-pretty">{signup ? "30 jours d'essai gratuit, sans engagement." : "Connectez-vous pour retrouver votre espace."}</p>
-            </motion.div>
-          </AnimatePresence>
+  if (sent) return <MotionConfig reducedMotion="user"><FlowShell><Sent email={email.trim()} cool={cool} busy={busy === "form"} resent={resent} alert={alert} onResend={resend} onBack={() => { setSent(false); go("email") }} onLogin={() => { setSent(false); switchMode("login"); go("password") }} /></FlowShell></MotionConfig>
 
-          {providers.length > 0 && <>
-            <div className="mt-8 space-y-2.5">{providers.map(p => <Outline key={p} className="w-full" disabled={!!busy} onClick={() => oauth(p)}>{busy === p ? <Spinner /> : p === "google" ? <GoogleG /> : <AppleLogo />}Continuer avec {NAME[p]}</Outline>)}</div>
-            <div className="my-6 flex items-center gap-3 text-[12px] text-white/35"><span className="h-px flex-1 bg-white/[.08]" />ou avec votre e-mail<span className="h-px flex-1 bg-white/[.08]" /></div>
-          </>}
+  return <MotionConfig reducedMotion="user"><div ref={root}><AnimatePresence mode="wait" initial={false}>
+    {screen === "welcome" && <motion.div key="welcome" {...trans}><MScreen footer={<div ref={scope}>
+      <div className="space-y-2.5">
+        {SHOW.apple && <MButton busy={busy === "apple"} disabled={!!busy} onClick={() => void oauth("apple")}><AppleLogo />Continuer avec Apple</MButton>}
+        {SHOW.google && <MButton variant="dark" busy={busy === "google"} disabled={!!busy} onClick={() => void oauth("google")}><GoogleG />Continuer avec Google</MButton>}
+      </div>
+      <button type="button" onClick={() => { switchMode("signup"); go("email") }} className="mt-4 h-11 w-full rounded-full text-[15.5px] font-medium text-white transition-colors hover:bg-white/[.05]">Continuer avec un e-mail</button>
+      {alertBox}
+      <p className="mx-auto mt-4 max-w-[300px] text-center text-[12px] leading-[1.5] text-white/35">En continuant, vous acceptez les <a href="/cgv" target="_blank" rel="noreferrer" className="underline decoration-white/25 underline-offset-2 hover:text-white/60">CGV</a> et la <a href="/confidentialite" target="_blank" rel="noreferrer" className="underline decoration-white/25 underline-offset-2 hover:text-white/60">Politique de confidentialité</a>.</p>
+      <p className="mt-3 text-center text-[13px] text-white/45">Déjà un compte ? <button type="button" onClick={() => { switchMode("login"); go("email") }} className="font-medium text-white underline decoration-white/25 underline-offset-[3px] hover:decoration-white">Se connecter</button></p>
+    </div>}>
+      <div className="flex flex-1 flex-col items-center justify-center pb-4 text-center">
+        <motion.div initial={{ scale: .8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 180, damping: 18 }}><Blob c="#E6E6E6" s={124} /></motion.div>
+        <h1 className="mt-9 text-[30px] font-semibold leading-[1.12] tracking-[-0.035em]">Tout votre métier,<br />dans une seule app.</h1>
+        <p className="mt-3 text-[15px] text-white/50">15 jours gratuits, sans engagement.</p>
+      </div>
+    </MScreen></motion.div>}
 
-          <form onSubmit={submit} noValidate method="post" action="#" className={`${providers.length ? "" : "mt-8"} space-y-5`}>
-            <Field data-f="email" label="E-mail professionnel" name="email" type="email" autoComplete={signup ? "email" : "username"} inputMode="email" autoCapitalize="none" placeholder="vous@entreprise.fr" value={email} onChange={e => { setEmail(e.target.value); setErrs(x => ({ ...x, email: undefined })) }} error={errs.email} required />
-            <div>
-              <PasswordField data-f="pw" label="Mot de passe" name="password" autoComplete={signup ? "new-password" : "current-password"} placeholder={signup ? "8 caractères minimum" : "Votre mot de passe"} value={pw} onChange={e => { setPw(e.target.value); setErrs(x => ({ ...x, pw: undefined })) }} error={errs.pw} required
-                aside={!signup ? <button type="button" onClick={onForgot} className="rounded text-[12.5px] font-medium text-white/50 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-white/50">Mot de passe oublié ?</button> : undefined} />
-              {signup && <Strength pw={pw} />}
-            </div>
-            <AnimatePresence initial={false}>{alert && <AlertBox key={alert.t} t={alert.t} action={alert.action} />}</AnimatePresence>
-            <div className="pt-1"><Submit busy={busy === "form"} busyLabel={signup ? "Création…" : "Connexion…"}>{signup ? "Créer mon compte" : "Se connecter"}</Submit></div>
-          </form>
-          {/* update50 · un seul lien discret au lieu des onglets : moins d'éléments, même parcours */}
-          <p className="mt-6 text-center text-[13.5px] text-white/45">{signup ? "Déjà un compte ?" : "Pas encore de compte ?"}{" "}
-            <button type="button" onClick={() => switchMode(signup ? "login" : "signup")} className="rounded font-medium text-white underline decoration-white/25 underline-offset-[3px] transition-colors hover:decoration-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60">{signup ? "Se connecter" : "Créer un compte"}</button></p>
-        </motion.div>}
-      </AnimatePresence>
-    </div>
-  </FlowShell></div></MotionConfig>
+    {screen === "email" && <motion.div key="email" {...trans}><form onSubmit={nextFromEmail} noValidate method="post" action="#">
+      <MScreen back={() => go("welcome")} footer={<MButton type="submit">Continuer</MButton>}>
+        <div ref={scope}>
+          <MTitle>Votre e-mail</MTitle>
+          {!signup && <MSub>Connectez-vous pour retrouver votre espace.</MSub>}
+          <div className="mt-6"><MInput data-f="email" autoFocus name="email" type="email" autoComplete={signup ? "email" : "username"} inputMode="email" autoCapitalize="none" placeholder="vous@entreprise.fr" aria-label="Adresse e-mail" value={email} onChange={e => { setEmail(e.target.value); setErrs({}) }} error={errs.email} /></div>
+          {alertBox}
+        </div>
+      </MScreen>
+    </form></motion.div>}
+
+    {screen === "password" && <motion.div key={`password-${mode}`} {...trans}><form onSubmit={submit} noValidate method="post" action="#">
+      <MScreen back={() => go("email")} footer={<MButton type="submit" busy={busy === "form"}>{busy === "form" ? (signup ? "Création…" : "Connexion…") : signup ? "Créer mon compte" : "Se connecter"}</MButton>}>
+        <div ref={scope}>
+          <MTitle>{signup ? "Choisissez un mot de passe" : "Votre mot de passe"}</MTitle>
+          <MSub>{email.trim()}</MSub>
+          {/* identifiant caché : le trousseau (Face ID / iCloud) associe le mot de passe à l'e-mail */}
+          <input type="email" name="username" autoComplete="username" value={email.trim()} readOnly hidden />
+          <div className="relative mt-6">
+            <MInput data-f="pw" autoFocus name="password" type={showPw ? "text" : "password"} autoComplete={signup ? "new-password" : "current-password"} autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={signup ? "8 caractères minimum" : "Mot de passe"} aria-label="Mot de passe" value={pw} onChange={e => { setPw(e.target.value); setErrs({}) }} error={errs.pw} className="pr-12" />
+            <button type="button" onClick={() => setShowPw(v => !v)} aria-label={showPw ? "Masquer le mot de passe" : "Afficher le mot de passe"} className="absolute right-2 top-[7px] flex h-10 w-10 items-center justify-center rounded-[10px] text-white/45 hover:text-white">{showPw ? <EyeOff size={18} /> : <Eye size={18} />}</button>
+          </div>
+          {signup && <Strength pw={pw} />}
+          {!signup && <button type="button" onClick={onForgot} className="mt-3 px-1 text-[13.5px] font-medium text-white/55 hover:text-white">Mot de passe oublié ?</button>}
+          {alertBox}
+          <p className="mt-6 text-[13.5px] text-white/45">{signup ? "Déjà un compte ?" : "Pas encore de compte ?"}{" "}
+            <button type="button" onClick={() => switchMode(signup ? "login" : "signup")} className="font-medium text-white underline decoration-white/25 underline-offset-[3px] hover:decoration-white">{signup ? "Se connecter" : "Créer un compte"}</button></p>
+        </div>
+      </MScreen>
+    </form></motion.div>}
+  </AnimatePresence></div></MotionConfig>
 }
 
 function Sent({ email, cool, busy, resent, alert, onResend, onBack, onLogin }: { email: string; cool: number; busy: boolean; resent: string; alert: Alert; onResend: () => void; onBack: () => void; onLogin: () => void }) {

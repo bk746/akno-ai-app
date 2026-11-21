@@ -8,7 +8,10 @@ import { missingLegal } from "../../lib/devisDoc"
 
 /* update44 · Écran « Entreprise » : toutes les mentions légales des devis et factures. */
 const FIELDS = ["entreprise_nom", "entreprise_forme", "entreprise_capital", "entreprise_adresse", "entreprise_cp_ville", "entreprise_telephone", "entreprise_email", "entreprise_siret", "entreprise_tva", "entreprise_rcs_rm", "entreprise_ape", "entreprise_mediateur", "assurance_nom", "assurance_numero", "assurance_zone", "assurance_adresse", "iban", "avis_url"] as const
-type Form = Record<(typeof FIELDS)[number], string> & { entreprise_ei: boolean; tva_non_applicable: boolean; delai_paiement_jours: string }
+// update61 : virement (BIC), TVA sur les débits, personnalisation des documents (couleur, pied de page)
+const EXTRA = ["bic", "devis_couleur", "devis_pied"] as const
+const COLORS = ["#0E8F8F", "#2F6BFF", "#14141A", "#C2410C", "#15803D", "#7C3AED", "#B91C1C", "#A16207"]
+type Form = Record<(typeof FIELDS)[number] | (typeof EXTRA)[number], string> & { entreprise_ei: boolean; tva_non_applicable: boolean; tva_sur_debits: boolean; delai_paiement_jours: string }
 
 export default function EntrepriseSheet({ close }: { close: () => void }) {
   const { toast } = useC()
@@ -17,7 +20,9 @@ export default function EntrepriseSheet({ close }: { close: () => void }) {
   const [busy, setBusy] = useState(false), [look, setLook] = useState(false), [err, setErr] = useState(""), [logoBusy, setLogoBusy] = useState(false)
   useEffect(() => {
     if (!p || f) return
-    const o = Object.fromEntries(FIELDS.map(k => [k, String(p[k] ?? "")])) as unknown as Form
+    const o = Object.fromEntries([...FIELDS, ...EXTRA].map(k => [k, String(p[k] ?? "")])) as unknown as Form
+    o.devis_couleur ||= "#0E8F8F"
+    o.tva_sur_debits = !!p.tva_sur_debits
     o.entreprise_nom ||= String(p.nom_entreprise || "")
     o.entreprise_email ||= String(p.email || "")
     o.entreprise_telephone ||= String(p.telephone || "")
@@ -69,9 +74,16 @@ export default function EntrepriseSheet({ close }: { close: () => void }) {
     patch.entreprise_ei = f.entreprise_ei
     patch.tva_non_applicable = f.tva_non_applicable
     patch.delai_paiement_jours = Math.min(60, Math.max(0, Number(f.delai_paiement_jours) || 30))
+    const bic = f.bic.replace(/\s/g, "").toUpperCase()
+    if (bic && !/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(bic)) { setBusy(false); setErr("Le BIC doit comporter 8 ou 11 caractères."); return }
     const e = await save(patch)
+    if (e) { setBusy(false); setErr(e); return }
+    const extra = { bic: bic || null, devis_couleur: /^#[0-9a-f]{6}$/i.test(f.devis_couleur) ? f.devis_couleur : null, devis_pied: f.devis_pied.trim().slice(0, 240) || null, tva_sur_debits: f.tva_sur_debits }
+    const changed = Object.entries(extra).some(([k, v]) => (p?.[k] ?? null) !== v && !(k === "tva_sur_debits" && !v && !p?.[k]) && !(k === "devis_couleur" && v === "#0E8F8F" && !p?.[k]))
+    const e2 = changed ? await save(extra) : ""
     setBusy(false)
-    if (e) setErr(e); else { toast("Entreprise enregistrée"); close() }
+    if (e2) setErr("Mentions enregistrées. BIC, couleur et pied de page : appliquez la migration 20261121_10 (voir LISEZMOI).")
+    else { toast("Entreprise enregistrée"); close() }
   }
   const miss = missingLegal("facture")
   return <Sheet title="Entreprise" sub="Mentions légales des devis et factures" c="#FFFFFF" onClose={close} footer={<Btn primary className="w-full" disabled={busy} onClick={submit}>{busy ? "Enregistrement…" : "Enregistrer"}</Btn>}>
@@ -92,7 +104,13 @@ export default function EntrepriseSheet({ close }: { close: () => void }) {
       <F l="Adresse de l'assureur"><input className={inp} {...v("assurance_adresse")} /></F>
       <F l="Couverture géographique"><input className={inp} placeholder="France métropolitaine" {...v("assurance_zone")} /></F>
       <F l="Médiateur de la consommation (nom et site)"><input className={inp} placeholder="Ex. CM2C — www.cm2c.net" {...v("entreprise_mediateur")} /></F>
-      <div className="grid grid-cols-[1.6fr_1fr] gap-2"><F l="IBAN (factures)"><input className={inp} placeholder="FR76 …" {...v("iban")} /></F><F l="Délai de paiement (j)"><input className={inp} type="number" min={0} max={60} {...v("delai_paiement_jours")} /></F></div>
+      <div className={`px-1 pt-2 ${tx.cap}`}>Paiement par virement (imprimé sur les factures)</div>
+      <F l="IBAN"><input className={inp} placeholder="FR76 …" {...v("iban")} /></F>
+      <div className="grid grid-cols-[1.6fr_1fr] gap-2"><F l="BIC"><input className={inp} placeholder="AGRIFRPP" autoCapitalize="characters" {...v("bic")} /></F><F l="Délai de paiement (j)"><input className={inp} type="number" min={0} max={60} {...v("delai_paiement_jours")} /></F></div>
+      {!f.tva_non_applicable && <div className="flex items-center gap-3 px-1 text-[14px]"><Tg on={f.tva_sur_debits} onClick={() => setF({ ...f, tva_sur_debits: !f.tva_sur_debits })} label="TVA sur les débits" />J'ai opté pour le paiement de la TVA d'après les débits</div>}
+      <div className={`px-1 pt-2 ${tx.cap}`}>Apparence des devis et factures</div>
+      <F l="Couleur d'accent"><div className="flex flex-wrap items-center gap-2">{COLORS.map(c => <button key={c} type="button" aria-label={`Couleur ${c}`} onClick={() => setF({ ...f, devis_couleur: c })} className={`h-9 w-9 rounded-full ring-offset-2 ring-offset-black ${f.devis_couleur.toLowerCase() === c.toLowerCase() ? "ring-2 ring-white" : ""}`} style={{ background: c }} />)}<input type="color" aria-label="Autre couleur" value={/^#[0-9a-f]{6}$/i.test(f.devis_couleur) ? f.devis_couleur : "#0E8F8F"} onChange={e => setF({ ...f, devis_couleur: e.target.value })} className="h-9 w-12 cursor-pointer rounded-[10px] bg-transparent" /></div></F>
+      <F l="Pied de page (facultatif)"><input className={inp} maxLength={240} placeholder="Ex. Merci de votre confiance · www.monentreprise.fr" {...v("devis_pied")} /></F>
       <F l="Lien de VOTRE fiche d'avis Google"><input className={inp} placeholder="https://g.page/r/…/review" {...v("avis_url")} /></F>
       <div className="flex items-center gap-3 rounded-[16px] bg-white/[.04] p-3">
         <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-[12px] bg-white/[.06]">{p?.logo_path ? <Building2 size={20} /> : <ImageIcon size={20} className="text-white/40" />}</span>
