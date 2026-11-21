@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { BellRing, Download, FileCode2, FileText, Plus, Receipt, Send, ShieldCheck, Trash2 } from "lucide-react"
 import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, Tg, inp, tx, useC } from "../ui"
 import { supabase } from "../../lib/supabase"
@@ -21,7 +21,7 @@ export async function createFactureFromDevis(devisId: string, type: "facture" | 
   return api("/api/devis", { action: "facture_from_devis", devis_id: devisId, type, ...(type === "situation" ? { avancement: pourcentage } : { pourcentage }) })
 }
 
-export default function FacturesSheet({ close, openId }: { close: () => void; openId?: string }) {
+export default function FacturesSheet({ close, openId, startNew }: { close: () => void; openId?: string; startNew?: boolean }) {
   const [rows, setRows] = useState<Facture[] | null>(null), [rels, setRels] = useState<Rel[]>([])
   const [tab, setTab] = useState<"todo" | "all" | "paid">("all"), [open, setOpen] = useState<string | null>(openId || null), [err, setErr] = useState("")
   const load = useCallback(async () => {
@@ -47,6 +47,9 @@ export default function FacturesSheet({ close, openId }: { close: () => void; op
     if (error || !data) { setErr("Création impossible."); return }
     await load(); setOpen(data.id)
   }
+  // update62 · bouton « + » → « Nouvelle facture » : ouvre directement un brouillon (même parcours que le bouton du bas)
+  const started = useRef(false)
+  useEffect(() => { if (startNew && rows !== null && !err && !started.current) { started.current = true; void newBlank() } }, [startNew, rows, err]) // eslint-disable-line react-hooks/exhaustive-deps
   if (open && rows) { const f = rows.find(x => x.id === open); if (f) return <FactureDetail f={f} rels={rels.filter(r => r.facture_id === f.id)} close={() => { setOpen(null); void load() }} reload={load} openOther={id => { void load().then(() => setOpen(id)) }} /> }
   const unpaid = (rows || []).filter(x => (x.statut === "emise" || x.statut === "envoyee") && x.type !== "avoir")
   const list = (rows || []).filter(x => tab === "all" ? true : tab === "paid" ? x.statut === "payee" : late(x) || rels.some(r => r.facture_id === x.id) || x.statut === "brouillon")

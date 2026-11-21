@@ -6,7 +6,9 @@ import { PhoneCall, CalendarDays, Repeat2, Receipt, Search, X, ChevronRight } fr
 import type { St } from "../lib/store"
 
 export type K = "rec" | "ag" | "rel" | "dev"
-export type P = K | "set"
+export type P = K | "set" | "fac" | "ch"
+/** update62 · pages d'agent (blob, couleur, configurateur) — « fac » (Factures) et « ch » (Chantiers) n'en sont pas. */
+export const isK = (p: P): p is K => p === "rec" || p === "ag" || p === "rel" || p === "dev"
 export const A = {
   rec: { n: "Réceptionniste", c: "#E6E6E6", tab: "Réception", I: PhoneCall, slug: "reception", d: "Décroche 24/7" },
   ag: { n: "Agenda", c: "#8B7CFF", tab: "Agenda", I: CalendarDays, slug: "agenda", d: "Cale vos RDV" },
@@ -73,7 +75,7 @@ export const Dot = ({ c }: { c: string }) => <span className="h-2 w-2 shrink-0 r
 export const Chip = ({ c, children }: any) => <span className="inline-flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-full px-2 text-[12px] font-medium" style={{ background: c === GREY ? "rgba(255,255,255,.06)" : c + "1F", color: c === GREY ? "rgba(255,255,255,.55)" : c }}><span className="h-[5px] w-[5px] rounded-full" style={{ background: c === GREY ? "rgba(255,255,255,.4)" : c }} />{children}</span>
 export const Circ = ({ children, c, className = "" }: any) => <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white ${className}`} style={c ? { background: c + "29", color: ink(c) } : {}}>{children}</span>
 export const Ic = ({ I, c }: any) => <Circ c={c}><I size={IS} strokeWidth={SW} /></Circ>
-export const Av = ({ n }: { n: string }) => { const { page } = useC(), c = page === "set" ? "#FFFFFF" : A[page].c; return <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold tracking-[.02em] text-white/90" style={{ background: `linear-gradient(180deg, ${c}38, ${c}1A)`, boxShadow: `inset 0 0 0 1px ${c}26` }}>{initials(n)}</span> }
+export const Av = ({ n }: { n: string }) => { const { page } = useC(), c = isK(page) ? A[page].c : "#FFFFFF"; return <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold tracking-[.02em] text-white/90" style={{ background: `linear-gradient(180deg, ${c}38, ${c}1A)`, boxShadow: `inset 0 0 0 1px ${c}26` }}>{initials(n)}</span> }
 export const Row = ({ lead, t, s, r, rs, onClick, first, label }: any) => <div onClick={onClick} {...(onClick ? { role: "button", tabIndex: 0, "aria-label": label, onKeyDown: (e: any) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick() } } } : {})} className={`flex w-full items-center gap-3 pl-4 text-left ${onClick ? "cursor-pointer transition-colors hover:bg-white/[.03] focus-visible:bg-white/[.04]" : ""} first:rounded-t-[24px] last:rounded-b-[24px]`}>
   {lead}<div className={`flex min-h-[64px] min-w-0 flex-1 items-center gap-3 py-3 pr-4 ${first ? "" : "border-t border-white/[.07]"}`}>
     <div className="min-w-0 flex-1"><div className={`truncate ${tx.body}`}>{t}</div>{s && <div className={`mt-0.5 truncate ${tx.cap}`}>{s}</div>}</div>

@@ -39,7 +39,7 @@ import { LockScreen, LockSetup } from "./Lock"
 import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
 import type { Session } from "@supabase/supabase-js"
 import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
-import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
+import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, isK, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
 // update45 : déclaré après les imports (sinon « Cannot access lazy before initialization » en mode dev Vite)
 const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
 // update57 · configurateur « Ma réceptionniste » (chargé à la demande)
@@ -47,11 +47,15 @@ const ReceptionnisteStudio = lazy(() => import("./reception/ReceptionnisteStudio
 import UpdateButton from "./UpdateButton"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
+import MobileNav, { type CreateKind } from "./nav/MobileNav"
+import { dueOf, isLate, isUnpaid, refreshFactures, unpaidCount, useFacturesLite, type FactureLite } from "../lib/facturesLite"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
-const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel", devis: "dev", parametres: "set" }
-const slugOf = (p: P) => p === "set" ? "parametres" : A[p].slug
+const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel", devis: "dev", parametres: "set", factures: "fac", chantiers: "ch" }
+const slugOf = (p: P) => p === "set" ? "parametres" : p === "fac" ? "factures" : p === "ch" ? "chantiers" : A[p].slug
+/** update62 · titre lisible d'une page (Factures et Chantiers ne sont pas des agents) */
+const pageTitle = (p: P) => p === "set" ? "Paramètres" : p === "fac" ? "Factures" : p === "ch" ? "Chantiers" : A[p].tab
 const DAYS = ["Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim."]
 const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
 const _now = new Date(), TODAY = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}-${String(_now.getDate()).padStart(2, "0")}`, NOW = _now.getHours() + _now.getMinutes() / 60
@@ -77,11 +81,11 @@ const tel = (n: string) => { const p = PHONES.get(n); if (p) return p; const f =
 
 function Side() {
   const { page, go, s } = useC(), rr = useRights()
-  const nDev = s.devis.filter(toValidate).length
-  const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}<span className="ml-auto flex items-center gap-2">{id === "rec" && !rr.reception && <LockIco size={13} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" />}{id === "dev" && nDev > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}{on && <span className="h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></span></motion.button> }
+  const nDev = s.devis.filter(toValidate).length, nFac = unpaidCount(useFacturesLite())
+  const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}<span className="ml-auto flex items-center gap-2">{id === "rec" && !rr.reception && <LockIco size={13} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" />}{id === "dev" && nDev > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}{id === "fac" && nFac > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1.5 text-[11px] font-bold text-black">{nFac}</span>}{on && <span className="h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></span></motion.button> }
   return <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/[.07] px-4 py-6">
     <div className="flex h-12 items-center px-3"><img src="/logo.png" alt="Akno" className="h-9" /></div>
-    <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}</nav>
+    <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}<It id="fac" l="Factures" c="#fff" /><It id="ch" l="Chantiers" c="#fff" /></nav>
     <div className={`mt-8 px-3 ${tx.cap}`}>Agents</div>
     <div className="mt-3 space-y-3 px-3">{agents.map(a => <button key={a} onClick={() => go(a)} className="flex w-full items-center gap-3 text-[13px] text-white/70"><Blob c={A[a].c} s={16} />{A[a].n}<span className="ml-auto">{a === "rec" && !rr.reception ? <LockIco size={12} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" /> : <Dot c={s.settings.agents[a] ? GREEN : GREY} />}</span></button>)}</div>
     <div className="mt-auto"><It id="set" l="Paramètres" c="#fff" /><div className="mt-3 flex items-center gap-3 border-t border-white/[.07] px-3 pt-4"><Av n={meName(s)} /><div><div className="text-[13px] font-medium">{meName(s)}</div><div className="text-[12px] text-white/50">{s.settings.company || ""}</div></div></div></div>
@@ -97,17 +101,37 @@ function Top() {
   const { page, q, setQ, modal } = useC(), ref = useRef<HTMLInputElement>(null), rr = useRights()
   useEffect(() => { const f = (e: KeyboardEvent) => { const t = e.target as HTMLElement, typing = /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable
     if (((e.metaKey || e.ctrlKey) && e.key === "k") || (!typing && e.key === "/")) { e.preventDefault(); ref.current?.focus() }
-    else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === "n" || e.key === "N") && page !== "set" && !document.querySelector("[role=dialog]")) { e.preventDefault(); if (isPageLocked(page)) openSetup(); else modal({ kind: plusKind[page] }) } }
+    else if (!typing && !e.metaKey && !e.ctrlKey && (e.key === "n" || e.key === "N") && isK(page) && !document.querySelector("[role=dialog]")) { e.preventDefault(); if (isPageLocked(page)) openSetup(); else modal({ kind: plusKind[page] }) } }
     addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [page, modal])
-  return <div className="flex h-16 shrink-0 items-center border-b border-white/[.07] bg-black px-8"><span className={tx.title}>{page === "set" ? "Paramètres" : A[page].n}</span>
+  return <div className="flex h-16 shrink-0 items-center border-b border-white/[.07] bg-black px-8"><span className={tx.title}>{isK(page) ? A[page].n : pageTitle(page)}</span>
     <div className="ml-auto flex items-center gap-4"><label className="flex h-9 w-[240px] items-center gap-2 rounded-full bg-white/[.07] px-3 text-[13px] text-white/50"><Search size={16} strokeWidth={SW} className="shrink-0" /><input ref={ref} value={q} onChange={e => setQ(e.target.value)} placeholder="Rechercher" className="w-full min-w-0 bg-transparent text-white outline-none placeholder:text-white/40" />{q ? <button aria-label="Effacer" onClick={() => setQ("")}><X size={14} /></button> : <kbd className="ml-auto rounded-[6px] bg-white/[.08] px-1.5 font-sans text-[11px] text-white/50">/</kbd>}</label>
-      <UpdateButton />{page !== "set" && !(page === "rec" && !rr.reception) && <Capsule k={page} />}</div></div>
+      <UpdateButton />{isK(page) && !(page === "rec" && !rr.reception) && <Capsule k={page} />}</div></div>
 }
 function Num({ n, u, money }: { n: number; u?: string; money?: boolean }) {
   const reduce = useReducedMotion(), [v, setV] = useState(0), from = useRef(0)
   useEffect(() => { if (reduce) return; const c = animate(from.current, n, { duration: .9, ease: [.22, 1, .36, 1], onUpdate: x => { from.current = x; setV(x) } }); return () => c.stop() }, [n, reduce])
   const x = Math.round(reduce ? n : v), t = money ? x.toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, " ") : String(x)
   return <span aria-label={`${n}${u ? " " + u : ""}`} className="inline-flex items-baseline gap-[.12em]"><span>{t}</span>{u && <span className="text-[.42em] font-normal tracking-[-0.01em] text-white/45">{u}</span>}</span>
+}
+/* update62 · En-tête mobile commun : retour (pages hors onglets), logo, mise à jour, assistant, accès Réglages (initiales).
+   Devis et Factures : sélecteur Devis / Factures (les deux pages vivent dans l'onglet Factures). */
+function MobileHead({ k }: { k?: K }) {
+  const { page, go } = useC(), rr = useRights()
+  const back = page === "rel" || page === "set"
+  return <><div className="flex h-10 shrink-0 items-center px-5">
+    {back && <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Retour" onClick={() => go(rr.reception || !rr.ready ? "rec" : "ag")} className="-ml-2 mr-1 flex h-10 w-10 items-center justify-center rounded-full text-white/80 [-webkit-tap-highlight-color:transparent]"><ChevronLeft size={24} strokeWidth={1.9} /></motion.button>}
+    <img src="/logo.png" alt="Akno" className="h-[25px] w-auto" />
+    <div className="ml-auto flex items-center gap-2"><UpdateButton sm />{k && <Capsule k={k} sm />}
+      {page !== "set" && <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Réglages" title="Réglages" onClick={() => go("set")} className="ml-1 flex h-9 w-9 items-center justify-center rounded-full [-webkit-tap-highlight-color:transparent]"><Me size={30} /></motion.button>}</div></div>
+    {(page === "dev" || page === "fac") && <div className="mt-4 px-5"><FacSeg /></div>}</>
+}
+function FacSeg() {
+  const { page, go } = useC()
+  const items: [P, string][] = [["dev", "Devis"], ["fac", "Factures"]]
+  return <div role="tablist" aria-label="Devis ou factures" className="grid h-10 grid-cols-2 rounded-full bg-white/[.07] p-1">
+    {items.map(([id, l]) => { const on = page === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => !on && go(id)} className={`relative rounded-full text-[14px] font-semibold transition-colors duration-200 [-webkit-tap-highlight-color:transparent] ${on ? "text-white" : "text-white/55"}`}>
+      {on && <motion.span layoutId="fac-seg" transition={spring} className="absolute inset-0 rounded-full bg-white/[.14] shadow-[inset_0_1px_0_rgba(255,255,255,.08)]" />}<span className="relative">{l}</span></motion.button> })}
+  </div>
 }
 /* Gabarit unique de page : blob + chiffre clé + actions rondes + sections */
 function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any }) {
@@ -120,7 +144,7 @@ function Shell({ k, lead, label, fig, sub, actions, children }: { k?: K; lead?: 
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0"><QA items={actions} /></div></motion.div><div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div>{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
     <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
-    <div className="flex h-10 shrink-0 items-center px-5"><img src="/logo.png" alt="Akno" className="h-[25px] w-auto" /><div className="ml-auto flex items-center gap-2"><UpdateButton sm />{k && <Capsule k={k} sm />}</div></div>
+    <MobileHead k={k} />
     <motion.div variants={rise} className="mt-6 flex flex-col items-center px-5">{LB}{H}</motion.div>
     <motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
     <div className="mt-5 flex flex-col gap-8 px-4">{children}</div>{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
@@ -138,25 +162,12 @@ const NAV_I: Record<P, any> = {
   rel: <><path d="M19.5 12a7.5 7.5 0 0 1-12.9 5.2" /><path d="M4.5 12a7.5 7.5 0 0 1 12.9-5.2" /><path d="M17.8 3.8v3.4h-3.4M6.2 20.2v-3.4h3.4" /></>,
   dev: <><path d="M7 3.5h7l4.5 4.5v10.5A2 2 0 0 1 16.5 20.5h-9.5A2 2 0 0 1 5 18.5v-13a2 2 0 0 1 2-2Z" /><path d="M13.5 3.5V8h5M8.5 12.5h7M8.5 16h4.5" /></>,
   set: <><path d="M4.5 7.5h8M16.5 7.5h3M4.5 16.5h3M11.5 16.5h8" /><circle cx="14.5" cy="7.5" r="2" /><circle cx="9.5" cy="16.5" r="2" /></>,
+  fac: <><rect x="5" y="3.5" width="14" height="17" rx="2.5" /><path d="M8.5 8h7M8.5 11.5h7M8.5 15h4" /></>,
+  ch: <><path d="M12 20.5s-6.25-5.4-6.25-10.6a6.25 6.25 0 0 1 12.5 0c0 5.2-6.25 10.6-6.25 10.6Z" /><circle cx="12" cy="9.9" r="2.3" /></>,
 }
-const NAV_C: Record<P, string> = { rec: "#fff", ag: A.ag.c, rel: A.rel.c, dev: A.dev.c, set: "#fff" }
-const NAV_L: Record<P, string> = { rec: "Réception", ag: "Agenda", rel: "Relance", dev: "Devis", set: "Réglages" }
+const NAV_C: Record<P, string> = { rec: "#fff", ag: A.ag.c, rel: A.rel.c, dev: A.dev.c, set: "#fff", fac: "#fff", ch: "#fff" }
+const NAV_L: Record<P, string> = { rec: "Réception", ag: "Agenda", rel: "Relance", dev: "Devis", set: "Réglages", fac: "Factures", ch: "Chantiers" }
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
-function TabBar() {
-  const { page, go, s } = useC(), rr = useRights()
-  const nDev = s.devis.filter(toValidate).length
-  const ids: P[] = ["rec", "ag", "rel", "dev", "set"]
-  return <nav aria-label="Navigation principale" className="pointer-events-none fixed inset-x-4 z-30 flex justify-center" style={{ bottom: "max(calc(var(--sab) - 10px), 12px)" }}>
-    <div className="pointer-events-auto flex h-[72px] w-full items-center gap-0 rounded-full border border-white/[.10] bg-[#161618]/80 p-[6px] shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]">
-      {ids.map(id => { const on = id === page; return <motion.button key={id} onClick={() => go(id)} aria-label={NAV_L[id]} aria-current={on ? "page" : undefined} whileTap={{ scale: .94 }}
-        className={`relative flex h-full flex-1 flex-col items-center justify-center gap-[5px] rounded-full transition-colors ${on ? "text-white" : "text-white/60"}`}>
-        {on && <motion.span layoutId="tab-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/[.10]" />}
-        <span className="relative">{id === "set" ? <Me size={24} on={on} /> : id === "rec" ? <span className="flex h-6 w-6 items-center justify-center"><img src="/logo.png" alt="" className={`h-[18px] w-auto transition-opacity ${on ? "opacity-100" : "opacity-60"}`} /></span> : <NI d={NAV_I[id]} size={24} />}{id === "rec" && !rr.reception && <span aria-hidden className="absolute -bottom-1 -right-2 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-[#2C2C2E] text-white/70 ring-2 ring-[#161618]"><LockIco size={8} strokeWidth={2.6} /></span>}{id === "dev" && nDev > 0 && <span className="absolute -right-2.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}</span>
-        <span className="relative whitespace-nowrap text-[11px] font-semibold leading-none tracking-[-0.005em]">{NAV_L[id]}</span>
-      </motion.button> })}
-    </div></nav>
-}
-
 /* Lecteur d'appel : audio réel (URL signée) + vitesse 1x / 1.25x / 1.5x / 2x */
 const secs = (d?: string) => { const [m, x] = (d || "0:00").split(":").map(Number); return (m || 0) * 60 + (x || 0) || 1 }
 const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`
@@ -282,6 +293,16 @@ function weekCallCount(calls: Call[]) {
   const mon = mondayParisYmd()
   return calls.filter(c => c.createdAt && parisYmd(new Date(c.createdAt)) >= mon).length
 }
+/* update62 · Relances (devis + demandes d'avis) : hors onglets, accessibles depuis la Réception et Réglages */
+const relPending = (s: St) => s.rels.filter(r => r.status === "prog").length
+function RelancesCard() {
+  const { s, go } = useC(), n = relPending(s), on = s.settings.agents.rel
+  return <motion.button type="button" whileTap={{ scale: .98 }} onClick={() => go("rel")} aria-label={`Relances${n ? `, ${n} à venir` : ""}`} className="flex w-full items-center gap-3 rounded-[24px] border border-white/[.07] bg-[#121214] px-4 py-3.5 text-left [-webkit-tap-highlight-color:transparent]">
+    <Circ><Blob c={A.rel.c} s={20} /></Circ>
+    <span className="min-w-0 flex-1"><span className="block text-[15px] font-medium">Relances</span><span className={`block truncate ${tx.cap}`}>{on ? "Devis sans réponse et demandes d'avis" : "En pause · devis et demandes d'avis"}</span></span>
+    {n > 0 && <span className="flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-[12px] font-semibold text-white" style={{ background: A.rel.c }}>{n}</span>}<Chev />
+  </motion.button>
+}
 /* update48 · sans l'option Réceptionniste IA : présentation de l'option (les appels déjà enregistrés restent dans les fiches clients). */
 function Rec() {
   const { desk, s, modal } = useC(), rr = useRights()
@@ -312,6 +333,7 @@ function RecFull() {
         Appeler ma réceptionniste
       </button>
     </div>
+    <div className="col-span-2"><RelancesCard /></div>
     <Col><Section t="À rappeler" aside={todoS.length ? `${todoS.length} client${todoS.length > 1 ? "s" : ""}` : undefined}><List I={Check} empty="Personne à rappeler. Tout est à jour.">{todoS.map(TRow)}</List></Section>
       {cur && <Section t="Dernier débrief" more={() => open(cur)}><Card className="overflow-hidden"><Row first label={cur.topic} onClick={() => open(cur)} lead={<Av n={cur.name} />} t={cur.topic} s={cur.short || cur.name} r={<span className={tx.cap}>{cur.at || cur.time}</span>} />
       {cur.recording && <div className="px-4 pb-4 pt-1"><Player p={pl} c={c} onMic={() => setChat(true)} /></div>}</Card></Section>}</Col>
@@ -508,8 +530,44 @@ function PrestaCard() {
 }
 
 /* ---------------- Paramètres ---------------- */
+/* ---------------- update62 · Factures (onglet Factures, segment « Factures ») ---------------- */
+const F_LABEL: Record<string, string> = { facture: "Facture", acompte: "Facture d'acompte", situation: "Situation", solde: "Facture de solde", avoir: "Avoir" }
+const F_ST: Record<string, [string, string]> = { brouillon: ["Brouillon", GREY], emise: ["Émise", AMBER], envoyee: ["Envoyée", AMBER], payee: ["Payée", GREEN], annulee: ["Annulée", GREY] }
+const fLabel = (f: FactureLite) => f.type === "situation" && f.situation_numero ? `Situation n° ${f.situation_numero}` : F_LABEL[f.type] || "Facture"
+function FacP() {
+  const { modal, go } = useC(), st = useFacturesLite()
+  useEffect(() => { void refreshFactures() }, [])
+  const rows = st.rows || [], unpaid = rows.filter(isUnpaid), late = unpaid.filter(isLate).length
+  const total = unpaid.reduce((a, f) => a + dueOf(f), 0), others = rows.filter(f => !isUnpaid(f)).slice(0, 8)
+  const FRow = (f: FactureLite, i: number) => { const [l, c] = isLate(f) ? ["En retard", RED] : F_ST[f.statut] || F_ST.brouillon
+    return <Row key={f.id} first={i === 0} label={`Ouvrir ${f.numero || "brouillon"}`} onClick={() => modal({ kind: "factures", data: { id: f.id } })} lead={<Ic I={Receipt} />} t={`${fLabel(f)} ${f.numero || "(brouillon)"}`} s={f.client_nom || "Client à renseigner"} r={e2(f.type === "avoir" ? -dueOf(f) : dueOf(f))} rs={<Chip c={c}>{l}</Chip>} /> }
+  return <Shell lead={<span className="flex h-[88px] w-[88px] items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.14)]"><Receipt size={34} strokeWidth={1.5} /></span>}
+    label={late ? <><Dot c={RED} />{late} en retard</> : <>Factures</>} fig={<Num n={Math.round(total)} u="€" money />}
+    sub={st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}`} actions={[
+      { I: Plus, l: "Nouvelle", on: () => modal({ kind: "factures", data: { create: true } }) }, { I: Receipt, l: "Toutes", on: () => modal({ kind: "factures" }) },
+      { I: FileSignature, l: "Devis", on: () => go("dev") }]}>
+    <Col><Section t="À encaisser" aside={unpaid.length ? e2(total) : undefined}><List I={Check} empty={st.error ? "Factures indisponibles pour le moment." : "Aucune facture en attente de paiement."}>{unpaid.map(FRow)}</List></Section></Col>
+    <Col><Section t="Récentes" more={rows.length ? () => modal({ kind: "factures" }) : undefined}><List empty="Aucune facture pour l'instant.">{others.map(FRow)}</List></Section></Col>
+  </Shell>
+}
+/* ---------------- update62 · Chantiers (page d'attente, aucun contenu encore) ---------------- */
+function ChP() {
+  const { desk } = useC()
+  const empty = <motion.div variants={rise} className="flex flex-1 flex-col items-center justify-center px-8 pb-10 text-center">
+    <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: "radial-gradient(circle, rgba(255,255,255,.08) 0%, transparent 62%)" }} />
+      <span className="relative flex h-[88px] w-[88px] items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.14)]"><MapPin size={34} strokeWidth={1.5} /></span></div>
+    <p className="mt-6 text-[17px] font-semibold tracking-[-0.01em] text-white/90">Bientôt : la carte de vos chantiers</p>
+    <p className={`mt-2 max-w-[280px] ${tx.cap}`}>Retrouvez ici chaque chantier, son adresse et son avancement.</p>
+  </motion.div>
+  if (desk) return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .04 } } }} className="flex h-full flex-col px-8 pt-8"><motion.h1 variants={rise} className="text-[32px] font-semibold tracking-[-0.03em]">Chantiers</motion.h1>{empty}</motion.div>
+  return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .04 } } }} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
+    <MobileHead />
+    <motion.h1 variants={rise} className="mt-6 px-5 text-[32px] font-semibold leading-none tracking-[-0.03em]">Chantiers</motion.h1>
+    {empty}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
+}
 function SetP() {
-  const { s, set, desk, toast, modal } = useC(), st = s.settings, presta = usePrestations()
+  const { s, set, desk, toast, modal, go } = useC(), st = s.settings, presta = usePrestations()
   const uidL: string = (window as any).__aknoUid || "", lk = hasLock(uidL), [bio, setBio] = useState(() => !!getLock(uidL)?.cred), [canBio, setCanBio] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [testBusy, setTestBusy] = useState(false)
@@ -568,7 +626,7 @@ function SetP() {
     { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => recLock ? openUpgrade("reception") : modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
       <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
-      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => modal({ kind: "contacts" })} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
+      <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => modal({ kind: "contacts" })} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
       <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
     <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><Row first label="Ma réceptionniste" onClick={() => modal({ kind: "studio" })} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Ma réceptionniste" s={`Voix ${voiceInfo(prof?.reception_config?.voice).name} · script, prestations, FAQ`} r={<Chev />} /><S I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
@@ -897,7 +955,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "pw") return <PwSheet close={close} />
   if (m.kind === "entreprise") return <EntrepriseSheet close={close} />
   if (m.kind === "abonnement") return <AbonnementSheet close={close} />
-  if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} /></Suspense>
+  if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} startNew={!!d?.create} /></Suspense>
   if (m.kind === "conformite") return <ConformiteSheet close={close} />
   if (m.kind === "leads") return rr.clients ? <LeadsSheet close={close} /> : null
   if (m.kind === "reception") return rr.reception ? <ReceptionSheet close={close} /> : null
@@ -947,7 +1005,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
 /* ---------------- Assistant (moteur local, src/lib/assistant.ts) ---------------- */
 function Chat() {
   const { s, set, desk, setChat, page, go, modal, toast } = useC()
-  const k: K = page === "set" ? "dev" : page, c = A[k].c
+  const k: K = isK(page) ? page : "dev", c = A[k].c
   const [v, setV] = useState(""), [busy, setBusy] = useState(false), end = useRef<HTMLDivElement>(null)
   useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth" }) }, [s.chat.length, busy])
   const sRef = useRef(s); sRef.current = s
@@ -1021,7 +1079,11 @@ function AknoApp() {
   CL = s.clients || []
   const page: P = SLUG[(pathname || "").split("/")[1] || ""] || "rec"
   const [m, setM] = useState<Modal>(null), [chat, setChatS] = useState(() => new URLSearchParams(location.search).has("chat"))
-  const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void; err?: boolean } | null>(null), [q, setQ] = useState("")
+  const [toastT, setToastT] = useState<{ t: string; k: number; undo?: () => void; err?: boolean; info?: boolean } | null>(null), [q, setQ] = useState("")
+  const fst = useFacturesLite()
+  useEffect(() => { void refreshFactures(); const f = () => { if (!document.hidden) void refreshFactures() }; document.addEventListener("visibilitychange", f); addEventListener("akno-refresh", f); return () => { document.removeEventListener("visibilitychange", f); removeEventListener("akno-refresh", f) } }, [])
+  const hadModal = useRef(false)
+  useEffect(() => { if (m?.kind === "factures" || m?.kind === "client" || m?.kind === "devisPrev") hadModal.current = true; else if (!m && hadModal.current) { hadModal.current = false; void refreshFactures() } }, [m])
   const [pushNote, setPushNote] = useState<{ title: string; body: string; url: string; k: number } | null>(null)
   // update48 · page d'arrivée : sans l'option Réceptionniste IA, on arrive sur l'Agenda (et non sur /reception).
   const rr = useRights(), landed = useRef(false)
@@ -1030,7 +1092,7 @@ function AknoApp() {
     landed.current = true
     if (!rr.reception && page === "rec") navigate(`/${slugOf("ag")}${location.search}`, { replace: true })
   }, [rr.ready, rr.reception, page, navigate])
-  useEffect(() => { document.title = `Akno · ${page === "set" ? "Paramètres" : A[page].tab}` }, [page])
+  useEffect(() => { document.title = `Akno · ${pageTitle(page)}` }, [page])
   useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo || toastT.err ? 6000 : 2600); return () => clearTimeout(t) }, [toastT])
   // update52 : toute écriture refusée par la base est signalée (fini les devis qui disparaissent sans explication)
   useEffect(() => { const f = (e: Event) => setToastT({ t: String((e as CustomEvent).detail || "Enregistrement impossible."), k: Date.now(), err: true }); addEventListener("akno-sync-error", f); return () => removeEventListener("akno-sync-error", f) }, [])
@@ -1071,17 +1133,25 @@ function AknoApp() {
     if (x?.kind === "devisEditor") { setM(null); setEd({ initial: x.data }); return }
     setM(x)
   }
+  // update62 · raccourcis du bouton « + » : uniquement des parcours existants
+  const onCreate = (k: CreateKind) => {
+    if (k === "rdv") modal({ kind: "rdv" })
+    else if (k === "devis") modal({ kind: "devis" })
+    else if (k === "facture") modal({ kind: "factures", data: { create: true } })
+    else if (k === "contact") modal({ kind: "contacts" })
+    else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
+  }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
-  const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP }[page]
+  const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: Dev, set: SetP, fac: FacP, ch: ChP }[page]
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></motion.div></AnimatePresence><TabBar /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={page} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></motion.div></AnimatePresence><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} />}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />
     <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
-    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(76px+max(var(--sab)-18px,6px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
+    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(94px+max(var(--sab)-10px,12px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : toastT.info ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/[.12] text-white/85"><Clock size={13} strokeWidth={2.2} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
 }
 

@@ -7,7 +7,7 @@ import { Suspense, lazy, useEffect, useId, useRef, useState, type ReactNode } fr
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { ArrowRight, Check, ChevronLeft, X } from "lucide-react"
-import { A, Blob, Tg, ink, useC, type K, type P } from "../ui"
+import { A, Blob, Tg, ink, isK, useC, type K, type P } from "../ui"
 import { EASE, Field, Spinner } from "../auth/fields"
 import { DAYS, DEF_H, type H } from "../sheets/ReglagesSheets"
 import { useProfile, type Profile } from "../../lib/profile"
@@ -42,7 +42,7 @@ type Status = "pending" | "locked" | "open"
 export default function SetupGate({ page, loading, mobile, children }: { page: P; loading: boolean; mobile: boolean; children: ReactNode }) {
   const { s, toast } = useC(), rr = useRights(), acc = useAccount(), { p } = useProfile(), fl = useSetupFlags()
   const reduce = useReducedMotion()
-  const k: K | null = page === "set" ? null : page
+  const k: K | null = isK(page) ? page : null
   const uid = p?.id || ""
   let st: Status
   if (!k || opened.has(`${uid}:${k}`)) st = "open"
