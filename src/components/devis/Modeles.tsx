@@ -6,6 +6,7 @@ import { X, LayoutTemplate, Plus, Pencil, Trash2, RefreshCw, Loader2 } from "luc
 import { supabase } from "../../lib/supabase"
 import { fmtE, type StoredLine } from "../../lib/devisCalc"
 import { TEAL, field } from "./fields"
+import ModalSheet from "../sheet/ModalSheet"
 
 export type Modele = { id: string; nom: string; objet: string | null; lignes: StoredLine[]; updated_at: string }
 const htOf = (ls: StoredLine[]) => ls.filter(x => x && x.k !== "sec" && x.k !== "meta").reduce((a, x) => a + Number(x.q) * Number(x.pu), 0)
@@ -82,7 +83,5 @@ export default function Modeles({ desk, current, onApply, onClose }: { desk: boo
       </div>
     </div>
   </div>
-  return <motion.div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 lg:items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-label="Modèles de devis" className={`w-full overflow-hidden border border-white/[.08] bg-[#0F0F11] text-white ${desk ? "max-w-[560px] rounded-[24px]" : "rounded-t-[26px] pb-[var(--sab)]"}`} initial={{ y: 40 }} animate={{ y: 0 }} exit={{ y: 40 }} onClick={e => e.stopPropagation()}>{panel}</motion.div>
-  </motion.div>
+  return <ModalSheet label="Modèles de devis" onClose={onClose} desk={desk} z={80} backdrop="bg-black/60" className={`bg-[#0F0F11] ${desk ? "" : "border-t border-white/[.08] pb-[var(--sab)]"}`} deskClass="max-w-[560px]"><div className="min-h-0 overflow-y-auto overscroll-contain pt-1">{panel}</div></ModalSheet>
 }

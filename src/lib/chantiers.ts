@@ -127,7 +127,7 @@ export async function uploadPhoto(file: File): Promise<{ path?: string; error?: 
   if (!/^image\//.test(file.type)) return { error: "Choisissez une image." }
   let blob: Blob = file
   try {
-    const bmp = await createImageBitmap(file), k = Math.min(1, 320 / Math.max(bmp.width, bmp.height))
+    const bmp = await createImageBitmap(file), k = Math.min(1, 512 / Math.max(bmp.width, bmp.height))
     const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k)
     cv.getContext("2d")!.drawImage(bmp, 0, 0, cv.width, cv.height)
     blob = await new Promise<Blob>((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error("toBlob")), "image/jpeg", .85))

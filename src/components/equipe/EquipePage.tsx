@@ -8,10 +8,12 @@ import { Check, ChevronLeft, ChevronRight, Loader2, Mail, MessageSquare, Phone, 
 import { useC } from "../ui"
 import { SatThumb } from "../SatThumb"
 import { MemberForm } from "../chantiers/EquipeSheet"
+import { PushStack } from "../nav/PushStack"
 import { Bar, EmpAvatar } from "../chantiers/parts"
 import { inviteEmploye, loadChantiers, requestOpenChantier, setAccess, useChantiers, type Chantier, type Employe } from "../../lib/chantiers"
 import { STATUS_COLOR, progressPct, rangeLabel, todayISO, untilLabel } from "../../lib/chantierCalc"
 import { ROLE_LABEL, cityOf, entryDate, frPhone, groupTeam, initialsOf, invitedAgo, longDate, memberToday, rowSite, shortName, sinceLabel, weekPlan, weekRange, type AccessRole, type Today } from "../../lib/equipeCalc"
+import ModalSheet from "../sheet/ModalSheet"
 
 const NAV = "calc(92px + max(var(--sab) - 10px, 12px))"
 const PUSH = { type: "spring" as const, stiffness: 420, damping: 40, mass: .9 }
@@ -21,22 +23,20 @@ const PendingAv = ({ e, size = 36 }: { e: Employe; size?: number }) => <span ari
 const Dot = ({ c }: { c: string }) => <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: c }} />
 const Head = ({ t, n, r }: { t: string; n?: number; r?: ReactNode }) => <div className="mb-2 mt-6 flex items-baseline justify-between px-1"><h2 className="text-[16px] font-semibold tracking-[-0.01em]">{t}</h2>{r ?? (n != null && <span className="text-[14px] tabular-nums text-white/45">{n}</span>)}</div>
 
-export default function EquipePage() {
+export default function EquipePage({ head }: { head?: ReactNode }) {
   const { desk, go, toast } = useC(), st = useChantiers(), reduce = useReducedMotion()
   const [q, setQ] = useState(""), [openId, setOpenId] = useState<string | null>(null), [form, setForm] = useState<{ e: Employe | null } | null>(null)
   const [relBusy, setRelBusy] = useState<string | null>(null), [today] = useState(() => todayISO())
-  const scroller = useRef<HTMLDivElement>(null), listTop = useRef(0), pushed = useRef(false)
+  const scroller = useRef<HTMLDivElement>(null), pushed = useRef(false)
   useEffect(() => { void loadChantiers() }, [])
 
   // fiche ouverte = entrée d'historique (retour Android / navigateur referme la fiche)
   const open = useCallback((id: string) => {
-    listTop.current = scroller.current?.scrollTop || 0
     setOpenId(id)
     try { history.pushState({ ...(history.state || {}), aknoMember: id }, ""); pushed.current = true } catch { pushed.current = false }
   }, [])
   const back = useCallback(() => { if (pushed.current) { pushed.current = false; history.back() } else setOpenId(null) }, [])
   useEffect(() => { const f = () => { if (!history.state?.aknoMember) { pushed.current = false; setOpenId(null) } }; addEventListener("popstate", f); return () => removeEventListener("popstate", f) }, [])
-  useEffect(() => { if (!openId) requestAnimationFrame(() => { if (scroller.current) scroller.current.scrollTop = listTop.current }); else if (scroller.current) scroller.current.scrollTop = 0 }, [openId])
   useEffect(() => { if (!openId || form) return; const f = (e: KeyboardEvent) => { if (e.key === "Escape") back() }; addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [openId, form, back])
 
   const sites = st.rows as (Chantier & { status: Chantier["status"] })[]
@@ -66,13 +66,14 @@ export default function EquipePage() {
   }
 
   const list = <div>
-    <div className="flex h-11 items-center justify-between">
-      <motion.button type="button" whileTap={{ scale: .96 }} onClick={() => go("set")} className="-ml-1.5 flex items-center text-[17px] text-white"><ChevronLeft size={26} strokeWidth={2} />Compte</motion.button>
+    {/* update67 : page comme les autres (absente de la barre) — en-tête commun avec le logo, pas de « < Compte » */}
+    {!desk && head}
+    <div className={`flex items-center justify-between ${desk ? "" : "mt-3"}`}>
+      <h1 className="text-[34px] font-bold leading-none tracking-[-0.03em]">Équipe</h1>
       <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Ajouter un membre" disabled={st.missing} onClick={() => setForm({ e: null })} className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black shadow-[0_4px_14px_rgba(255,255,255,.18)] disabled:opacity-40"><Plus size={20} strokeWidth={2.4} /></motion.button>
     </div>
-    <h1 className="mt-1.5 text-[34px] font-bold leading-none tracking-[-0.03em]">Équipe</h1>
     {st.missing ? <div className={`${card} mt-6 px-4 py-4 text-[14px] leading-5 text-white/75`}>Appliquez la migration <b>20261121_11_update64_chantiers_equipe.sql</b> pour activer l'équipe.</div>
-      : !st.ready ? <div className="mt-5 space-y-3" aria-hidden>{[0, 1, 2].map(i => <div key={i} className={`${card} h-[64px] animate-pulse`} />)}</div>
+      : !st.ready ? <div className="mt-5 space-y-3" aria-hidden>{[0, 1, 2].map(i => <div key={i} className={`${card} h-[64px] opacity-60`} />)}</div>
         : !st.employes.length ? <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={PUSH} className="flex flex-col items-center px-6 pb-8 pt-16 text-center">
           <span className="relative flex h-[84px] w-[84px] items-center justify-center rounded-full bg-gradient-to-b from-white/[.14] to-white/[.04] shadow-[inset_0_1px_0_rgba(255,255,255,.12)]"><Users size={34} strokeWidth={1.5} /></span>
           <p className="mt-6 text-[19px] font-semibold tracking-[-0.01em]">Votre équipe, en un coup d'œil</p>
@@ -94,15 +95,9 @@ export default function EquipePage() {
 
   const fiche = member && <Fiche e={member} today={today} onBack={back} onEdit={() => setForm({ e: member })} onSite={openSite} onRelancer={() => void relancer(member)} relBusy={relBusy === member.id} ext={st.ext} />
 
-  return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-black text-white">
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain" style={{ paddingTop: desk ? 28 : "calc(var(--sat) + 6px)", paddingBottom: desk ? 40 : `calc(${NAV} + 16px)` }}>
-      <div className={`relative mx-auto w-full px-4 ${desk ? "max-w-[640px]" : ""}`}>
-        <AnimatePresence initial={false} mode="popLayout" custom={openId ? 1 : -1}>
-          {fiche ? <motion.div key={`f-${member!.id}`} initial={reduce ? { opacity: 0 } : { x: "100%", opacity: 1 }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "100%" }} transition={PUSH}>{fiche}</motion.div>
-            : <motion.div key="list" initial={reduce ? { opacity: 0 } : { x: "-28%", opacity: .4 }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "-28%", opacity: .4 }} transition={PUSH}>{list}</motion.div>}
-        </AnimatePresence>
-      </div>
-    </div>
+  return <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-black text-white">
+    <PushStack ref={scroller} base={list} top={fiche || null} topKey={member ? `f-${member.id}` : undefined} inner={desk ? "max-w-[640px]" : ""}
+      padTop={desk ? 28 : "calc(var(--sat) + 2px)"} padBottom={desk ? 40 : `calc(${NAV} + 16px)`} />
     <AnimatePresence>{form && <MemberForm key="mf" initial={form.e} desk={desk} onClose={() => setForm(null)} onSaved={id => { if (!form.e) open(id) }} onDeleted={() => { setOpenId(null); if (pushed.current) { pushed.current = false; history.back() } }} />}</AnimatePresence>
   </div>
 }
@@ -179,11 +174,9 @@ const InfoRow = ({ l, v, href }: { l: string; v: string; href?: string }) => { c
 function AccessSheet({ open, value, name, onPick, onClose }: { open: boolean; value: AccessRole | null; name: string; onPick: (r: AccessRole | null) => void; onClose: () => void }) {
   useEffect(() => { if (!open) return; const f = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopImmediatePropagation(); onClose() } }; addEventListener("keydown", f, true); return () => removeEventListener("keydown", f, true) }, [open, onClose])
   const opts: [AccessRole | null, string, string][] = [["ouvrier", "Ouvrier", "Voit ses chantiers et son planning"], ["chef", "Chef d'équipe", "Gère les chantiers de son équipe"], ["admin", "Admin", "Accès complet, comme vous"], [null, "Aucun accès", "Pas de compte dans l'app"]]
-  return createPortal(<AnimatePresence>{open && <motion.div className="fixed inset-0 z-[70] flex items-end bg-black/55" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-modal="true" aria-label="Accès à l'app" onClick={e => e.stopPropagation()} initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={PUSH} className="mx-auto w-full max-w-[520px] rounded-t-[22px] bg-[#1C1C1E] px-4 pt-2" style={{ paddingBottom: "max(calc(var(--sab) + 8px), 18px)" }}>
-      <div className="mx-auto h-[5px] w-9 rounded-full bg-white/20" />
+  return <AnimatePresence>{open && <ModalSheet key="acc" label="Accès à l'app" onClose={onClose} z={70} escape={false} className="max-w-[520px] bg-[#1C1C1E] px-4 pt-4" style={{ paddingBottom: "max(calc(var(--sab) + 8px), 18px)" }}>
       <div className="py-3.5 text-center"><div className="text-[17px] font-semibold">Accès à l'app</div><div className="mt-0.5 text-[13px] text-white/45">{name} · une invitation SMS part si l'accès est nouveau</div></div>
       <div className={`${card} overflow-hidden`}>{opts.map(([r, l, s]) => <button key={l} type="button" role="menuitemradio" aria-checked={value === r} onClick={() => onPick(r)} className="eq-sep flex w-full items-center gap-3 px-4 py-3 text-left active:bg-white/[.05]">
         <span className="min-w-0 flex-1"><span className={`block text-[16.5px] ${r ? "" : "text-[#FF6B6B]"}`}>{l}</span><span className="block text-[13px] text-white/45">{s}</span></span>{value === r && <Check size={19} className="text-[#30D158]" />}</button>)}</div>
-    </motion.div></motion.div>}</AnimatePresence>, document.body)
+  </ModalSheet>}</AnimatePresence>
 }

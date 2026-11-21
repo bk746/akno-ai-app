@@ -21,8 +21,8 @@ import { usePrestations } from "../lib/prestations"
 import { isPageLocked, openSetup } from "../lib/setup"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Component, Suspense, lazy, type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig } from "motion/react"
+import { Component, Suspense, lazy, type ReactNode, createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
+import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig, useIsPresent } from "motion/react"
 import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, HardHat, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck, Package, FilePen } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
@@ -41,21 +41,24 @@ import type { Session } from "@supabase/supabase-js"
 import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
 import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, isK, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
 // update45 : déclaré après les imports (sinon « Cannot access lazy before initialization » en mode dev Vite)
-const FacturesSheet = lazy(() => import("./sheets/FacturesSheet"))
+const FacturesSheet = lazyPage(() => import("./sheets/FacturesSheet")) // update67 : préchargée au repos
 // update64 · Chantiers (carte Leaflet) et Équipe : chargés à la demande, hors bundle principal
-const ChantiersPage = lazy(() => import("./chantiers/ChantiersPage"))
-const EquipePage = lazy(() => import("./equipe/EquipePage")) // update65
-const ClientsPage = lazy(() => import("./clients/ClientsPage")) // update66
+// update67 : préchargées (au repos, au toucher) — rendu synchrone ensuite, jamais d'écran de chargement entre deux pages
+const ChantiersPage = lazyPage(() => import("./chantiers/ChantiersPage"))
+const EquipePage = lazyPage(() => import("./equipe/EquipePage")) // update65
+const ClientsPage = lazyPage(() => import("./clients/ClientsPage")) // update66
 import { loadChantiers, requestNewChantier, requestOpenChantier, useChantiers } from "../lib/chantiers"
 import ClientChantiers from "./chantiers/ClientChantiers"
 import { clientsState, loadClients, requestNewClient, requestOpenClient, useClients } from "../lib/clients"
 // update57 · configurateur « Ma réceptionniste » (chargé à la demande)
-const ReceptionnisteStudio = lazy(() => import("./reception/ReceptionnisteStudio"))
+const ReceptionnisteStudio = lazyPage(() => import("./reception/ReceptionnisteStudio"))
 import UpdateButton from "./UpdateButton"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
 import MobileNav, { type CreateKind } from "./nav/MobileNav"
+import { PUSH, SNAP, TAB, idle, lazyPage } from "../lib/motion"
 import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
+import ModalSheet from "./sheet/ModalSheet"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
@@ -134,14 +137,36 @@ function MobileHead({ k }: { k?: K }) {
 }
 /* Gabarit unique de page : blob + chiffre clé + actions rondes + sections */
 const DOC_ORDER = (x?: string) => x === "fac" ? 1 : 0
-const swapV = { enter: (d: number) => ({ opacity: 0, x: d * 28 }), center: { opacity: 1, x: 0 }, exit: (d: number) => ({ opacity: 0, x: -d * 28 }) }
-const swapT = { x: { type: "spring" as const, stiffness: 420, damping: 38 }, opacity: { duration: .18, ease: [.25, .1, .25, 1] as const } }
+/* update67 · Devis ↔ Factures : le contenu glisse dans le sens du changement avec un fondu, la hauteur suit en ressort (aucun saut),
+   le haut de page (bot bleu, chiffre) ne bouge pas. */
+const swapV = { enter: (d: number) => ({ opacity: 0, x: d * 44 }), center: { opacity: 1, x: 0 }, exit: (d: number) => ({ opacity: 0, x: -d * 44 }) }
+const swapT = { x: TAB, opacity: { duration: .2, ease: [.22, 1, .36, 1] as const } }
+function Measure({ onH, children, className }: { onH: (h: number) => void; children: ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null), present = useIsPresent(), on = useRef(onH); on.current = onH
+  const live = useRef(present); live.current = present
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return
+    const ro = new ResizeObserver(() => { if (live.current) on.current(el.offsetHeight) })
+    ro.observe(el); if (live.current) on.current(el.offsetHeight)
+    return () => ro.disconnect()
+  }, [])
+  return <div ref={ref} className={className}>{children}</div>
+}
+function SwapBody({ k, dir, className, children }: { k?: string; dir: number; className: string; children: ReactNode }) {
+  const [h, setH] = useState<number | null>(null), [moving, setMoving] = useState(false)
+  return <motion.div className="relative" initial={false} animate={h == null ? undefined : { height: h }} transition={{ height: TAB }}
+    onAnimationStart={() => setMoving(true)} onAnimationComplete={() => setMoving(false)} style={{ overflow: moving ? "hidden" : "visible" }}>
+    <AnimatePresence mode="popLayout" initial={false} custom={dir}>
+      <motion.div key={k} custom={dir} variants={swapV} initial="enter" animate="center" exit="exit" transition={swapT}><Measure onH={setH} className={className}>{children}</Measure></motion.div>
+    </AnimatePresence>
+  </motion.div>
+}
 function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string }) {
   const { desk, s, setChat } = useC(), on = k ? s.settings.agents[k] : true
   // update63 · contenu interchangeable (Devis | Factures) : fondu + glissement, le haut de page (bot) ne bouge pas
   const prevKey = useRef(bodyKey), dir = useRef(1)
   if (bodyKey !== prevKey.current) { dir.current = DOC_ORDER(bodyKey) >= DOC_ORDER(prevKey.current) ? 1 : -1; prevKey.current = bodyKey }
-  const swap = (node: ReactNode, cls: string) => <div className="relative"><AnimatePresence mode="popLayout" initial={false} custom={dir.current}><motion.div key={bodyKey} custom={dir.current} variants={swapV} initial="enter" animate="center" exit="exit" transition={swapT} className={cls}>{node}</motion.div></AnimatePresence></div>
+  const swap = (node: ReactNode, cls: string) => <SwapBody k={bodyKey} dir={dir.current} className={cls}>{node}</SwapBody>
   const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${A[k].c === "#E6E6E6" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
   const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
   const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-4 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`${desk ? "mt-1 text-[52px]" : "mt-3 text-[44px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
@@ -567,24 +592,37 @@ function DevFac() {
 function DocSwitch({ mode }: { mode: "dev" | "fac" }) {
   const navigate = useNavigate(), { desk } = useC()
   const items: ["dev" | "fac", string, string][] = [["dev", "Devis", "/devis"], ["fac", "Factures", "/factures"]]
+  // update67 : une seule pilule qui glisse en ressort (plus de layoutId, qui sautait quand la page était défilée)
   return <div role="tablist" aria-label="Devis ou factures" className={`relative grid h-11 grid-cols-2 rounded-full bg-white/[.07] p-1 ${desk ? "w-[280px]" : "mx-auto w-full max-w-[340px]"}`}>
+    <motion.span aria-hidden data-doc-pill className="absolute bottom-1 left-1 top-1 w-[calc(50%-4px)] rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,.10)]" style={{ background: `linear-gradient(180deg, ${A.dev.c}55, ${A.dev.c}33)` }}
+      initial={false} animate={{ x: mode === "fac" ? "100%" : "0%" }} transition={SNAP} />
     {items.map(([id, l, url]) => { const on = mode === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => { if (!on) navigate(url + location.search, { replace: true }) }}
       className={`relative rounded-full text-[15px] font-semibold outline-none transition-colors duration-200 [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-white/40 ${on ? "text-white" : "text-white/55 hover:text-white/80"}`}>
-      {on && <motion.span layoutId="doc-seg" transition={spring} className="absolute inset-0 rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,.10)]" style={{ background: `linear-gradient(180deg, ${A.dev.c}55, ${A.dev.c}33)` }} />}<span className="relative">{l}</span></motion.button> })}
+      <span className="relative">{l}</span></motion.button> })}
   </div>
 }
 /* ---------------- update64 · Chantiers : carte satellite, carrousel, fiche, création (page chargée à la demande) ---------------- */
 function ChP() {
   const { s } = useC()
-  return <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center bg-[#0b0d0c]"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white/15 border-t-white/60" /></div>}><ChantiersPage me={<Me size={30} />} clients={ctInfos(s)} /></Suspense>
+  return <ChantiersPage me={<Me size={30} />} clients={ctInfos(s)} />
+}
+/* update67 · En-tête des pages hors barre (Équipe, Clients) : le même que les pages principales — logo, mise à jour, assistant, initiales */
+function PageHead() {
+  const { go, setChat } = useC()
+  return <div className="-mx-4 flex h-10 shrink-0 items-center px-5">
+    <img src="/logo.png" alt="Akno" className="h-[25px] w-auto" />
+    <div className="ml-auto flex items-center gap-2"><UpdateButton sm />
+      <button type="button" data-hit aria-label="Assistant" title="Assistant" onClick={() => setChat(true)} className="relative flex h-8 w-8 items-center justify-center rounded-[10px] bg-[#141416] text-white/55 hover:text-white"><Sparkles size={16} strokeWidth={1.5} /></button>
+      <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Réglages" title="Réglages" onClick={() => go("set")} className="ml-1 flex h-9 w-9 items-center justify-center rounded-full [-webkit-tap-highlight-color:transparent]"><Me size={30} /></motion.button></div>
+  </div>
 }
 /* update66 · Clients (page chargée à la demande) */
 function ClP() {
-  return <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white/15 border-t-white/60" /></div>}><ClientsPage /></Suspense>
+  return <ClientsPage head={<PageHead />} />
 }
 /* update65 · Équipe (page chargée à la demande) */
 function EqP() {
-  return <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><span className="h-6 w-6 animate-spin rounded-full border-2 border-white/15 border-t-white/60" /></div>}><EquipePage /></Suspense>
+  return <EquipePage head={<PageHead />} />
 }
 function SetP() {
   const { s, set, desk, toast, modal, go } = useC(), st = s.settings, presta = usePrestations()
@@ -1109,15 +1147,51 @@ function Chat() {
   const input = <form onSubmit={e => { e.preventDefault(); send(v) }} className="flex h-12 shrink-0 items-center gap-2 rounded-full bg-white/[.07] pl-4 pr-1.5"><input aria-label="Message" value={v} onChange={e => setV(e.target.value)} placeholder={facMode ? "Une question sur vos factures ou devis…" : "Écrire à l'assistant…"} className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-white/30" /><Mic size={17} strokeWidth={1.5} className="shrink-0 text-white/40" /><button aria-label="Envoyer" disabled={!v.trim() || busy} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-60" style={{ background: c, color: c === "#E6E6E6" ? "#000" : "#fff" }}><ArrowUp size={16} strokeWidth={1.8} /></button></form>
   if (desk) return <motion.aside initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} className="flex w-[380px] shrink-0 flex-col border-l border-white/[.06] bg-[#0B0B0C]">
     <div className="flex h-16 shrink-0 items-center border-b border-white/[.06] px-5">{head}</div>{msgs}<div className="p-5">{input}</div></motion.aside>
-  return <><motion.div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setChat(false)} />
-    <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }} transition={{ type: "spring", stiffness: 200, damping: 24 }} className="kb-bottom kb-panel fixed inset-x-0 bottom-0 z-40 flex h-[560px] max-h-[88dvh] flex-col rounded-t-[24px] border-t border-white/[.08] bg-[#121214] px-5 pt-3 shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)]" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
-      <div className="mx-auto h-[5px] w-9 shrink-0 rounded-full bg-white/20" /><div className="mt-4 shrink-0">{head}</div>{msgs}<div className="pt-3">{input}</div></motion.div></>
+  return <ModalSheet label="Assistant" onClose={() => setChat(false)} z={40} backdrop="bg-black/60" className="h-[560px] border-t border-white/[.08] bg-[#121214] px-5 pt-3" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+      <div aria-hidden className="h-[5px] shrink-0" /><div className="mt-4 shrink-0">{head}</div>{msgs}<div className="pt-3">{input}</div></ModalSheet>
 }
 
 /* ---------------- App ---------------- */
 const useDesk = () => { const q = "(min-width: 1024px)"; const [d, setD] = useState(() => matchMedia(q).matches); useEffect(() => { const m = matchMedia(q), f = () => setD(m.matches); m.addEventListener("change", f); return () => m.removeEventListener("change", f) }, []); return d }
 const font = (desk: boolean) => ({ fontFamily: "'Geist Variable', -apple-system, sans-serif", fontFeatureSettings: desk ? "'tnum'" : "'tnum','ss01'" })
 const ORD: P[] = ["rec", "ag", "rel", "dev", "set"]
+/* ================= update67 · Transitions entre pages =================
+   Onglets (et pages du +) : fondu enchaîné léger avec un petit glissement dans le sens de la barre ; la nouvelle page se pose
+   au-dessus de l'ancienne (fond plein), l'ancienne ne s'efface pas : aucun « trou » noir, aucun flash.
+   Réglages / Relance (pages de détail) : push iOS depuis la droite, retour inversé (l'ancienne page glisse de 28 % et s'assombrit).
+   Ressorts communs (lib/motion.ts), prefers-reduced-motion : simple fondu (MotionConfig reducedMotion="user"). */
+const LAZY: Partial<Record<P, { preload: () => Promise<void>; ready: () => boolean }>> = { ch: ChantiersPage, eq: EquipePage, cl: ClientsPage }
+const ORDER: Partial<Record<string, number>> = { rec: 0, ag: 1, ch: 2, dev: 3, eq: 4, cl: 5 }
+const isPushP = (p: string) => p === "set" || p === "rel"
+type PT = { kind: "fade" | "push" | "pop"; dir: number }
+const OPA = { duration: .24, ease: [.22, 1, .36, 1] as const }
+const pageV = {
+  enter: (t: PT) => t.kind === "push" ? { x: "100%", opacity: 1, zIndex: 2 } : t.kind === "pop" ? { x: "-28%", opacity: .55, zIndex: 0 } : { x: t.dir * 22, opacity: 0, zIndex: 1 },
+  center: (t: PT) => ({ x: 0, opacity: 1, zIndex: t.kind === "pop" ? 0 : t.kind === "push" ? 2 : 1, pointerEvents: "auto" as const, transition: { x: t.kind === "fade" ? TAB : PUSH, opacity: OPA, zIndex: { duration: 0 } } }),
+  exit: (t: PT) => ({ ...(t.kind === "push" ? { x: "-28%", opacity: .55, zIndex: 0 } : t.kind === "pop" ? { x: "100%", opacity: 1, zIndex: 2 } : { x: t.dir * -12, opacity: 1, zIndex: 0 }), pointerEvents: "none" as const, transition: { x: t.kind === "fade" ? TAB : PUSH, opacity: OPA, zIndex: { duration: 0 } } }),
+}
+function Pages({ pkey, desk, children }: { pkey: string; desk: boolean; children: ReactNode }) {
+  const prev = useRef(pkey), pt = useRef<PT>({ kind: "fade", dir: 1 }), fromSet = useRef(false)
+  if (prev.current !== pkey) {
+    const a = prev.current, b = pkey, sub = (x: string) => x === "eq" || x === "cl"
+    // Réglages → Équipe / Clients : on avance (push) ; retour vers Réglages : pop
+    if (!desk && a === "set" && sub(b)) { pt.current = { kind: "push", dir: 1 }; fromSet.current = true }
+    else if (!desk && sub(a) && b === "set" && fromSet.current) { pt.current = { kind: "pop", dir: -1 }; fromSet.current = false }
+    else {
+      pt.current = !desk && isPushP(b) && !isPushP(a) ? { kind: "push", dir: 1 } : !desk && isPushP(a) && !isPushP(b) ? { kind: "pop", dir: -1 } : { kind: "fade", dir: (ORDER[b] ?? 9) >= (ORDER[a] ?? 9) ? 1 : -1 }
+      fromSet.current = false
+    }
+    prev.current = b
+  }
+  return <div className="relative min-h-0 flex-1 overflow-hidden">
+    <Suspense fallback={<div className="absolute inset-0 bg-black" />}>
+      <AnimatePresence initial={false} custom={pt.current}>
+        <motion.div key={pkey} data-page={pkey} custom={pt.current} variants={pageV} initial="enter" animate="center" exit="exit"
+          className={`absolute inset-0 flex flex-col bg-black will-change-transform ${(isPushP(pkey) || pt.current.kind === "push") && !desk ? "shadow-[-16px_0_40px_-8px_rgba(0,0,0,.75)]" : ""}`}>{children}</motion.div>
+      </AnimatePresence>
+    </Suspense>
+  </div>
+}
 function AknoApp() {
   const pathname = useLocation().pathname, navigate = useNavigate()
   const [s, setS, loading, put] = useStore(), desk = useDesk()
@@ -1175,7 +1249,8 @@ function AknoApp() {
     navigator.serviceWorker.addEventListener("message", onMsg)
     return () => navigator.serviceWorker.removeEventListener("message", onMsg)
   }, [navigate])
-  const go = (p: P) => { setQ(""); setM(null); if (p !== page) navigate(`/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`); if (!desk) setChatS(false) }
+  // update67 : une page chargée à part est d'abord reçue, puis affichée (la page courante reste visible en attendant : ni flash ni écran de chargement)
+  const go = (p: P) => { setQ(""); setM(null); if (p !== page) { const url = `/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`, L = LAZY[p]; if (L && !L.ready()) void L.preload().then(() => navigate(url), () => navigate(url)); else navigate(url) } if (!desk) setChatS(false) }
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }
   const modal = (x: Modal) => {
     if (x?.kind === "devis") { setM(null); setEd({ prefill: x.data }); return }
@@ -1184,11 +1259,9 @@ function AknoApp() {
     setM(x)
   }
   // update62 · raccourcis du bouton « + » : uniquement des parcours existants
+  // update67 : Nouveau RDV / Nouveau devis / Nouvelle facture retirés du + (déjà dans Agenda et Devis | Factures)
   const onCreate = (k: CreateKind) => {
-    if (k === "rdv") modal({ kind: "rdv" })
-    else if (k === "devis") modal({ kind: "devis" })
-    else if (k === "facture") modal({ kind: "factures", data: { create: true } })
-    else if (k === "clients") go("cl") // update66 : la tuile Contact devient Clients
+    if (k === "clients") go("cl") // update66 : la tuile Contact devient Clients
     else if (k === "chantier") { requestNewChantier(); go("ch") }
     else if (k === "equipe") go("eq") // update65 : Équipe remplace Note
     else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
@@ -1196,9 +1269,12 @@ function AknoApp() {
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
   const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: DevFac, set: SetP, fac: DevFac, ch: ChP, eq: EqP, cl: ClP }[page]
   const pkey = page === "fac" ? "dev" : page // update63 : Devis ↔ Factures sans re-monter la page (le bot reste en place)
+  // update67 : préchargement des pages et feuilles chargées à part, au repos (puis au toucher, cf. MobileNav)
+  useEffect(() => { idle(() => { for (const L of [ChantiersPage, ClientsPage, EquipePage, FacturesSheet, ReceptionnisteStudio]) void L.preload().catch(() => {}); void loadChantiers() }) }, []) // update67 : pages et données Chantiers / Équipe prêtes avant le premier tap (pas de squelette)
+  const prefetch = (p: P) => { void LAZY[p]?.preload().catch(() => {}) }
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
-    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="min-h-0 flex-1 overflow-hidden"><AnimatePresence mode="wait" initial={false}><motion.div key={pkey} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></motion.div></AnimatePresence></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><AnimatePresence mode="wait" initial={false}><motion.div key={pkey} className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18, ease: [.25, .1, .25, 1] }}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></motion.div></AnimatePresence><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} desk><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></Pages></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
+      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} desk={false}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></Pages><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} />}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />

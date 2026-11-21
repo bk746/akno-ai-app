@@ -6,11 +6,12 @@
    Fermeture : ×, tap sur le fond, glisser vers le bas, Échap, bouton retour Android (entrée d'historique). */
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion, type PanInfo } from "motion/react"
-import { CalendarDays, CreditCard, FileText, Lock, MapPin, Plus, UserRound, Users } from "lucide-react"
+import { Lock, MapPin, Plus, UserRound, Users } from "lucide-react"
 import type { P } from "../ui"
+import { EASE_OUT, SHEET } from "../../lib/motion"
 import { lastDocMode } from "../../lib/facturesLite"
 
-export type CreateKind = "rdv" | "devis" | "facture" | "chantier" | "equipe" | "clients"
+export type CreateKind = "chantier" | "equipe" | "clients" // update67 : RDV / devis / facture retirés (déjà dans Agenda et Devis | Factures)
 type Tab = "rec" | "ag" | "ch" | "fac"
 
 const Ico = ({ d }: { d: React.ReactNode }) => <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{d}</svg>
@@ -21,19 +22,18 @@ const ICONS: Record<Tab, React.ReactNode> = {
   fac: <><path d="M7 3.5h7l4.5 4.5v10.5A2 2 0 0 1 16.5 20.5h-9.5A2 2 0 0 1 5 18.5v-13a2 2 0 0 1 2-2Z" /><path d="M13.5 3.5V8h5M8.5 12.5h7M8.5 16h4.5" /></>,
 }
 const LABEL: Record<Tab, string> = { rec: "Réception", ag: "Agenda", ch: "Chantiers", fac: "Factures" }
-/** Onglet actif : Devis et Factures vivent dans l'onglet Factures. Relance et Réglages : aucun onglet. */
-export const tabOf = (p: P): Tab | null => p === "rec" || p === "ag" || p === "ch" ? p : p === "eq" || p === "cl" ? "ch" : p === "fac" || p === "dev" ? "fac" : null // update65 : Équipe vit sous Chantiers
+/** Onglet actif : Devis et Factures vivent dans l'onglet Factures. Relance, Réglages, Équipe, Clients : aucun onglet (update67). */
+export const tabOf = (p: P): Tab | null => p === "rec" || p === "ag" || p === "ch" ? p : p === "fac" || p === "dev" ? "fac" : null
 
-const TILES: { k: CreateKind; l: string; I: typeof CalendarDays }[] = [
-  { k: "rdv", l: "Nouveau RDV", I: CalendarDays }, { k: "devis", l: "Nouveau devis", I: FileText }, { k: "facture", l: "Nouvelle facture", I: CreditCard },
-  { k: "chantier", l: "Nouveau chantier", I: MapPin }, { k: "equipe", l: "Équipe", I: Users }, { k: "clients", l: "Clients", I: UserRound },
+const TILES: { k: CreateKind; l: string; I: typeof MapPin; p: P }[] = [
+  { k: "chantier", l: "Nouveau chantier", I: MapPin, p: "ch" }, { k: "clients", l: "Clients", I: UserRound, p: "cl" }, { k: "equipe", l: "Équipe", I: Users, p: "eq" },
 ]
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
-const sheetIn = { type: "spring" as const, stiffness: 420, damping: 31, mass: .9 } // léger dépassement
+const TILE_V = { h: { opacity: 0, y: 14, scale: .96 }, s: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, stiffness: 500, damping: 34 } } }
 const BAR_BOTTOM = "max(calc(var(--sab) - 10px), 12px)"
 
-function TabBtn({ t, on, badge, recLocked, onTap }: { t: Tab; on: boolean; badge: number; recLocked: boolean; onTap: (t: Tab) => void }) {
-  return <motion.button type="button" onClick={() => onTap(t)} aria-label={t === "fac" && badge > 0 ? `${LABEL[t]}, ${badge} à encaisser` : LABEL[t]} aria-current={on ? "page" : undefined} whileTap={{ scale: .92 }} transition={spring}
+function TabBtn({ t, on, badge, recLocked, onTap, onIntent }: { t: Tab; on: boolean; badge: number; recLocked: boolean; onTap: (t: Tab) => void; onIntent?: (p: P) => void }) {
+  return <motion.button type="button" onClick={() => onTap(t)} onPointerDown={() => onIntent?.(t)} onPointerEnter={() => onIntent?.(t)} aria-label={t === "fac" && badge > 0 ? `${LABEL[t]}, ${badge} à encaisser` : LABEL[t]} aria-current={on ? "page" : undefined} whileTap={{ scale: .92 }} transition={spring}
       className={`relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-[5px] rounded-full outline-none transition-colors duration-200 [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-white/40 ${on ? "text-white" : "text-white/55"}`}>
       {on && <motion.span layoutId="m-tab-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/[.10]" />}
       <span className="relative"><Ico d={ICONS[t]} />
@@ -45,10 +45,11 @@ function TabBtn({ t, on, badge, recLocked, onTap }: { t: Tab; on: boolean; badge
     </motion.button>
 }
 
-export default function MobileNav({ page, go, badge, recLocked, onCreate }: { page: P; go: (p: P) => void; badge: number; recLocked: boolean; onCreate: (k: CreateKind) => void }) {
+export default function MobileNav({ page, go, badge, recLocked, onCreate, onIntent }: { page: P; go: (p: P) => void; badge: number; recLocked: boolean; onCreate: (k: CreateKind) => void; onIntent?: (p: P) => void }) {
   const [open, setOpen] = useState(false)
   const openRef = useRef(false), pushed = useRef(false), closing = useRef(false), pending = useRef<(() => void) | null>(null), lastToggle = useRef(0)
   openRef.current = open
+  const onIntentRef = useRef(onIntent); onIntentRef.current = onIntent
   const finish = useCallback(() => {
     closing.current = false; pushed.current = false; setOpen(false)
     const a = pending.current; pending.current = null
@@ -56,7 +57,7 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate }: { pa
   }, [])
   const show = useCallback(() => {
     if (openRef.current || closing.current) return
-    setOpen(true)
+    setOpen(true); for (const x of TILES) onIntentRef.current?.(x.p)
     try { history.pushState({ ...(history.state || {}), aknoCreate: true }, ""); pushed.current = true } catch { pushed.current = false }
   }, [])
   const hide = useCallback((after?: () => void) => {
@@ -97,32 +98,33 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate }: { pa
   const onDragEnd = (_: unknown, i: PanInfo) => { if (i.offset.y > 90 || i.velocity.y > 600) hide() }
   const active = tabOf(page)
   return <>
-    <AnimatePresence>{open && <>
-      <motion.div key="cr-bg" aria-hidden className="fixed inset-0 z-[34] touch-none overscroll-none bg-black/45 backdrop-blur-[14px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .22, ease: [.25, .1, .25, 1] }} onClick={() => hide()} />
-      <motion.div key="cr-sheet" role="dialog" aria-modal="true" aria-labelledby="cr-title" className="fixed inset-x-0 bottom-0 z-[35] mx-auto w-full max-w-[560px] touch-none overscroll-none rounded-t-[28px] border-t border-white/[.08] bg-[#161618] px-4 pt-2.5 shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] will-change-transform"
-        style={{ paddingBottom: `calc(72px + ${BAR_BOTTOM} + 18px)` }}
-        initial={{ y: "100%" }} animate={{ y: 0, transition: sheetIn }} exit={{ y: "100%", transition: { type: "tween", duration: .24, ease: [.4, 0, 1, 1] } }}
-        drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: .04, bottom: .55 }} dragMomentum={false} onDragEnd={onDragEnd}>
-        <div aria-hidden className="mx-auto h-[5px] w-9 rounded-full bg-white/20" />
-        <h2 id="cr-title" className="mt-4 px-1 text-[20px] font-semibold tracking-[-0.02em]">Créer</h2>
-        <motion.div className="mt-4 grid grid-cols-3 gap-2.5" initial="h" animate="s" variants={{ s: { transition: { staggerChildren: .035, delayChildren: .07 } } }}>
-          {TILES.map(x => <motion.button key={x.k} type="button" onClick={() => pick(x.k)} variants={{ h: { opacity: 0, scale: .9, y: 10 }, s: { opacity: 1, scale: 1, y: 0, transition: { type: "spring", stiffness: 480, damping: 30 } } }} whileTap={{ scale: .95 }}
-            className="flex h-[92px] flex-col items-center justify-center gap-2.5 rounded-[20px] border border-white/[.05] bg-white/[.06] px-2 text-center text-[13.5px] font-medium leading-[1.2] text-white outline-none transition-colors [-webkit-tap-highlight-color:transparent] hover:bg-white/[.09] focus-visible:ring-2 focus-visible:ring-white/40">
-            <x.I size={20} strokeWidth={1.75} aria-hidden />{x.l}
-          </motion.button>)}
-        </motion.div>
+    {/* update67 : la feuille « Créer » monte une seule fois — fond en fondu (sans flou animé, coûteux), feuille en ressort,
+        tuiles en légère cascade ; fermeture en ressort, y compris en la glissant vers le bas. */}
+    <AnimatePresence>{open && <motion.div key="cr-bg" aria-hidden className="fixed inset-0 z-[34] touch-none overscroll-none bg-black/50"
+      initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .26, ease: EASE_OUT } }} exit={{ opacity: 0, transition: { duration: .22, ease: EASE_OUT } }} onClick={() => hide()} />}</AnimatePresence>
+    <AnimatePresence>{open && <motion.div key="cr-sheet" role="dialog" aria-modal="true" aria-labelledby="cr-title" data-create-sheet className="fixed inset-x-0 bottom-0 z-[35] mx-auto w-full max-w-[560px] touch-none overscroll-none rounded-t-[28px] border-t border-white/[.08] bg-[#161618] px-4 pt-2.5 shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] will-change-transform"
+      style={{ paddingBottom: `calc(72px + ${BAR_BOTTOM} + 18px)` }}
+      initial={{ y: "100%" }} animate={{ y: 0, transition: SHEET }} exit={{ y: "100%", transition: { type: "spring", stiffness: 420, damping: 46, restDelta: 1 } }}
+      drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: .04, bottom: .7 }} dragMomentum={false} onDragEnd={onDragEnd}>
+      <div aria-hidden className="mx-auto h-[5px] w-9 rounded-full bg-white/20" />
+      <h2 id="cr-title" className="mt-4 px-1 text-[20px] font-semibold tracking-[-0.02em]">Créer</h2>
+      <motion.div className="mt-4 grid grid-cols-3 gap-2.5" initial="h" animate="s" variants={{ h: {}, s: { transition: { staggerChildren: .045, delayChildren: .05 } } }}>
+        {TILES.map(x => <motion.button key={x.k} type="button" onClick={() => pick(x.k)} variants={TILE_V} whileTap={{ scale: .95 }}
+          className="flex h-[104px] flex-col items-center justify-center gap-2.5 rounded-[20px] border border-white/[.05] bg-white/[.06] px-2 text-center text-[13.5px] font-medium leading-[1.2] text-white outline-none transition-colors [-webkit-tap-highlight-color:transparent] hover:bg-white/[.09] focus-visible:ring-2 focus-visible:ring-white/40">
+          <x.I size={22} strokeWidth={1.75} aria-hidden />{x.l}
+        </motion.button>)}
       </motion.div>
-    </>}</AnimatePresence>
+    </motion.div>}</AnimatePresence>
     <nav aria-label="Navigation principale" className={`pointer-events-none fixed inset-x-4 flex justify-center ${open ? "z-[36]" : "z-30"}`} style={{ bottom: BAR_BOTTOM }}>
       <div className="pointer-events-auto flex h-[72px] w-full max-w-[520px] items-center rounded-full border border-white/[.10] bg-[#161618]/85 p-[6px] shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]">
-        <TabBtn t="rec" on={active === "rec"} badge={badge} recLocked={recLocked} onTap={tapTab} /><TabBtn t="ag" on={active === "ag"} badge={badge} recLocked={recLocked} onTap={tapTab} />
+        <TabBtn t="rec" on={active === "rec"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} /><TabBtn t="ag" on={active === "ag"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} />
         <div className="flex h-full flex-1 items-center justify-center">
           <motion.button type="button" onClick={toggle} aria-label={open ? "Fermer" : "Créer"} aria-expanded={open} aria-haspopup="dialog" whileTap={{ scale: .9 }} transition={spring}
             className="flex h-[58px] w-[58px] items-center justify-center rounded-full bg-white text-black shadow-[0_10px_28px_-6px_rgba(255,255,255,.28),0_6px_14px_-6px_rgba(0,0,0,.6)] outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-4 focus-visible:ring-white/30">
-            <motion.span className="flex" animate={{ rotate: open ? 45 : 0 }} transition={{ type: "spring", stiffness: 460, damping: 26 }}><Plus size={27} strokeWidth={2.1} /></motion.span>
+            <motion.span className="flex" initial={false} animate={{ rotate: open ? 45 : 0 }} transition={{ type: "spring", stiffness: 460, damping: 28 }}><Plus size={27} strokeWidth={2.1} /></motion.span>
           </motion.button>
         </div>
-        <TabBtn t="ch" on={active === "ch"} badge={badge} recLocked={recLocked} onTap={tapTab} /><TabBtn t="fac" on={active === "fac"} badge={badge} recLocked={recLocked} onTap={tapTab} />
+        <TabBtn t="ch" on={active === "ch"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} /><TabBtn t="fac" on={active === "fac"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} />
       </div>
     </nav>
   </>

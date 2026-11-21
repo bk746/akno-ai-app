@@ -1,6 +1,7 @@
 /* update52 · Bibliothèque de prestations : gestion (Réglages / page Devis), formulaire, et palette d'ajout rapide dans l'éditeur. */
 import { useEffect, useMemo, useRef, useState } from "react"
 import { motion } from "motion/react"
+import ModalSheet from "../sheet/ModalSheet"
 import { Search, Plus, Check, Trash2, Clock, Package, Tag, Sparkles, CloudOff } from "lucide-react"
 import { Sheet, Btn, useC } from "../ui"
 import { CO } from "../../lib/devisDoc"
@@ -125,10 +126,8 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
     else if (e.key === "Enter") { e.preventDefault(); const p = list[sel]; if (p) pick(p) }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose() }
   }
-  return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-start justify-center pt-[12vh]" : "items-end kb-sheet"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-label="Ajouter une prestation" onClick={e => e.stopPropagation()} initial={desk ? { y: -8, opacity: 0 } : { y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 380, damping: 34 }}
-      className={`flex w-full flex-col overflow-hidden border-white/[.09] bg-[#121214] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${desk ? "max-h-[70vh] max-w-[620px] rounded-[22px] border" : "kb-panel h-[86dvh] rounded-t-[24px] border-t"}`}>
-      {!desk && <div className="mx-auto mt-3 h-[5px] w-9 shrink-0 rounded-full bg-white/20" />}
+  return <ModalSheet label="Ajouter une prestation" onClose={onClose} desk={desk} z={50} deskAlign="top" backdrop="bg-black/60" className={`border-white/[.09] bg-[#121214] ${desk ? "" : "h-[86dvh] border-t"}`} deskClass="max-h-[70vh] max-w-[620px]">
+      {!desk && <div className="h-[22px] shrink-0" />}
       <div className="flex shrink-0 items-center gap-3 border-b border-white/[.07] px-4 py-3">
         <Search size={18} strokeWidth={1.7} className="shrink-0 text-white/40" />
         <input ref={inp} autoFocus value={q} onChange={e => setQ(e.target.value)} onKeyDown={key} placeholder="Rechercher une prestation…" aria-label="Rechercher une prestation" className="h-10 min-w-0 flex-1 bg-transparent text-[16px] text-white outline-none placeholder:text-white/35" />
@@ -149,7 +148,6 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
         {desk ? <span>↑ ↓ pour choisir · Entrée pour ajouter · la palette reste ouverte</span> : <span>Touchez pour ajouter</span>}
         <button type="button" onClick={onNew} className="flex items-center gap-1 font-medium text-white/70 hover:text-white"><Plus size={14} />Nouvelle</button>
       </div>
-    </motion.div>
-  </motion.div>
+  </ModalSheet>
 }
 const StorageNoteInline = ({ mode }: { mode: "db" | "local" }) => mode === "local" ? <div className="mx-4 mb-1 flex items-center gap-2 text-[11.5px] text-white/35"><CloudOff size={12} />Bibliothèque gardée sur cet appareil</div> : null

@@ -6,6 +6,8 @@ import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Camera, ChevronRight, Loader2, Phone, Trash2, UserPlus, X } from "lucide-react"
 import { useC } from "../ui"
+import ModalSheet from "../sheet/ModalSheet"
+import PhotoCropper from "../photo/PhotoCropper"
 import { deleteEmploye, empName, inviteEmploye, loadChantiers, saveEmploye, uploadPhoto, useChantiers, type Employe } from "../../lib/chantiers"
 import { METIERS, ROLE_LABEL, frPhone, isMobile, shortName, todayISOsafe, validEmail, type AccessRole } from "../../lib/equipeCalc"
 import { EmpAvatar } from "./parts"
@@ -42,14 +44,17 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
   const { toast } = useC(), st = useChantiers(), edit = !!initial
   const [d, setD] = useState<Draft>(() => draftOf(initial)), [busy, setBusy] = useState(""), [errs, setErrs] = useState<Record<string, string>>({}), [confirmDel, setConfirmDel] = useState(false)
   const file = useRef<HTMLInputElement>(null), autreRef = useRef<HTMLInputElement>(null)
+  const [crop, setCrop] = useState<File | null>(null)
   const set = (p: Partial<Draft>) => { setD(x => ({ ...x, ...p })); setErrs(e => { const n = { ...e }; for (const k of Object.keys(p)) delete n[k]; return n }) }
   useEffect(() => { if (d.metier === "Autre" && !initial) setTimeout(() => autreRef.current?.focus(), 220) }, [d.metier]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const f = (e: KeyboardEvent) => { if (e.key !== "Escape") return; e.stopImmediatePropagation(); if (confirmDel) setConfirmDel(false); else onClose() }
+    const f = (e: KeyboardEvent) => { if (e.key !== "Escape") return; e.stopImmediatePropagation(); if (crop) setCrop(null); else if (confirmDel) setConfirmDel(false); else onClose() }
     addEventListener("keydown", f, true); return () => removeEventListener("keydown", f, true)
-  }, [confirmDel, onClose])
-  const pick = async (f?: File | null) => {
-    if (!f) return
+  }, [confirmDel, onClose, crop])
+  // update67 : la photo choisie passe d'abord par le recadrage circulaire, puis part (carré 512 px) dans le bucket « equipe »
+  const pick = (f?: File | null) => { if (!f) return; if (!/^image\//.test(f.type)) { toast("Choisissez une image."); return } setCrop(f) }
+  const upload = async (f: File) => {
+    setCrop(null)
     setBusy("photo"); const r = await uploadPhoto(f); setBusy("")
     if (r.error) { toast(r.error); return }
     set({ photo_path: r.path! })
@@ -87,20 +92,18 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
   const preview: Employe | null = d.photo_path ? { id: initial?.id || "new", first_name: d.first_name || "?", last_name: d.last_name || null, role: null, phone: null, photo_path: d.photo_path } : null
   const title = edit ? "Modifier" : "Nouveau membre"
 
-  return createPortal(<motion.div className={`fixed inset-0 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-center justify-center" : "items-end"}`} style={{ zIndex: z }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()} initial={desk ? { opacity: 0, scale: .97 } : { y: "100%" }} animate={desk ? { opacity: 1, scale: 1 } : { y: 0 }} exit={desk ? { opacity: 0, scale: .97 } : { y: "100%" }} transition={SPRING}
-      className={`relative flex w-full flex-col overflow-hidden bg-[#161618] text-white ${desk ? "h-[86dvh] max-w-[480px] rounded-[24px] border border-white/[.08]" : "rounded-t-[22px]"}`} style={desk ? undefined : { height: "calc(100dvh - var(--sat) - 10px)" }}>
+  return <ModalSheet label={title} onClose={onClose} desk={desk} z={z} size="large" escape={false} className="bg-[#161618]" deskClass="h-[86dvh] max-w-[480px]">
       <div className="relative flex h-[56px] shrink-0 items-center justify-center px-4">
         <button type="button" onClick={onClose} className="absolute left-4 text-[16px] text-white/55 active:text-white">Annuler</button>
         <span className="text-[17px] font-semibold">{title}</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4" style={{ paddingBottom: "calc(110px + var(--kb, 0px))" }}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4" style={{ paddingBottom: 110 }}>
         <div className="flex flex-col items-center pb-5 pt-1">
           <motion.button type="button" whileTap={{ scale: .94 }} onClick={() => file.current?.click()} aria-label={d.photo_path ? "Changer la photo" : "Ajouter une photo"} className="relative flex h-[84px] w-[84px] items-center justify-center rounded-full border border-dashed border-white/30 bg-white/[.03] text-white/70">
             {preview ? <span className="absolute inset-0"><EmpAvatar e={preview} size={84} /></span> : busy === "photo" ? <Loader2 size={22} className="animate-spin" /> : <Camera size={24} strokeWidth={1.7} />}
           </motion.button>
           <div className="mt-2.5 flex items-center gap-4 text-[14.5px] font-medium"><button type="button" onClick={() => file.current?.click()}>{busy === "photo" ? "Envoi…" : d.photo_path ? "Changer la photo" : "Ajouter une photo"}</button>{d.photo_path && <button type="button" onClick={() => set({ photo_path: null })} className="text-white/45">Retirer</button>}</div>
-          <input ref={file} type="file" accept="image/*" className="hidden" onChange={e => { void pick(e.target.files?.[0]); e.target.value = "" }} />
+          <input ref={file} type="file" accept="image/*" className="hidden" onChange={e => { pick(e.target.files?.[0]); e.target.value = "" }} />
         </div>
         <Group>
           <Field label="Prénom" htmlFor="mf-fn" err={errs.first_name}><input id="mf-fn" className={inp} autoComplete="off" autoCapitalize="words" enterKeyHint="next" placeholder="Obligatoire" maxLength={80} value={d.first_name} onChange={e => set({ first_name: e.target.value })} /></Field>
@@ -135,8 +138,8 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
             <button type="button" disabled={!!busy} onClick={() => void del()} className="h-14 w-full border-t border-white/[.08] text-[18px] font-semibold text-[#FF453A] active:bg-white/[.05]">{busy === "del" ? "Retrait…" : `Retirer ${shortName(initial)}`}</button></div>
           <button type="button" onClick={() => setConfirmDel(false)} className="mt-2 h-14 w-full rounded-[16px] bg-[#2A2A2D] text-[18px] font-semibold text-[#7EA6FF]">Annuler</button>
         </motion.div></motion.div>}</AnimatePresence>
-    </motion.div>
-  </motion.div>, document.body)
+    <AnimatePresence>{crop && <PhotoCropper key="crop" file={crop} z={z + 10} onCancel={() => setCrop(null)} onDone={f => void upload(f)} />}</AnimatePresence>
+  </ModalSheet>
 }
 
 /** Liste compacte (formulaire chantier → « Gérer l'équipe ») ; ajout / modification via MemberForm. */
@@ -147,10 +150,8 @@ export default function EquipeSheet({ close, desk, z = 70 }: { close: () => void
     const f = (e: KeyboardEvent) => { if (e.key === "Escape" && !form) { e.stopImmediatePropagation(); close() } }
     addEventListener("keydown", f, true); return () => removeEventListener("keydown", f, true)
   }, [form, close])
-  return <motion.div className={`fixed inset-0 flex bg-black/60 backdrop-blur-[3px] ${desk ? "items-center justify-center" : "items-end"}`} style={{ zIndex: z }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close}>
-    <motion.div role="dialog" aria-modal="true" aria-label="Équipe" onClick={e => e.stopPropagation()} initial={desk ? { opacity: 0, scale: .97 } : { y: "100%" }} animate={desk ? { opacity: 1, scale: 1 } : { y: 0 }} exit={desk ? { opacity: 0, scale: .97 } : { y: "100%" }} transition={SPRING}
-      className={`relative flex w-full flex-col overflow-hidden bg-[#0B0B0C] text-white ${desk ? "h-[82dvh] max-w-[520px] rounded-[24px] border border-white/[.08]" : "h-[94dvh] rounded-t-[22px]"}`}>
-      {!desk && <div className="mx-auto mt-2 h-[5px] w-9 shrink-0 rounded-full bg-white/20" />}
+  return <>
+    <ModalSheet label="Équipe" onClose={close} desk={!!desk} z={z} size="large" escape={false} className="bg-[#0B0B0C] text-white" deskClass="h-[82dvh] max-w-[520px]">
       <div className="flex h-14 shrink-0 items-center justify-between px-4"><span className="w-16" /><span className="text-[17px] font-semibold">Équipe</span><button type="button" onClick={close} className="flex w-16 justify-end text-[16px] font-semibold text-[#7EA6FF]">OK</button></div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-10 pt-2">
         {st.missing ? <div className="rounded-[18px] bg-[#FFB340]/[.09] px-4 py-4 text-[14px] leading-5 text-white/80">Appliquez la migration <b>20261121_11_update64_chantiers_equipe.sql</b> (voir LISEZMOI update64).</div> : <Group>
@@ -164,7 +165,7 @@ export default function EquipeSheet({ close, desk, z = 70 }: { close: () => void
         </Group>}
       </div>
       <button type="button" aria-label="Fermer" onClick={close} className="sr-only"><X /></button>
-    </motion.div>
+    </ModalSheet>
     <AnimatePresence>{form && <MemberForm key="mf" initial={form.e} desk={!!desk} z={z + 5} onClose={() => setForm(null)} />}</AnimatePresence>
-  </motion.div>
+  </>
 }

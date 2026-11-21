@@ -8,6 +8,7 @@ import { useC } from "../ui"
 import { SatThumb } from "../SatThumb"
 import { Bar, AvatarStack } from "../chantiers/parts"
 import { ClientForm } from "./ClientForm"
+import { PushStack } from "../nav/PushStack"
 import { geocode, loadClients, takeNewClient, takeOpenClient, useClients, type NewClientSeed } from "../../lib/clients"
 import { loadChantiers, requestOpenChantier, teamOf, useChantiers } from "../../lib/chantiers"
 import { dueOf, refreshFactures, useFacturesLite } from "../../lib/facturesLite"
@@ -40,20 +41,19 @@ export function useDirectory() {
   return { list, factures, cs, ch, ready: cs.ready && fl.rows !== null }
 }
 
-export default function ClientsPage() {
+export default function ClientsPage({ head }: { head?: ReactNode }) {
   const { desk, go } = useC(), reduce = useReducedMotion(), prof = useProfile().p
   const { list, factures, cs, ch, ready } = useDirectory()
   const delay = useMemo(() => { const a = Array.isArray(prof?.relance_delais) ? (prof!.relance_delais as unknown[]).map(Number).filter(n => n >= 1 && n <= 60).sort((x, y) => x - y) : []; return a[0] || 3 }, [prof])
   const [q, setQ] = useState(""), [filter, setFilter] = useState<Filter>("all"), [openKey, setOpenKey] = useState<string | null>(null), [form, setForm] = useState<{ c: Client | null; seed?: NewClientSeed | null } | null>(null)
-  const [today] = useState(() => todayISO()), scroller = useRef<HTMLDivElement>(null), listTop = useRef(0), pushed = useRef(false)
+  const [today] = useState(() => todayISO()), scroller = useRef<HTMLDivElement>(null), pushed = useRef(false)
 
   const open = useCallback((key: string) => {
-    listTop.current = scroller.current?.scrollTop || 0; setOpenKey(key)
+    setOpenKey(key)
     try { history.pushState({ ...(history.state || {}), aknoClient: key }, ""); pushed.current = true } catch { pushed.current = false }
   }, [])
   const back = useCallback(() => { if (pushed.current) { pushed.current = false; history.back() } else setOpenKey(null) }, [])
   useEffect(() => { const f = () => { if (!history.state?.aknoClient) { pushed.current = false; setOpenKey(null) } }; addEventListener("popstate", f); return () => removeEventListener("popstate", f) }, [])
-  useEffect(() => { if (!openKey) requestAnimationFrame(() => { if (scroller.current) scroller.current.scrollTop = listTop.current }); else if (scroller.current) scroller.current.scrollTop = 0 }, [openKey])
   useEffect(() => { if (!openKey || form) return; const f = (e: KeyboardEvent) => { if (e.key === "Escape") back() }; addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [openKey, form, back])
   // demandes venues d'ailleurs (fiche d'appel → « Ajouter aux clients » / « Fiche client »)
   const pendingOpen = useRef<string | null>(null)
@@ -88,12 +88,13 @@ export default function ClientsPage() {
   }
 
   const listView = <div>
-    <div className="flex h-11 items-center justify-between">
-      <motion.button type="button" whileTap={{ scale: .96 }} onClick={() => go("set")} className="-ml-1.5 flex items-center text-[17px] text-white"><ChevronLeft size={26} strokeWidth={2} />Compte</motion.button>
+    {/* update67 : page comme les autres (absente de la barre) — en-tête commun avec le logo, pas de « < Compte » */}
+    {!desk && head}
+    <div className={`flex items-center justify-between ${desk ? "" : "mt-3"}`}>
+      <h1 className="text-[34px] font-bold leading-none tracking-[-0.03em]">Clients</h1>
       <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Ajouter un client" disabled={cs.missing} onClick={() => setForm({ c: null })} className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-black shadow-[0_4px_14px_rgba(255,255,255,.18)] disabled:opacity-40"><Plus size={20} strokeWidth={2.4} /></motion.button>
     </div>
-    <h1 className="mt-1.5 text-[34px] font-bold leading-none tracking-[-0.03em]">Clients</h1>
-    {!ready ? <div className="mt-5 space-y-3" aria-hidden>{[0, 1, 2].map(i => <div key={i} className={`${card} h-[64px] animate-pulse`} />)}</div>
+    {!ready ? <div className="mt-5 space-y-3" aria-hidden>{[0, 1, 2].map(i => <div key={i} className={`${card} h-[64px] opacity-60`} />)}</div>
       : !list.length ? <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={PUSH} className="flex flex-col items-center px-6 pb-8 pt-16 text-center">
         <span className="flex h-[84px] w-[84px] items-center justify-center rounded-full bg-gradient-to-b from-white/[.14] to-white/[.04] shadow-[inset_0_1px_0_rgba(255,255,255,.12)]"><UsersRound size={34} strokeWidth={1.5} /></span>
         <p className="mt-6 text-[19px] font-semibold tracking-[-0.01em]">Votre carnet d'adresses</p>
@@ -116,16 +117,9 @@ export default function ClientsPage() {
         </>}
   </div>
 
-  return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-black text-white">
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain" style={{ paddingTop: desk ? 28 : "calc(var(--sat) + 6px)", paddingBottom: desk ? 40 : `calc(${NAV} + 16px)` }}>
-      <div className={`relative mx-auto w-full px-4 ${desk ? "max-w-[640px]" : ""}`}>
-        <AnimatePresence initial={false} mode="popLayout">
-          {client ? <motion.div key={`f-${client.key}`} initial={reduce ? { opacity: 0 } : { x: "100%", opacity: 1 }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "100%" }} transition={PUSH}>
-            <Fiche c={client} today={today} sigs={cs.sigs} onBack={back} onEdit={() => setForm({ c: client })} /></motion.div>
-            : <motion.div key="list" initial={reduce ? { opacity: 0 } : { x: "-28%", opacity: .4 }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "-28%", opacity: .4 }} transition={PUSH}>{listView}</motion.div>}
-        </AnimatePresence>
-      </div>
-    </div>
+  return <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-black text-white">
+    <PushStack ref={scroller} base={listView} top={client ? <Fiche c={client} today={today} sigs={cs.sigs} onBack={back} onEdit={() => setForm({ c: client })} /> : null} topKey={client ? `f-${client.key}` : undefined}
+      inner={desk ? "max-w-[640px]" : ""} padTop={desk ? 28 : "calc(var(--sat) + 2px)"} padBottom={desk ? 40 : `calc(${NAV} + 16px)`} />
     <AnimatePresence>{form && <ClientForm key="cf" initial={form.c} seed={form.seed} directory={list} desk={desk} onClose={() => setForm(null)} onOpen={k => open(k)} onSaved={k => { if (!form.c) open(k) }} onDeleted={() => { setOpenKey(null); if (pushed.current) { pushed.current = false; history.back() } }} />}</AnimatePresence>
   </div>
 }

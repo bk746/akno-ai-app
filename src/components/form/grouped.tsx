@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import ModalSheet from "../sheet/ModalSheet"
 import { Check, ChevronDown, ChevronRight, MapPin, Search, UserPlus, X } from "lucide-react"
 
 export const ACC = "#2F6BFF", ACC_T = "#7EA6FF"
@@ -96,13 +97,8 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
   // les contacts trouvés d'abord, puis « Nouveau client » (saisie libre)
   const opts: { c: Contact; isNew: boolean }[] = [...list.map(c => ({ c, isNew: false })), ...(q.trim() && !exact ? [{ c: { name: q.trim() }, isNew: true }] : [])]
   const pick = (i: number) => { const o = opts[i]; if (o) onPick(o.c, o.isNew) }
-  return createPortal(<AnimatePresence>{open && <motion.div key="cs" className={`fixed inset-0 z-[60] flex bg-black/55 backdrop-blur-[3px] ${desk ? "items-center justify-center" : "items-end kb-sheet"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: rm ? 0 : .18 }} onClick={onClose}>
-    <motion.div role="dialog" aria-modal="true" aria-label="Choisir un client" onClick={e => e.stopPropagation()}
-      initial={desk ? { opacity: 0, scale: .97 } : { y: "100%" }} animate={desk ? { opacity: 1, scale: 1 } : { y: 0 }} exit={desk ? { opacity: 0, scale: .97 } : { y: "100%" }}
-      transition={rm ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 38, mass: .9 }}
-      onAnimationComplete={() => inRef.current?.focus({ preventScroll: true })}
-      className={`flex w-full flex-col bg-[#1C1C1E] ${desk ? "max-h-[72dvh] max-w-[460px] rounded-[22px]" : "kb-panel h-[86dvh] rounded-t-[22px]"}`} style={desk ? undefined : { paddingBottom: "env(safe-area-inset-bottom)" }}>
-      {!desk && <div className="mx-auto mt-2 h-[5px] w-9 shrink-0 rounded-full bg-white/20" />}
+  return <AnimatePresence>{open && <ModalSheet key="cs" label="Choisir un client" onClose={onClose} desk={desk} z={60} escape={false} onEntered={() => inRef.current?.focus({ preventScroll: true })}
+      className={`bg-[#1C1C1E] ${desk ? "" : "h-[86dvh] pt-2"}`} deskClass="max-h-[72dvh] max-w-[460px] rounded-[22px]" style={desk ? undefined : { paddingBottom: "env(safe-area-inset-bottom)" }}>
       <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3"><span className="w-16" /><span className="text-[16px] font-semibold">Client</span><button type="button" onClick={onClose} className="w-16 text-right text-[16px] text-[#7EA6FF]">Annuler</button></div>
       <div className="shrink-0 px-4 pb-3"><label className="flex h-10 items-center gap-2 rounded-[11px] bg-white/[.09] px-3">
         <Search size={16} className="shrink-0 text-white/40" />
@@ -125,8 +121,7 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
             </button>)}
           </div>}
       </div>
-    </motion.div>
-  </motion.div>}</AnimatePresence>, document.body)
+  </ModalSheet>}</AnimatePresence>
 }
 
 /** Pilule discrète (brouillon à reprendre…), refermable. */

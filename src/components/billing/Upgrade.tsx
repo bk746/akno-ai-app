@@ -11,6 +11,7 @@ import { A, Blob } from "../ui"
 import { EASE, Spinner } from "../auth/fields"
 import { api, reloadAccount, useRights, type UpgradeKind } from "../../lib/accountApi"
 import { OFFERS, RECEPTION, TVA, dateFr, eur, yearly, type Interval } from "../../lib/offers"
+import ModalSheet from "../sheet/ModalSheet"
 
 type Preview = { kind: UpgradeKind; interval: Interval; trialing: boolean; trialEnd: string | null; periodEnd: string | null; current: number; next: number; added: number; proration: number; taxPct: number }
 
@@ -92,6 +93,7 @@ const GAINS: Record<UpgradeKind, string[]> = {
 
 function Sheet({ kind, close }: { kind: UpgradeKind; close: () => void }) {
   const reduce = useReducedMotion()
+  const wide = typeof matchMedia !== "undefined" && matchMedia("(min-width: 640px)").matches
   const [ph, setPh] = useState<Phase>("load"), [p, setP] = useState<Preview | null>(null), [err, setErr] = useState(""), [portal, setPortal] = useState(false)
   useEffect(() => { let on = true; void fetchPreview(kind, true).then(x => { if (!on) return; if (x.p) { setP(x.p); setPh("confirm") } else { setErr(x.error || ""); setPh("error") } }); return () => { on = false } }, [kind])
   useEffect(() => { const f = (e: KeyboardEvent) => { if (e.key === "Escape" && ph !== "busy") close() }; addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [ph, close])
@@ -109,9 +111,9 @@ function Sheet({ kind, close }: { kind: UpgradeKind; close: () => void }) {
   const addLabel = kind === "reception" ? RECEPTION.name : "Passage en Clients"
   const addAmt = p ? (kind === "reception" ? p.added : p.next - p.current) : 0
   const Row = ({ l, v, strong }: { l: ReactNode; v: ReactNode; strong?: boolean }) => <div className={`flex items-baseline justify-between gap-4 ${strong ? "text-[16px] font-semibold" : "text-[14.5px] text-white/70"}`}><span>{l}</span><span className="tabular-nums">{v}</span></div>
-  return <motion.div role="dialog" aria-modal aria-label={TITLE[kind]} className="kb-sheet fixed inset-0 z-[85] flex items-end justify-center bg-black/70 backdrop-blur-[6px] sm:items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => ph !== "busy" && close()}>
-    <motion.div onClick={e => e.stopPropagation()} initial={reduce ? { opacity: 0 } : { y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { y: 16, opacity: 0 }} transition={{ duration: .32, ease: EASE }}
-      className="relative w-full max-w-[460px] rounded-t-[28px] border border-white/[.08] bg-[#0E0E10] px-6 pb-[max(24px,env(safe-area-inset-bottom))] pt-6 shadow-[0_40px_80px_-20px_rgba(0,0,0,1)] sm:rounded-[28px] sm:pb-6">
+  return <ModalSheet label={TITLE[kind]} onClose={close} desk={wide} z={85} escape={false} dismissible={ph !== "busy"} backdrop="bg-black/70"
+      className={`border border-white/[.08] bg-[#0E0E10] px-6 pt-6 ${wide ? "pb-6" : "pb-[max(24px,env(safe-area-inset-bottom))]"}`} deskClass="max-w-[460px] rounded-[28px]">
+      <div className="min-h-0 overflow-y-auto overscroll-contain">
       {ph !== "busy" && <button type="button" aria-label="Fermer" onClick={close} className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/[.06] text-white/60 hover:text-white"><X size={16} /></button>}
       <AnimatePresence mode="wait" initial={false}>
         {ph === "done" && p ? <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-2 text-center">
@@ -141,8 +143,8 @@ function Sheet({ kind, close }: { kind: UpgradeKind; close: () => void }) {
           <motion.button type="button" whileTap={{ scale: .985 }} disabled={ph !== "confirm"} onClick={confirm} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-white text-[15.5px] font-semibold text-black transition-opacity hover:bg-[#F2F2F2] disabled:cursor-progress disabled:opacity-70">{ph === "busy" ? <><Spinner />Mise à jour…</> : kind === "reception" ? "Confirmer l'ajout" : "Confirmer le passage en Clients"}</motion.button>
         </motion.div>}
       </AnimatePresence>
-    </motion.div>
-  </motion.div>
+      </div>
+  </ModalSheet>
 }
 
 /** Monté une fois dans l'app : écoute openUpgrade(kind). */

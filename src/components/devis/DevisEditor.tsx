@@ -20,6 +20,8 @@ import { NumField, Seg, Stepper, Menu, MenuItem, MenuSep, Kbd, isMac, TEAL, TEAL
 import { PrestaForm, PrestaPicker, tauxDef } from "./Prestations"
 import Modeles, { type Modele } from "./Modeles"
 import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Pill, Reveal, ival } from "../form/grouped"
+import { createPortal } from "react-dom"
+import ModalSheet from "../sheet/ModalSheet"
 
 export type EditorReq = { initial?: Devis; prefill?: { client?: string; objet?: string; amount?: number; phone?: string; addr?: string; email?: string } }
 export type CtInfo = { name: string; phone?: string; email?: string; addr?: string }
@@ -180,7 +182,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
       : <span className="text-white/40">{doc.client.trim() ? "Ajoutez une ligne pour enregistrer" : "Indiquez le client pour enregistrer"}</span>}
   </div>
 
-  const header = <div className="flex shrink-0 items-center gap-3 border-b border-white/[.07] bg-black/80 px-4 backdrop-blur-xl lg:px-6" style={{ paddingTop: desk ? 0 : "var(--sat)", minHeight: desk ? 64 : undefined }}>
+  const header = <div className="flex shrink-0 items-center gap-3 border-b border-white/[.07] bg-black/80 px-4 backdrop-blur-xl lg:px-6" style={{ paddingTop: desk ? 0 : 8, minHeight: desk ? 64 : undefined }}>
     <div className={`flex w-full items-center gap-3 ${desk ? "h-16" : "h-14"}`}>
       <button type="button" aria-label="Fermer l'éditeur" onClick={() => void close()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/70 transition-colors hover:text-white"><X size={19} strokeWidth={1.75} /></button>
       <div className="min-w-0 flex-1">
@@ -266,7 +268,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
     <Pill onDismiss={() => { dropLocal("new"); setRestoreNew(null) }} action={<button type="button" onClick={() => { setDoc(restoreNew); setRestoreNew(null); setSiteDiff(!!restoreNew.meta?.site); setCoordOpen(!(restoreNew.email || restoreNew.phone || restoreNew.addr)) }} className="shrink-0 rounded-full bg-white px-3 py-1 text-[12.5px] font-semibold text-black">Reprendre</button>}>Brouillon{restoreNew.client ? ` · ${restoreNew.client}` : ""} gardé</Pill>
   </div>}</AnimatePresence>
 
-  return <motion.div className="fixed inset-0 z-[45] flex flex-col bg-black text-white" initial={{ opacity: 0, y: desk ? 0 : 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: desk ? 0 : 24 }} transition={{ type: "spring", stiffness: 360, damping: 34 }} role="dialog" aria-modal="true" aria-label={num ? `Devis N° ${num}` : "Nouveau devis"}>
+  const body = <>
     {header}
     {st === "error" && err && <div role="alert" className="flex shrink-0 items-center gap-3 border-b border-[#FF453A]/20 bg-[#FF453A]/10 px-4 py-2.5 text-[13px] text-[#FFB4AF] lg:px-6"><AlertCircle size={15} className="shrink-0" /><span className="flex-1">{err}</span><button type="button" onClick={() => void saveNow()} className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-[12.5px] font-semibold text-white hover:bg-white/15">Réessayer</button></div>}
     {desk ? <div className="min-h-0 flex-1 overflow-y-auto">
@@ -304,15 +306,20 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
     <AnimatePresence>{modeles && <Modeles desk={desk} current={{ objet: doc.objet, lignes: serialize(doc).lines }} onClose={() => setModeles(false)} onApply={applyModele} />}</AnimatePresence>
     <AnimatePresence>{picker && <PrestaPicker desk={desk} onClose={() => setPicker(false)} onPick={p => fromPresta(p)} onNew={() => { setPicker(false); setForm({ initial: {} }) }} />}</AnimatePresence>
     <AnimatePresence>{form && <PrestaForm initial={form.initial} title={form.initial?.libelle ? "Enregistrer comme prestation" : undefined} onCancel={() => setForm(null)} onDone={p => { setForm(null); if (p) { toast(`« ${p.libelle} » ajoutée à vos prestations`); if (!form.initial?.libelle) fromPresta(p) } }} />}</AnimatePresence>
-    <AnimatePresence>{preview && <motion.div className="fixed inset-0 z-[55] flex flex-col bg-black/85 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setPreview(false)}>
+    {createPortal(<AnimatePresence>{preview && <motion.div className="fixed inset-0 z-[55] flex flex-col bg-black/85 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setPreview(false)}>
       <div className="flex shrink-0 items-center gap-3 px-4 py-3 lg:px-6" style={{ paddingTop: desk ? undefined : "calc(var(--sat) + 8px)" }} onClick={e => e.stopPropagation()}>
         <span className="flex-1 text-[15px] font-semibold">Aperçu · ce que reçoit le client</span>
         <button type="button" onClick={() => import("../../lib/devisPdf").then(m => { m.downloadPdf(pdoc()); toast(`Devis-${num || "brouillon"}.pdf téléchargé`) })} className="flex h-10 items-center gap-2 rounded-full bg-white/[.1] px-4 text-[14px] font-medium hover:bg-white/[.14]"><Download size={16} />PDF</button>
         <button type="button" aria-label="Fermer l'aperçu" onClick={() => setPreview(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[.1] hover:bg-white/[.14]"><X size={18} /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-10 lg:px-6" onClick={e => e.stopPropagation()}><div className="mx-auto w-full max-w-[820px]"><DevisPaper d={pdoc()} /></div></div>
-    </motion.div>}</AnimatePresence>
-  </motion.div>
+    </motion.div>}</AnimatePresence>, document.body)}
+  </>
+  const label = num ? `Devis N° ${num}` : "Nouveau devis"
+  // update67 · ordinateur : plein écran (fondu) ; mobile : grande feuille iOS (poignée, glisser vers le bas = fermer, avec la même garde « non enregistré »)
+  return desk
+    ? <motion.div className="fixed inset-0 z-[45] flex flex-col bg-black text-white" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .2 }} role="dialog" aria-modal="true" aria-label={label}>{body}</motion.div>
+    : <ModalSheet label={label} onClose={() => void close()} z={45} size="large" escape={false} className="bg-black">{body}</ModalSheet>
 }
 
 const COLS = (tvaNA: boolean) => tvaNA ? "20px minmax(0,1fr) 132px 84px 120px 116px 36px" : "20px minmax(0,1fr) 132px 84px 120px 84px 116px 36px"

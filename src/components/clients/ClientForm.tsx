@@ -6,6 +6,7 @@ import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "motion/react"
 import { ChevronRight, Loader2, MapPin, Trash2, UserRound } from "lucide-react"
 import { useC } from "../ui"
+import ModalSheet from "../sheet/ModalSheet"
 import { Field, Group, inp } from "../chantiers/EquipeSheet"
 import { deleteClient, displayName, saveClient, useClients, type ClientInput, type NewClientSeed } from "../../lib/clients"
 import { ORIGINS, boldMatch, ficheKey, fromPicker, frPhone, parseVcf, phoneKey, sirenOf, validEmail, type Client, type Kind, type Picked } from "../../lib/clientsCalc"
@@ -106,14 +107,12 @@ export function ClientForm({ initial, seed, directory, desk, onClose, onSaved, o
   const del = async () => { if (!initial) return; setBusy("del"); const e = await deleteClient(initial.key); setBusy(""); if (e) { toast(e); return } toast(`${initial.name} supprimé`); setConfirmDel(false); onDeleted?.(initial.key); onClose() }
   const title = edit ? "Modifier" : "Nouveau client"
 
-  return createPortal(<motion.div className={`fixed inset-0 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-center justify-center" : "items-end"}`} style={{ zIndex: z }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()} initial={desk ? { opacity: 0, scale: .97 } : { y: "100%" }} animate={desk ? { opacity: 1, scale: 1 } : { y: 0 }} exit={desk ? { opacity: 0, scale: .97 } : { y: "100%" }} transition={SPRING}
-      className={`relative flex w-full flex-col overflow-hidden bg-[#161618] text-white ${desk ? "h-[86dvh] max-w-[480px] rounded-[24px] border border-white/[.08]" : "rounded-t-[22px]"}`} style={desk ? undefined : { height: "calc(100dvh - var(--sat) - 10px)" }}>
+  return <ModalSheet label={title} onClose={onClose} desk={desk} z={z} size="large" escape={false} className="bg-[#161618]" deskClass="h-[86dvh] max-w-[480px]">
       <div className="relative flex h-[56px] shrink-0 items-center justify-center px-4">
         <button type="button" onClick={onClose} className="absolute left-4 text-[16px] text-white/55 active:text-white">Annuler</button>
         <span className="text-[17px] font-semibold">{title}</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4" style={{ paddingBottom: "calc(110px + var(--kb, 0px))" }}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4" style={{ paddingBottom: 110 }}>
         <Seg id="cl-kind" label="Type de client" value={pro ? "pro" : "particulier"} options={[["particulier", "Particulier"], ["pro", "Professionnel"]]} onChange={v => set({ kind: v as Kind })} />
         <button type="button" onClick={() => void importContacts()} className="mx-auto mt-3 flex items-center gap-1.5 text-[14px] font-medium text-white/85 active:opacity-60"><UserRound size={15} strokeWidth={2} />Importer depuis les contacts</button>
         <input ref={vcf} type="file" accept=".vcf,text/vcard,text/x-vcard" className="hidden" aria-label="Fichier de contact (.vcf)" onChange={e => { void readVcf(e.target.files?.[0]); e.target.value = "" }} />
@@ -164,6 +163,5 @@ export function ClientForm({ initial, seed, directory, desk, onClose, onSaved, o
             <button type="button" disabled={!!busy} onClick={() => void del()} className="h-14 w-full border-t border-white/[.08] text-[18px] font-semibold text-[#FF453A] active:bg-white/[.05]">{busy === "del" ? "Suppression…" : `Supprimer ${initial.name}`}</button></div>
           <button type="button" onClick={() => setConfirmDel(false)} className="mt-2 h-14 w-full rounded-[16px] bg-[#2A2A2D] text-[18px] font-semibold text-[#7EA6FF]">Annuler</button>
         </motion.div></motion.div>}</AnimatePresence>
-    </motion.div>
-  </motion.div>, document.body)
+  </ModalSheet>
 }

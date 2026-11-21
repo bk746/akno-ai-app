@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useSyncExternalS
 import { motion, useReducedMotion } from "motion/react"
 import { PhoneCall, CalendarDays, Repeat2, Receipt, Search, X, ChevronRight } from "lucide-react"
 import type { St } from "../lib/store"
+import ModalSheet from "./sheet/ModalSheet"
 
 export type K = "rec" | "ag" | "rel" | "dev"
 export type P = K | "set" | "fac" | "ch" | "eq" | "cl"
@@ -99,15 +100,15 @@ export const Chev = () => <ChevronRight size={IS} strokeWidth={SW} className="te
 export const inp = "h-12 w-full rounded-[14px] border border-transparent bg-white/[.07] px-4 text-[15px] text-white outline-none [color-scheme:dark] placeholder:text-white/35 focus:border-white/25"
 export const F = ({ l, children }: any) => <label className="block"><span className="mb-2 block px-1 text-[13px] text-white/50">{l}</span>{children}</label>
 
+/* update67 · feuille générique : même composant que toutes les feuilles de l'app (ModalSheet, façon iOS) */
 export function Sheet({ title, sub, onClose, children, c, footer }: any) {
   const { desk } = useC()
-  useEffect(() => { const f = (e: KeyboardEvent) => e.key === "Escape" && onClose(); addEventListener("keydown", f); return () => removeEventListener("keydown", f) }, [onClose])
-  return <motion.div className={`fixed inset-0 z-50 flex bg-black/60 backdrop-blur-[2px] ${desk ? "items-center justify-center" : "items-end kb-sheet"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-    <motion.div role="dialog" aria-label={title} onClick={e => e.stopPropagation()} initial={desk ? { scale: .97, opacity: 0 } : { y: 40, opacity: 0 }} animate={desk ? { scale: 1, opacity: 1 } : { y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 340, damping: 32, mass: .9 }} className={`w-full border-white/[.08] bg-[#121214] shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] ${desk ? "max-h-[86dvh] max-w-[480px] rounded-[24px] border" : "kb-panel max-h-[90dvh] rounded-t-[24px] border-t"} ${footer ? "relative flex flex-col overflow-hidden" : desk ? "overflow-y-auto p-6" : "overflow-y-auto px-5 pt-3"}`} style={desk || footer ? {} : { paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
-      <div className={footer ? `min-h-0 flex-1 overflow-y-auto ${desk ? "px-6 pt-6" : "px-5 pt-3"}` : "contents"} style={footer ? { paddingBottom: desk ? 104 : "calc(112px + env(safe-area-inset-bottom))" } : {}}>
-      {!desk && <div className="mx-auto mb-4 h-[5px] w-9 rounded-full bg-white/20" />}
+  return <ModalSheet label={title} onClose={onClose} desk={desk} z={50} className={`bg-[#121214] ${desk ? "" : "border-t border-white/[.08]"}`} deskClass="max-w-[480px]">
+      <div className={`min-h-0 overflow-y-auto overscroll-contain ${footer ? "flex-1" : ""} ${desk ? (footer ? "px-6 pt-6" : "p-6") : "px-5 pt-3"}`} style={footer ? { paddingBottom: desk ? 104 : "calc(112px + env(safe-area-inset-bottom))" } : desk ? {} : { paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+      {!desk && <div aria-hidden className="mb-4 h-[5px]" />}
       <div className="mb-6 flex items-center gap-3">{c && <Circ><Blob c={c} s={20} /></Circ>}<div className="min-w-0"><div className={`truncate ${tx.title}`}>{title}</div>{sub && <div className={`truncate ${tx.cap}`}>{sub}</div>}</div><button type="button" aria-label="Fermer" onClick={onClose} className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/70 hover:text-white"><X size={IS} strokeWidth={SW} /></button></div>
       {children}</div>
-      {footer && <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 ${desk ? "px-6 pb-6" : "px-5"}`} style={{ paddingBottom: desk ? undefined : "max(20px, env(safe-area-inset-bottom))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(18,18,20,0) 0, rgba(18,18,20,.82) 26px, #121214 52px)" }}><div className="pointer-events-auto">{footer}</div></div>}</motion.div></motion.div>
+      {footer && <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 ${desk ? "px-6 pb-6" : "px-5"}`} style={{ paddingBottom: desk ? undefined : "max(20px, env(safe-area-inset-bottom))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(18,18,20,0) 0, rgba(18,18,20,.82) 26px, #121214 52px)" }}><div className="pointer-events-auto">{footer}</div></div>}
+  </ModalSheet>
 }
 export const Sub = ({ children, dot }: any) => dot ? <Chip c={dot}>{children}</Chip> : <div className={tx.cap}>{children}</div>

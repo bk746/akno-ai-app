@@ -284,3 +284,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .eq-sep.eq-sep-av + .eq-sep::before, .eq-sep + .eq-sep.eq-sep-av::before { left: 62px; }
 /* update66 · séparateurs des lignes clients (avatar 38 px) */
 .eq-sep + .eq-sep.eq-sep-cl::before { left: 64px; }
+
+/* update67 · feuilles modales (ModalSheet) : remontée au-dessus du clavier, en douceur et sans saut */
+.sheet-kb { transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform .32s cubic-bezier(.22, 1, .36, 1); }
+.sheet-kb > * { transition: max-height .32s cubic-bezier(.22, 1, .36, 1); }
+@media (prefers-reduced-motion: reduce) { .sheet-kb, .sheet-kb > * { transition: none; } }

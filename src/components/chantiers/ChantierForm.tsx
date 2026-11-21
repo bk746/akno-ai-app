@@ -1,6 +1,7 @@
 /* update64 · Créer / modifier un chantier (style iOS des listes groupées, comme les éditeurs update63). */
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
+import ModalSheet from "../sheet/ModalSheet"
 import { Check, Loader2, MapPin, Search, Trash2, Users } from "lucide-react"
 import { ClientRow, ContactSheet, IGroup, IRow, IToggleRow, Reveal, ival, type Contact } from "../form/grouped"
 import { Seg } from "../devis/fields"
@@ -76,11 +77,8 @@ export default function ChantierForm({ req, clients, devis, desk, onClose, onSav
   }
   const devisOpts = useMemo(() => [...devis].sort((a, b) => b.created - a.created).slice(0, 200), [devis])
 
-  return <motion.div className={`fixed inset-0 z-[55] flex ${desk ? "items-center justify-center bg-black/60 backdrop-blur-[3px]" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={desk ? onClose : undefined}>
-    <motion.div role="dialog" aria-modal="true" aria-label={c0 ? "Chantier" : "Nouveau chantier"} onClick={e => e.stopPropagation()}
-      initial={desk ? { scale: .97, opacity: 0 } : { y: 28, opacity: 0 }} animate={desk ? { scale: 1, opacity: 1 } : { y: 0, opacity: 1 }} exit={desk ? { scale: .97, opacity: 0 } : { y: 28, opacity: 0 }} transition={{ type: "spring", stiffness: 380, damping: 34 }}
-      className={`flex flex-col bg-black text-white ${desk ? "h-[88dvh] w-full max-w-[580px] overflow-hidden rounded-[24px] border border-white/[.08]" : "h-full w-full"}`}>
-      <div className="shrink-0 border-b border-white/[.07] bg-black/80 backdrop-blur-xl" style={{ paddingTop: desk ? 0 : "var(--sat)" }}>
+  return <ModalSheet label={c0 ? "Chantier" : "Nouveau chantier"} onClose={onClose} desk={desk} z={55} size="large" escape={false} className="bg-black" deskClass="h-[88dvh] max-w-[580px]">
+      <div className="shrink-0 border-b border-white/[.07] bg-black/80 backdrop-blur-xl" style={{ paddingTop: desk ? 0 : 4 }}>
         <div className="flex h-14 items-center justify-between px-4">
           <button type="button" onClick={onClose} className="w-24 text-left text-[16px] text-[#7EA6FF]">Annuler</button>
           <span className="truncate text-[17px] font-semibold">{c0 ? "Chantier" : "Nouveau chantier"}</span>
@@ -146,6 +144,5 @@ export default function ChantierForm({ req, clients, devis, desk, onClose, onSav
         if (!isNew && c.addr && d.lat == null && !d.address) void searchAddress(c.addr).then(r => { if (r[0]) setD(x => x.lat == null ? { ...x, lat: r[0].lat, lng: r[0].lng } : x) })
       }} />
       <AnimatePresence>{equipe && <EquipeSheet desk={desk} z={75} close={() => setEquipe(false)} />}</AnimatePresence>
-    </motion.div>
-  </motion.div>
+  </ModalSheet>
 }
