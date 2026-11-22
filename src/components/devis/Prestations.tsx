@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { motion } from "motion/react"
 import ModalSheet from "../sheet/ModalSheet"
-import { Search, Plus, Check, Trash2, Clock, Package, Tag, Sparkles, CloudOff } from "lucide-react"
+import { Search, Plus, Check, ChevronDown, Trash2, Clock, Package, Tag, Sparkles, CloudOff } from "lucide-react"
 import { Sheet, Btn, useC } from "../ui"
 import { CO } from "../../lib/devisDoc"
 import { KIND_LABEL, UNITS, fmtE, fmtN, r2, type LineKind } from "../../lib/devisCalc"
@@ -22,7 +22,7 @@ const blank = (tv?: number): PrestaInput => ({ libelle: "", description: "", cat
 
 /** Formulaire de prestation (création, modification, ou « enregistrer cette ligne comme prestation »). */
 export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?: Partial<PrestaInput>; id?: string; onDone: (p?: Prestation) => void; onCancel: () => void; title?: string }) {
-  const { s } = useC(), lib = usePrestations(), taux = tauxDef(s.settings.tarifs?.tauxHoraire)
+  const { s, desk } = useC(), lib = usePrestations(), taux = tauxDef(s.settings.tarifs?.tauxHoraire)
   const [v, setV] = useState<PrestaInput>({ ...blank(), ...initial } as PrestaInput), [busy, setBusy] = useState(false), [err, setErr] = useState("")
   const up = (p: Partial<PrestaInput>) => { setV(x => ({ ...x, ...p })); setErr("") }
   const setType = (t: LineKind) => up({ type: t, unite: t === "mo" ? "h" : t === "fft" ? "forfait" : v.unite === "h" || v.unite === "forfait" ? "u" : v.unite, duree_h: t === "mo" ? v.duree_h ?? 1 : v.duree_h })
@@ -40,9 +40,16 @@ export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?:
   const del = async () => { if (!id || !confirm(`Supprimer « ${v.libelle} » de vos prestations ?`)) return; setBusy(true); const r = await deletePrestation(id); setBusy(false); if (!r.ok) { setErr(r.error); return } onDone() }
   const L = ({ children }: any) => <span className="mb-1.5 block px-0.5 text-[12.5px] text-white/50">{children}</span>
   return <Sheet title={title || (id ? "Modifier la prestation" : "Nouvelle prestation")} sub={id ? v.categorie || "Bibliothèque" : "Réutilisable dans tous vos devis"} c={TEAL} onClose={onCancel}
-    footer={<div className="flex gap-2">{id ? <Btn aria-label="Supprimer la prestation" disabled={busy} onClick={del} className="!px-4"><Trash2 size={16} strokeWidth={1.6} /></Btn> : <Btn disabled={busy} onClick={onCancel} className="flex-1">Annuler</Btn>}<Btn primary c={TEAL} disabled={busy} className="flex-[1.6]" onClick={save}>{busy ? "Enregistrement…" : id ? "Enregistrer" : "Ajouter à mes prestations"}</Btn></div>}>
+    footer={<div data-presta-footer>
+      {/* update73 : récapitulatif dans le pied (un seul bloc plein), même présentation pour les trois types */}
+      <div className="mb-3 flex min-h-[40px] items-center justify-between gap-3 rounded-[12px] bg-white/[.05] px-3.5 text-[14px]">
+        <span className="min-w-0 truncate text-white/60">{v.type === "mo" ? `${fmtN(v.duree_h ?? 1)} h × ${fmtE(v.taux_horaire ?? taux ?? 0)}/h` : v.type === "fft" ? "Forfait" : `1 ${v.unite} × ${fmtE(v.prix_unitaire || 0)}`}{marge != null && <span className="ml-2 text-white/35">· marge {fmtE(marge)}</span>}</span>
+        <span className="shrink-0 font-semibold tabular-nums text-white">{fmtE(price)} HT</span>
+      </div>
+      <div className={`grid gap-2 ${id ? "grid-cols-[52px_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]"}`}>{id ? <Btn aria-label="Supprimer la prestation" disabled={busy} onClick={del} className="!px-0"><Trash2 size={16} strokeWidth={1.6} /></Btn> : <Btn disabled={busy} onClick={onCancel} className="w-full">Annuler</Btn>}<Btn primary c={TEAL} disabled={busy} className="w-full" onClick={save}>{busy ? "Enregistrement…" : id ? "Enregistrer" : "Ajouter à mes prestations"}</Btn></div>
+    </div>}>
     <div className="space-y-4">
-      <label className="block"><L>Libellé</L><input autoFocus className={field + " !h-11 text-[15px]"} placeholder="Ex. Pose de ballon d'eau chaude" value={v.libelle} maxLength={200} onChange={e => up({ libelle: e.target.value })} /></label>
+      <label className="block"><L>Libellé</L><input autoFocus={desk} className={field + " !h-11 text-[15px]"} placeholder="Ex. Pose de ballon d'eau chaude" value={v.libelle} maxLength={200} onChange={e => up({ libelle: e.target.value })} /></label>
       <label className="block"><L>Description <span className="text-white/30">· facultatif, imprimée sous le libellé</span></L><textarea className={field + " !h-20 resize-none py-2.5 leading-5"} placeholder="Détail des travaux compris" value={v.description} maxLength={1000} onChange={e => up({ description: e.target.value })} /></label>
       <div><L>Type</L><Seg label="Type de prestation" value={v.type} onChange={setType} opts={[["mo", "À l'heure"], ["fo", "Fourniture"], ["fft", "Forfait"]]} /></div>
       {v.type === "mo" ? <div className="grid grid-cols-2 gap-3">
@@ -50,17 +57,14 @@ export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?:
         <div><L>Taux horaire HT</L><NumField value={v.taux_horaire} onChange={n => up({ taux_horaire: n })} suffix="€/h" ariaLabel="Taux horaire" placeholder={taux != null ? `${fmtN(taux)} (réglages)` : "Ex. 55"} inputClass="!h-11" /></div>
       </div> : <div className="grid grid-cols-[minmax(0,1fr)_120px] gap-3">
         <div><L>{v.type === "fft" ? "Prix du forfait HT" : "Prix unitaire HT"}</L><NumField value={v.prix_unitaire} onChange={n => up({ prix_unitaire: n ?? 0 })} suffix="€" ariaLabel="Prix unitaire HT" inputClass="!h-11" /></div>
-        <label className="block"><L>Unité</L><select className={field + " !h-11"} value={v.unite} disabled={v.type === "fft"} onChange={e => up({ unite: e.target.value })}>{UNITS.filter(u => u !== "h").map(u => <option key={u} value={u}>{u}</option>)}</select></label>
+        <label className="block"><L>Unité</L><span className="relative block"><select aria-label="Unité" className={field + " !h-11 appearance-none pr-9 text-[15px] disabled:opacity-60"} value={v.unite} disabled={v.type === "fft"} onChange={e => up({ unite: e.target.value })}>{UNITS.filter(u => u !== "h").map(u => <option key={u} value={u}>{u}</option>)}</select><ChevronDown aria-hidden size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/40" /></span></label>
       </div>}
       <div className="grid grid-cols-2 gap-3">
         <label className="block"><L>Catégorie</L><input list="akno-presta-cats" className={field + " !h-11"} placeholder="Ex. Plomberie" value={v.categorie} maxLength={60} onChange={e => up({ categorie: e.target.value })} /><datalist id="akno-presta-cats">{cats.map(c => <option key={c} value={c} />)}</datalist></label>
         <div><L>Coût d'achat HT <span className="text-white/30">· facultatif</span></L><NumField value={v.cout_achat} onChange={n => up({ cout_achat: n })} suffix={v.type === "mo" ? "€/h" : "€"} ariaLabel="Coût d'achat" placeholder="Pour la marge" inputClass="!h-11" /></div>
       </div>
-      <div><L>TVA</L><Seg label="Taux de TVA" value={v.tva == null ? "def" : String(v.tva)} onChange={x => up({ tva: x === "def" ? null : Number(x) })} opts={[["def", `Par défaut (${fmtN(s.settings.tva)} %)`], ["5.5", "5,5 %"], ["10", "10 %"], ["20", "20 %"]]} /></div>
-      <div className="flex items-center justify-between rounded-[14px] border border-white/[.06] bg-white/[.03] px-4 py-3 text-[13.5px]">
-        <span className="text-white/55">{v.type === "mo" ? `${fmtN(v.duree_h ?? 1)} h × ${fmtN(v.taux_horaire ?? taux ?? 0)} €/h` : v.type === "fft" ? "Forfait" : `Par ${v.unite}`}{marge != null && <span className="ml-2 text-white/35">· marge {fmtE(marge)}</span>}</span>
-        <span className="font-semibold tabular-nums text-white">{fmtE(price)} HT</span>
-      </div>
+      <div><L>TVA</L><Seg label="Taux de TVA" value={v.tva == null ? "def" : String(v.tva)} onChange={x => up({ tva: x === "def" ? null : Number(x) })} opts={[["def", "Défaut"], ["5.5", "5,5 %"], ["10", "10 %"], ["20", "20 %"]]} />
+        {v.tva == null && <span className="mt-1.5 block px-0.5 text-[12.5px] text-white/40">Défaut = {fmtN(s.settings.tva)} %, le taux de vos réglages</span>}</div>
       {v.type === "mo" && v.taux_horaire == null && taux == null && <p className="px-1 text-[12.5px] text-[#FFB340]">Aucun taux horaire dans vos réglages : indiquez-en un ici.</p>}
       {err && <div role="alert" className="rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{err}</div>}
     </div>
@@ -119,18 +123,21 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
   const list = lib.items.filter(x => (!cat || x.categorie === cat) && words.every(w => `${x.libelle} ${x.description} ${x.categorie}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(w)))
   useEffect(() => { setSel(0) }, [q, cat])
   useEffect(() => { listRef.current?.querySelector(`[data-i="${sel}"]`)?.scrollIntoView({ block: "nearest" }) }, [sel])
-  const pick = (p: Prestation) => { onPick(p); setFlash(p.id); setTimeout(() => setFlash(f => f === p.id ? null : f), 900); inp.current?.focus() }
+  const pick = (p: Prestation) => { onPick(p); setFlash(p.id); setTimeout(() => setFlash(f => f === p.id ? null : f), 900); if (desk) inp.current?.focus({ preventScroll: true }) }
   const key = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setSel(i => Math.min(list.length - 1, i + 1)) }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSel(i => Math.max(0, i - 1)) }
     else if (e.key === "Enter") { e.preventDefault(); const p = list[sel]; if (p) pick(p) }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose() }
   }
-  return <ModalSheet label="Ajouter une prestation" onClose={onClose} desk={desk} z={50} deskAlign="top" backdrop="bg-black/60" className={`border-white/[.09] bg-[#121214] ${desk ? "" : "h-[86dvh] border-t"}`} deskClass="max-h-[70vh] max-w-[620px]">
+  /* update73 : plus d'autoFocus. Sur iPhone, le focus pendant la montée de la feuille ouvrait le clavier, qui faisait défiler
+       et redimensionner l'écran : la feuille « Nouveau devis » disparaissait ~2 s. Le clavier ne s'ouvre plus qu'au toucher du champ ;
+       sur ordinateur, le champ reçoit le focus une fois la feuille arrivée. */
+  return <ModalSheet label="Ajouter une prestation" onClose={onClose} desk={desk} z={50} onEntered={() => { if (desk) inp.current?.focus({ preventScroll: true }) }} deskAlign="top" backdrop="bg-black/60" className={`border-white/[.09] bg-[#121214] ${desk ? "" : "h-[86dvh] border-t"}`} deskClass="max-h-[70vh] max-w-[620px]">
       {!desk && <div className="h-[22px] shrink-0" />}
       <div className="flex shrink-0 items-center gap-3 border-b border-white/[.07] px-4 py-3">
         <Search size={18} strokeWidth={1.7} className="shrink-0 text-white/40" />
-        <input ref={inp} autoFocus value={q} onChange={e => setQ(e.target.value)} onKeyDown={key} placeholder="Rechercher une prestation…" aria-label="Rechercher une prestation" className="h-10 min-w-0 flex-1 bg-transparent text-[16px] text-white outline-none placeholder:text-white/35" />
+        <input ref={inp} value={q} onChange={e => setQ(e.target.value)} onKeyDown={key} placeholder="Rechercher une prestation…" aria-label="Rechercher une prestation" className="h-10 min-w-0 flex-1 bg-transparent text-[16px] text-white outline-none placeholder:text-white/35" />
         <button type="button" onClick={onClose} className="shrink-0 rounded-full bg-white/[.07] px-3 py-1.5 text-[12.5px] font-medium text-white/70 hover:text-white">{desk ? "Échap" : "Fermer"}</button>
       </div>
       {cats.length > 1 && <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 py-2.5 [scrollbar-width:none]">{["", ...cats].map(c => <button key={c || "all"} type="button" onClick={() => setCat(c)} className={`h-7 shrink-0 rounded-full px-3 text-[12.5px] font-medium transition-colors ${cat === c ? "bg-white text-black" : "bg-white/[.06] text-white/60 hover:text-white"}`}>{c || "Toutes"}</button>)}</div>}

@@ -308,3 +308,6 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .sheet-kb { transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform .32s cubic-bezier(.22, 1, .36, 1); }
 .sheet-kb > * { transition: max-height .32s cubic-bezier(.22, 1, .36, 1); }
 @media (prefers-reduced-motion: reduce) { .sheet-kb, .sheet-kb > * { transition: none; } }
+
+/* update73 · listes déroulantes compactes (unité, TVA) : flèche discrète collée au texte, mêmes marges que les autres champs */
+select.sel { -webkit-appearance: none; appearance: none; padding-right: 28px !important; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-opacity='.45' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 12px; }

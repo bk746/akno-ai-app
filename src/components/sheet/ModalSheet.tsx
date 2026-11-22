@@ -5,7 +5,7 @@
    - bureau : boîte centrée (fondu + léger zoom) ;
    - prefers-reduced-motion : simple fondu.
    À placer dans <AnimatePresence> : la sortie est animée depuis la position courante (y compris après un glissement). */
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useIsPresent, useMotionValue, useReducedMotion } from "motion/react"
 import { SHEET, SNAP } from "../../lib/motion"
@@ -34,6 +34,15 @@ type Props = {
 }
 
 const stack: number[] = []
+/* update73 · pile de feuilles robuste : on sait quelle feuille est au sommet (abonnement), pour que SEULE celle-ci suive le
+   clavier (.sheet-kb / --kb). Avant, la feuille du dessous (ex. « Nouveau devis ») remontait et rétrécissait elle aussi quand
+   le clavier s'ouvrait dans la feuille du dessus : fond noir en haut, feuille qui « disparaît » puis revient. */
+const stackSubs = new Set<() => void>()
+const stackChanged = () => stackSubs.forEach(f => f())
+const TEXT_FIELD = "input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]),textarea,select,[contenteditable=true]"
+const isTextField = (el: Element | null) => !!el && el instanceof HTMLElement && el.matches(TEXT_FIELD)
+/** ferme le clavier : retire le focus d'un champ de saisie actif (iOS garde parfois le clavier sans champ visible) */
+export const blurTyping = () => { const a = document.activeElement; if (isTextField(a)) (a as HTMLElement).blur() }
 let lockN = 0, saved: [string, string] = ["", ""]
 const lock = () => { if (lockN++ === 0) { const b = document.body.style, h = document.documentElement.style; saved = [b.overflow, h.overflow]; b.overflow = "hidden"; h.overflow = "hidden" } }
 const unlock = () => { if (--lockN === 0) { document.body.style.overflow = saved[0]; document.documentElement.style.overflow = saved[1] } }
@@ -57,12 +66,24 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
   const present = useRef(true); present.current = useIsPresent()
 
   // pile des feuilles ouvertes : seule la plus haute répond à Échap ; défilement de la page verrouillé
+  const [isTop, setTop] = useState(true), [under, setUnder] = useState(false)
   useLayoutEffect(() => {
-    id.current = ++seq; stack.push(id.current); lock()
+    // update73 · mobile : le clavier se ferme avant l'ouverture d'une feuille (pas de clavier « fantôme » sans champ)
+    if (!desk) blurTyping()
+    id.current = ++seq; setUnder(stack.length > 0); stack.push(id.current); lock(); stackChanged()
+    const me = id.current, sync = () => setTop(stack[stack.length - 1] === me); stackSubs.add(sync); sync()
     const prev = document.activeElement as HTMLElement | null
     requestAnimationFrame(() => { const p = panel.current; if (p && !p.contains(document.activeElement)) p.focus({ preventScroll: true }) })
-    return () => { const i = stack.indexOf(id.current); if (i >= 0) stack.splice(i, 1); unlock(); if (prev && document.contains(prev)) prev.focus?.({ preventScroll: true }) }
-  }, [])
+    return () => {
+      stackSubs.delete(sync)
+      const i = stack.indexOf(me); if (i >= 0) stack.splice(i, 1); unlock(); stackChanged()
+      // fermeture : on retire le focus d'un champ de cette feuille (sinon le clavier reste ouvert sans champ) ; sur mobile on ne
+      // redonne jamais le focus à un champ de saisie de la feuille du dessous (le clavier se rouvrirait tout seul)
+      const p = panel.current, a = document.activeElement
+      if (a instanceof HTMLElement && (!a.isConnected || (p && p.contains(a)))) a.blur()
+      if (prev && document.contains(prev) && (desk || !isTextField(prev))) prev.focus?.({ preventScroll: true })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!escape) return
     const f = (e: KeyboardEvent) => { if (e.key === "Escape" && stack[stack.length - 1] === id.current && canDismiss.current) { e.preventDefault(); close.current() } }
@@ -124,7 +145,7 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
   // (total, boutons « PDF / Envoyer ») passait sous le bord de l'écran sur iPhone.
   const VH = "min(var(--sheet-vh, 100dvh), 100%)"
   const H = size === "full" ? "100%" : size === "large" ? "calc(100% - var(--sat, 0px) - 10px)" : undefined
-  const mobile: any = { y, height: H, maxHeight: size === "full" ? undefined : "calc(100% - var(--sat, 0px) - 10px - var(--kb, 0px))", ...style }
+  const mobile: any = { y, height: H, maxHeight: size === "full" ? undefined : isTop ? "calc(100% - var(--sat, 0px) - 10px - var(--kb, 0px))" : "calc(100% - var(--sat, 0px) - 10px)", ...style }
   const anim = desk
     ? { initial: { opacity: 0, scale: .96, y: 8 }, animate: { opacity: 1, scale: 1, y: 0, transition: SNAP }, exit: { opacity: 0, scale: .97, transition: { duration: .16 } } }
     : reduce
@@ -134,9 +155,9 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
   const node = <div className={`fixed inset-0 flex ${desk ? (deskAlign === "top" ? "items-start justify-center pt-[12vh]" : "items-center justify-center p-6") : "items-end justify-center"}`} style={desk ? { zIndex: z } : { zIndex: z, bottom: "auto", height: VH }}>
     <motion.div aria-hidden className="absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .28, ease: [.22, 1, .36, 1] } }} exit={{ opacity: 0, transition: { duration: .24 } }}
       onClick={() => { if (canDismiss.current) close.current() }}>
-      <motion.div className={`absolute inset-0 ${backdrop}`} style={{ opacity: dim }} />
+      <motion.div className={`absolute inset-0 ${under ? "bg-black/35" : backdrop}`} style={{ opacity: dim }} />
     </motion.div>
-    <div className={desk ? "relative flex w-full justify-center" : "sheet-kb pointer-events-none relative flex h-full w-full items-end justify-center"}>
+    <div className={desk ? "relative flex w-full justify-center" : `${isTop ? "sheet-kb " : ""}pointer-events-none relative flex h-full w-full items-end justify-center`}>
       <motion.div ref={panel} role={role} aria-modal="true" aria-label={labelledBy ? undefined : label} aria-labelledby={labelledBy} tabIndex={-1}
         {...anim} style={desk ? style : mobile}
         onAnimationComplete={() => { if (!entered.current) { entered.current = true; onEntered?.() } }}

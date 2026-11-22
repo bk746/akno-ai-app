@@ -82,45 +82,98 @@ export function ClientRow({ value, phone, email, onOpen, disabled }: { value: st
     title={v || "Choisir ou ajouter un client"} accent={!v} sub={v ? ([phone, email].filter(Boolean).join(" · ") || "Coordonnées à compléter") : "Dans vos contacts ou nouveau"} />
 }
 
-/** Feuille de recherche de contact. Saisie libre possible (« Nouveau client »). */
+/** Feuille de recherche de contact.
+    update73 : ligne « + Nouveau client » toujours en tête (même liste vide). Si une recherche est tapée : « Créer "<texte>" »,
+    préremplie (nom, ou téléphone / e-mail si le texte y ressemble). Mini-formulaire nom, téléphone, e-mail, adresse : la fiche
+    client est créée (client_fiches, comme depuis la page Clients) puis choisie aussitôt pour le devis / la facture / le chantier. */
+const looksTel = (t: string) => /^[+\d][\d\s.()-]{5,}$/.test(t.trim())
+const looksMail = (t: string) => /@/.test(t)
 export function ContactSheet({ open, clients, current, onPick, onClose, desk }: { open: boolean; clients: Contact[]; current?: string; onPick: (c: Contact, isNew: boolean) => void; onClose: () => void; desk?: boolean }) {
   const [q, setQ] = useState(""), [sel, setSel] = useState(0), inRef = useRef<HTMLInputElement>(null), rm = useReducedMotion()
-  useEffect(() => { if (open) { setQ(""); setSel(0) } }, [open])
+  const [nf, setNf] = useState<Contact | null>(null), [busy, setBusy] = useState(false), [err, setErr] = useState(""), nameRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (open) { setQ(""); setSel(0); setNf(null); setErr(""); setBusy(false) } }, [open])
   useEffect(() => {
     if (!open) return
-    const f = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); onClose() } }
+    const f = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); if (nf) setNf(null); else onClose() } }
     addEventListener("keydown", f, true); return () => removeEventListener("keydown", f, true)
-  }, [open, onClose])
+  }, [open, onClose, nf])
+  useEffect(() => { if (nf && desk) { const t = setTimeout(() => nameRef.current?.focus({ preventScroll: true }), 60); return () => clearTimeout(t) } }, [!!nf]) // eslint-disable-line react-hooks/exhaustive-deps
   const nq = q.trim().toLowerCase(), digits = nq.replace(/\s/g, "")
   const list = useMemo(() => clients.filter(c => c.name && (!nq || c.name.toLowerCase().includes(nq) || (c.email || "").toLowerCase().includes(nq) || (digits.length > 1 && (c.phone || "").replace(/\s/g, "").includes(digits)))).slice(0, 40), [clients, nq, digits])
   const exact = list.some(c => c.name.toLowerCase() === nq)
-  // les contacts trouvés d'abord, puis « Nouveau client » (saisie libre)
-  const opts: { c: Contact; isNew: boolean }[] = [...list.map(c => ({ c, isNew: false })), ...(q.trim() && !exact ? [{ c: { name: q.trim() }, isNew: true }] : [])]
-  const pick = (i: number) => { const o = opts[i]; if (o) onPick(o.c, o.isNew) }
-  return <AnimatePresence>{open && <ModalSheet key="cs" label="Choisir un client" onClose={onClose} desk={desk} z={60} escape={false} onEntered={() => inRef.current?.focus({ preventScroll: true })}
+  const startNew = () => { const t = q.trim(); setErr(""); setNf(!t ? { name: "" } : looksMail(t) ? { name: "", email: t } : looksTel(t) ? { name: "", phone: t } : { name: t }) }
+  const pick = (i: number) => { const c = list[i]; if (c) onPick(c, false); else startNew() }
+  const saveNew = async () => {
+    if (!nf || busy) return
+    const name = nf.name.trim(); if (!name) { setErr("Indiquez le nom du client."); nameRef.current?.focus(); return }
+    const c: Contact = { name, phone: nf.phone?.trim() || undefined, email: nf.email?.trim() || undefined, addr: nf.addr?.trim() || undefined }
+    setBusy(true); setErr("")
+    try {
+      const { saveClient } = await import("../../lib/clients")
+      const w = name.split(/\s+/), r = await saveClient(null, { kind: "particulier", prenom: w.length > 1 ? w[0] : "", nom_famille: w.length > 1 ? w.slice(1).join(" ") : name, societe: "", telephone: c.phone || "", email: c.email || "", adresse: c.addr || "", ville: "", lat: null, lng: null, siren: "", notes: "", origine: null })
+      // déjà existant : on le choisit avec les coordonnées saisies ; table absente / hors ligne : le client est quand même choisi
+      // (il sera enregistré avec le document, comme avant)
+      if (!r.ok && !r.existing && !/session/i.test(r.error)) console.warn("[clients] fiche non créée :", r.error)
+      if (!r.ok && /session/i.test(r.error)) { setErr(r.error); setBusy(false); return }
+    } catch { /* hors ligne : le client est quand même choisi */ }
+    setBusy(false); onPick(c, false)
+  }
+  const nfIn = (k: keyof Contact, label: string, props: Record<string, unknown>) => <label className="ig-row flex min-h-12 items-center gap-3 pl-4">
+    <span className="w-[92px] shrink-0 text-[16px]">{label}</span>
+    <input value={nf?.[k] || ""} onChange={e => { const v = e.target.value; setNf(x => x ? { ...x, [k]: v } : x); setErr("") }} className={ival} {...props} />
+  </label>
+  return <AnimatePresence>{open && <ModalSheet key="cs" label={nf ? "Nouveau client" : "Choisir un client"} onClose={onClose} desk={desk} z={60} escape={false} onEntered={() => { if (desk) inRef.current?.focus({ preventScroll: true }) }}
       className={`bg-[#1C1C1E] ${desk ? "" : "h-[86dvh] pt-2"}`} deskClass="max-h-[72dvh] max-w-[460px] rounded-[22px]" style={desk ? undefined : { paddingBottom: "var(--sab)" }}>
+      {nf ? <div data-new-client className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
+          <button type="button" onClick={() => setNf(null)} className="w-20 text-left text-[16px] text-[#7EA6FF]">Retour</button>
+          <span className="text-[16px] font-semibold">Nouveau client</span>
+          <button type="button" onClick={() => void saveNew()} disabled={busy} className="w-20 text-right text-[16px] font-semibold text-[#7EA6FF] disabled:opacity-50">{busy ? "…" : "OK"}</button>
+        </div>
+        <form className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6 pt-2" onSubmit={e => { e.preventDefault(); void saveNew() }}>
+          <div className="ig overflow-hidden rounded-[14px] bg-white/[.05]">
+            {nfIn("name", "Nom", { ref: nameRef, placeholder: "Ex. Isabelle Fournier", autoComplete: "name", autoCapitalize: "words", enterKeyHint: "next", "aria-label": "Nom du client" })}
+            {nfIn("phone", "Téléphone", { type: "tel", inputMode: "tel", placeholder: "06 12 34 56 78", autoComplete: "tel", enterKeyHint: "next", "aria-label": "Téléphone du client" })}
+            {nfIn("email", "E-mail", { type: "email", inputMode: "email", placeholder: "client@exemple.fr", autoComplete: "email", autoCapitalize: "none", enterKeyHint: "next", "aria-label": "E-mail du client" })}
+            {nfIn("addr", "Adresse", { placeholder: "N°, rue, ville", autoComplete: "street-address", enterKeyHint: "done", "aria-label": "Adresse du client" })}
+          </div>
+          <p className="px-1 pt-2 text-[13px] text-white/45">Seul le nom est obligatoire. Le client est ajouté à vos contacts et choisi pour ce document.</p>
+          {err && <p role="alert" className="px-1 pt-2 text-[13.5px] text-[#FF9B96]">{err}</p>}
+          <button type="submit" disabled={busy} className="mt-5 flex h-[52px] w-full items-center justify-center gap-2 rounded-full text-[16.5px] font-semibold text-white transition-transform active:scale-[.98] disabled:opacity-60" style={{ background: ACC }}>
+            <UserPlus size={18} strokeWidth={2} />{busy ? "Enregistrement…" : "Enregistrer et choisir ce client"}</button>
+        </form>
+      </div> : <>
       <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3"><span className="w-16" /><span className="text-[16px] font-semibold">Client</span><button type="button" onClick={onClose} className="w-16 text-right text-[16px] text-[#7EA6FF]">Annuler</button></div>
       <div className="shrink-0 px-4 pb-3"><label className="flex h-10 items-center gap-2 rounded-[11px] bg-white/[.09] px-3">
         <Search size={16} className="shrink-0 text-white/40" />
         <input ref={inRef} value={q} onChange={e => { setQ(e.target.value); setSel(0) }} placeholder="Nom, téléphone ou e-mail" aria-label="Rechercher un client" enterKeyHint="done" autoComplete="off" autoCapitalize="words"
-          onKeyDown={e => { if (e.key === "ArrowDown") { e.preventDefault(); setSel(i => Math.min(opts.length - 1, i + 1)) } else if (e.key === "ArrowUp") { e.preventDefault(); setSel(i => Math.max(0, i - 1)) } else if (e.key === "Enter") { e.preventDefault(); pick(sel) } }}
+          onKeyDown={e => { if (e.key === "ArrowDown") { e.preventDefault(); setSel(i => Math.min(list.length - 1, i + 1)) } else if (e.key === "ArrowUp") { e.preventDefault(); setSel(i => Math.max(0, i - 1)) } else if (e.key === "Enter") { e.preventDefault(); pick(sel) } }}
           className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-white outline-none caret-[#2F6BFF] placeholder:text-white/35" />
         {q && <button type="button" aria-label="Effacer" onClick={() => { setQ(""); inRef.current?.focus() }} className="flex h-5 w-5 items-center justify-center rounded-full bg-white/25 text-black"><X size={12} strokeWidth={3} /></button>}
       </label></div>
       <div role="listbox" aria-label="Contacts" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6">
-        {opts.length === 0 ? <div className="px-2 py-10 text-center text-[14px] text-white/40">{clients.length ? "Aucun contact ne correspond." : "Aucun contact pour l'instant : tapez le nom du client."}</div>
-          : <div className="ig overflow-hidden rounded-[14px] bg-white/[.05]">
-            {opts.map((o, i) => <button key={(o.isNew ? "new:" : "") + o.c.name} type="button" role="option" aria-selected={i === sel} onClick={() => pick(i)} onMouseMove={() => setSel(i)}
+        <div className="ig mb-4 overflow-hidden rounded-[14px] bg-white/[.05]">
+          <button type="button" data-new-client-row onClick={startNew} className="ig-row flex min-h-[56px] w-full items-center gap-3 py-2.5 pl-3 pr-3 text-left active:bg-white/[.06]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white" style={{ background: ACC }}><UserPlus size={17} strokeWidth={2} /></span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-[16px] font-medium text-[#7EA6FF]">{q.trim() && !exact ? `Créer « ${q.trim()} »` : "Nouveau client"}</span>
+              <span className="block truncate text-[13px] text-white/45">Nom, téléphone, e-mail, adresse</span></span>
+            <ChevronRight size={17} className="shrink-0 text-white/30" />
+          </button>
+        </div>
+        {list.length === 0 ? <div className="px-2 py-6 text-center text-[14px] text-white/40">{clients.length ? "Aucun contact ne correspond." : "Aucun contact pour l'instant."}</div>
+          : <>{!q.trim() && <div className="px-4 pb-1.5 text-[13px] uppercase tracking-[.04em] text-white/40">Vos clients</div>}
+          <div className="ig overflow-hidden rounded-[14px] bg-white/[.05]">
+            {list.map((c, i) => <button key={c.name} type="button" role="option" aria-selected={i === sel} onClick={() => pick(i)} onMouseMove={() => setSel(i)}
               className={`ig-row flex w-full items-center gap-3 py-2.5 pl-3 pr-3 text-left transition-colors ${i === sel && desk ? "bg-white/[.06]" : ""} active:bg-white/[.06]`}>
-              {o.isNew ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#2F6BFF]/15 text-[#7EA6FF]"><UserPlus size={17} strokeWidth={1.8} /></span> : <Avatar name={o.c.name} />}
+              <Avatar name={c.name} />
               <span className="min-w-0 flex-1">
-                <span className={`block truncate text-[16px] ${o.isNew ? "text-[#7EA6FF]" : ""}`}>{o.isNew ? `Nouveau client « ${o.c.name} »` : o.c.name}</span>
-                {!o.isNew && (o.c.phone || o.c.email || o.c.addr) && <span className="flex items-center gap-1 truncate text-[13px] text-white/45">{o.c.phone || o.c.email}{(o.c.phone || o.c.email) && o.c.addr ? " · " : ""}{o.c.addr && <><MapPin size={11} className="shrink-0" /><span className="truncate">{o.c.addr}</span></>}</span>}
+                <span className="block truncate text-[16px]">{c.name}</span>
+                {(c.phone || c.email || c.addr) && <span className="flex items-center gap-1 truncate text-[13px] text-white/45">{c.phone || c.email}{(c.phone || c.email) && c.addr ? " · " : ""}{c.addr && <><MapPin size={11} className="shrink-0" /><span className="truncate">{c.addr}</span></>}</span>}
               </span>
-              {!o.isNew && current && o.c.name.toLowerCase() === current.trim().toLowerCase() && <Check size={17} className="shrink-0 text-[#7EA6FF]" />}
+              {current && c.name.toLowerCase() === current.trim().toLowerCase() && <Check size={17} className="shrink-0 text-[#7EA6FF]" />}
             </button>)}
-          </div>}
-      </div>
+          </div></>}
+      </div></>}
   </ModalSheet>}</AnimatePresence>
 }
 

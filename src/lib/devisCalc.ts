@@ -9,13 +9,15 @@
 
 export type LineKind = "mo" | "fo" | "fft"
 export type DevisMeta = { v: 2; site?: string; remise?: { t: "pct" | "eur"; v: number }; acompte?: number; validite?: number; conditions?: string; notes?: string }
-export type StoredLine = { l: string; q: number; pu: number; u?: string; tv?: number; k?: LineKind | "sec" | "rem" | "meta"; d?: string; pid?: string; ca?: number; m?: DevisMeta }
-export type EdLine = { id: string; k: LineKind | "sec"; l: string; d: string; q: number; u: string; pu: number; tv: number; pid?: string; ca?: number }
+/** update73 · remise sur une ligne : t = "pct" (% du montant de la ligne) ou "eur" (montant retiré de la ligne). */
+export type LineDisc = { t: "pct" | "eur"; v: number }
+export type StoredLine = { l: string; q: number; pu: number; u?: string; tv?: number; k?: LineKind | "sec" | "rem" | "meta"; d?: string; pid?: string; ca?: number; m?: DevisMeta; rl?: LineDisc; lr?: 1 }
+export type EdLine = { id: string; k: LineKind | "sec"; l: string; d: string; q: number; u: string; pu: number; tv: number; pid?: string; ca?: number; rl?: LineDisc }
 
 export const TVA_RATES = [5.5, 10, 20] as const
 export const UNITS = ["u", "h", "m²", "ml", "m³", "kg", "forfait", "lot", "j", "ens."] as const
 export const KIND_LABEL: Record<LineKind, string> = { mo: "Main-d'œuvre", fo: "Fourniture", fft: "Forfait" }
-export const KIND_SHORT: Record<LineKind, string> = { mo: "MO", fo: "Fourn.", fft: "Forfait" }
+export const KIND_SHORT: Record<LineKind, string> = { mo: "À l'heure", fo: "Fourniture", fft: "Forfait" }
 
 export const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100
 export const lid = () => Math.random().toString(36).slice(2, 10)
@@ -46,13 +48,17 @@ export function fromStored(raw: unknown, tvDef: number, fallback?: { objet?: str
     if (!x || typeof x !== "object" || x.k === "meta" || x.k === "rem") continue
     if (x.k === "sec") { items.push({ id: lid(), k: "sec", l: String(x.l || ""), d: "", q: 0, u: "", pu: 0, tv: tvDef }); continue }
     const k = guessKind(x)
-    items.push({ id: lid(), k, l: String(x.l || ""), d: String(x.d || ""), q: Number(x.q) || 0, u: String(x.u || (k === "mo" ? "h" : k === "fft" ? "forfait" : "u")), pu: Number(x.pu) || 0, tv: x.tv == null ? tvDef : Number(x.tv), ...(x.pid ? { pid: x.pid } : {}), ...(x.ca != null && Number.isFinite(Number(x.ca)) ? { ca: Number(x.ca) } : {}) })
+    items.push({ id: lid(), k, l: String(x.l || ""), d: String(x.d || ""), q: Number(x.q) || 0, u: String(x.u || (k === "mo" ? "h" : k === "fft" ? "forfait" : "u")), pu: Number(x.pu) || 0, tv: x.tv == null ? tvDef : Number(x.tv), ...(x.pid ? { pid: x.pid } : {}), ...(x.ca != null && Number.isFinite(Number(x.ca)) ? { ca: Number(x.ca) } : {}), ...(x.rl && Number(x.rl.v) > 0 ? { rl: { t: x.rl.t === "eur" ? "eur" as const : "pct" as const, v: Number(x.rl.v) } } : {}) })
   }
   if (!items.length && fallback?.amount) items.push({ id: lid(), k: "fft", l: fallback.objet || "Travaux", d: "", q: 1, u: "forfait", pu: r2(fallback.amount / (1 + tvDef / 100)), tv: tvDef })
   return { items, meta }
 }
 
-const lineHT = (x: EdLine) => x.k === "sec" ? 0 : r2(x.q * x.pu)
+/** Montant brut d'une ligne (q × pu), remise de la ligne, et montant net (base de TVA). */
+export const lineGross = (x: EdLine) => x.k === "sec" ? 0 : r2(x.q * x.pu)
+export const lineDisc = (x: EdLine) => { const g = lineGross(x), r = x.rl; if (!r || !(r.v > 0) || g <= 0) return 0; return r.t === "pct" ? r2(g * Math.min(100, r.v) / 100) : r2(Math.min(r.v, g)) }
+export const lineHT = (x: EdLine) => r2(lineGross(x) - lineDisc(x))
+export const lineDiscLabel = (x: EdLine) => x.rl?.t === "pct" ? `Remise ${fmtN(Math.min(100, x.rl.v))} %` : "Remise"
 
 /** Remise répartie par taux de TVA (obligatoire pour une TVA juste). */
 export function discountLines(items: EdLine[], meta: DevisMeta): StoredLine[] {
@@ -77,7 +83,17 @@ export function discountLines(items: EdLine[], meta: DevisMeta): StoredLine[] {
 export function toStored(items: EdLine[], meta: DevisMeta): StoredLine[] {
   const out: StoredLine[] = items.filter(x => x.k === "sec" ? x.l.trim() : x.l.trim() || x.q * x.pu).map(x => x.k === "sec"
     ? { k: "sec", l: x.l.trim(), q: 0, pu: 0 }
-    : { k: x.k, l: x.l.trim() || KIND_LABEL[x.k], ...(x.d.trim() ? { d: x.d.trim() } : {}), q: r2(x.q), u: x.u || "u", pu: r2(x.pu), tv: x.tv, ...(x.pid ? { pid: x.pid } : {}), ...(x.ca != null ? { ca: r2(x.ca) } : {}) })
+    : { k: x.k, l: x.l.trim() || KIND_LABEL[x.k], ...(x.d.trim() ? { d: x.d.trim() } : {}), q: r2(x.q), u: x.u || "u", pu: r2(x.pu), tv: x.tv, ...(x.pid ? { pid: x.pid } : {}), ...(x.ca != null ? { ca: r2(x.ca) } : {}), ...(lineDisc(x) > 0 ? { rl: x.rl } : {}) })
+  // update73 · remise d'une ligne : ligne « rem » négative juste en dessous, au même taux de TVA. Les sommes Σ q × pu, les
+  // factures (devis → facture) et le Factur-X (ligne négative, comme la remise globale) restent justes sans autre changement.
+  const withLineDisc: StoredLine[] = []
+  for (const st of out) {
+    withLineDisc.push(st)
+    const src = st.rl ? items.find(x => x.k !== "sec" && x.l.trim() === st.l && r2(x.q) === st.q && r2(x.pu) === st.pu && x.tv === st.tv && x.rl === st.rl) : undefined
+    const disc = src ? lineDisc(src) : 0
+    if (disc > 0) withLineDisc.push({ k: "rem", lr: 1, l: `${lineDiscLabel(src!)} sur « ${st.l.slice(0, 60)} »`, q: 1, u: "", pu: -disc, tv: st.tv })
+  }
+  out.length = 0; out.push(...withLineDisc)
   out.push(...discountLines(items, meta))
   const m: DevisMeta = { v: 2 }
   if (meta.site?.trim()) m.site = meta.site.trim()
@@ -94,8 +110,8 @@ export type Totals = { brut: number; remise: number; ht: number; rates: { r: num
 /** Totaux en temps réel (mêmes arrondis que l'aperçu, le PDF et la base). */
 export function computeTotals(items: EdLine[], meta: DevisMeta, opts: { tvaNA?: boolean; acompteDef?: number } = {}): Totals {
   const rems = discountLines(items, meta)
-  const brut = r2(items.reduce((a, x) => a + lineHT(x), 0))
-  const remise = r2(-rems.reduce((a, x) => a + x.pu, 0))
+  const brut = r2(items.reduce((a, x) => a + lineGross(x), 0))
+  const remise = r2(items.reduce((a, x) => a + lineDisc(x), 0) - rems.reduce((a, x) => a + x.pu, 0))
   const by: Record<string, number> = {}
   for (const x of items) if (x.k !== "sec") by[String(x.tv)] = (by[String(x.tv)] || 0) + lineHT(x)
   for (const x of rems) by[String(x.tv)] = (by[String(x.tv)] || 0) + x.pu

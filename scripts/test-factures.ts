@@ -4,6 +4,8 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { acompteLines, cleanLines, computeFacture, r2, sequenceGaps, situationLines, soldeLines, unitCode, type FLine } from "../api/_lib/factureCalc"
 import { buildCII, splitCity, toFacturX } from "../src/lib/facturx"
+import { devisToFactureLines } from "../api/_lib/factureCalc"
+import { computeTotals, toStored, type EdLine } from "../src/lib/devisCalc"
 import { PDFDocument, PDFName, PDFDict, PDFArray } from "pdf-lib"
 
 let ok = 0, ko = 0
@@ -94,6 +96,30 @@ const sumHT = (ls: FLine[][]) => r2(ls.reduce((a, l) => a + computeFacture(l).ht
   T("PDF : factur-x.xml joint", !!names && Buffer.from(fx).includes(Buffer.from("factur-x.xml")))
   T("PDF : XMP PDF/A-3B + Factur-X EN 16931", Buffer.from(fx).includes(Buffer.from("<pdfaid:part>3</pdfaid:part>")) && Buffer.from(fx).includes(Buffer.from("<fx:ConformanceLevel>EN 16931</fx:ConformanceLevel>")))
   T("PDF : aucune police standard non incorporée", !/\/BaseFont\s*\/Helvetica/.test(Buffer.from(fx).toString("latin1")))
+
+  // update73 · remises : globale en € et remise sur une ligne, du devis jusqu'au Factur-X
+  {
+    const items: EdLine[] = [
+      { id: "a", k: "mo", l: "Pose", d: "", q: 4, u: "h", pu: 55, tv: 10 },
+      { id: "b", k: "fo", l: "Mitigeur", d: "", q: 2, u: "u", pu: 120, tv: 20, rl: { t: "pct", v: 10 } },
+      { id: "c", k: "fft", l: "Déplacement", d: "", q: 1, u: "forfait", pu: 40, tv: 10, rl: { t: "eur", v: 15 } },
+    ]
+    const meta = { v: 2 as const, remise: { t: "eur" as const, v: 50 } }
+    const tot = computeTotals(items, meta)
+    // brut 220 + 240 + 40 = 500 ; remises lignes 24 + 15 = 39 ; net 461 ; remise globale 50 € répartie au prorata (10 % : 245 / 20 % : 216)
+    T("remises : total HT avant remise = 500,00", tot.brut === 500, tot)
+    T("remises : remise ligne 10 % + 15 € + globale 50 € = 89,00", tot.remise === 89, tot)
+    T("remises : total HT = 411,00", tot.ht === 411, tot)
+    const r10 = tot.rates.find(r => r.r === 10), r20 = tot.rates.find(r => r.r === 20)
+    T("remises : TVA calculée après remise, juste pour chaque taux", !!r10 && !!r20 && r10.base === 218.43 && r20.base === 192.57 && r10.tva === 21.84 && r20.tva === 38.51, tot.rates)
+    const stored = toStored(items, meta)
+    T("remise de ligne : ligne négative juste sous la ligne, même taux", stored[2].k === "rem" && stored[2].pu === -24 && stored[2].tv === 20 && /Remise 10 %/.test(stored[2].l), stored.slice(0, 4))
+    const fl = devisToFactureLines(stored), ft = computeFacture(fl)
+    T("devis → facture : remises conservées, totaux identiques", ft.ht === tot.ht && ft.ttc === tot.ttc && fl.filter(l => l.pu < 0).length === 4, { ht: ft.ht, ttc: ft.ttc, n: fl.filter(l => l.pu < 0).length })
+    const xr = buildCII({ ...base, lines: fl, acompteDeduit: 0 })
+    T("Factur-X : remises en lignes à quantité négative (BR-27), aucun prix négatif", (xr.match(/>-1<\/ram:BilledQuantity>/g) || []).length === 4 && !xr.includes("<ram:ChargeAmount>-"))
+    T("Factur-X : totaux après remise (HT 411,00 · TTC " + tot.ttc.toFixed(2) + ")", xr.includes("<ram:TaxBasisTotalAmount>411.00</ram:TaxBasisTotalAmount>") && xr.includes(`<ram:GrandTotalAmount>${tot.ttc.toFixed(2)}</ram:GrandTotalAmount>`))
+  }
 
   if (process.env.FX_OUT) {
     mkdirSync(process.env.FX_OUT, { recursive: true })

@@ -8,11 +8,11 @@
    (balayer pour supprimer), barre du bas compacte HT / TVA / TTC. Logique, champs, modèles et brouillons inchangés. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, animate, motion, Reorder, useDragControls, useMotionValue, useReducedMotion, useTransform } from "motion/react"
-import { X, Plus, GripVertical, MoreHorizontal, Copy, ArrowUp, ArrowDown, Trash2, BookmarkPlus, Clock, Package, Tag, Layers, Eye, Send, Check, AlertCircle, Loader2, Search, AlignLeft, Download, LayoutTemplate } from "lucide-react"
+import { X, Plus, GripVertical, MoreHorizontal, Copy, ArrowUp, ArrowDown, Trash2, BookmarkPlus, Clock, Package, Tag, Layers, Eye, Send, Check, AlertCircle, Loader2, Search, AlignLeft, Download, LayoutTemplate, Percent } from "lucide-react"
 import { useC } from "../ui"
 import DevisPaper from "../DevisPaper"
 import { CO, buildDoc, missingLegal } from "../../lib/devisDoc"
-import { KIND_LABEL, KIND_SHORT, TVA_RATES, UNITS, acompteFrom, computeTotals, fmtE, fmtN, fromStored, lid, r2, toStored, withAcompte, type DevisMeta, type EdLine, type LineKind } from "../../lib/devisCalc"
+import { KIND_LABEL, KIND_SHORT, TVA_RATES, UNITS, acompteFrom, computeTotals, fmtE, fmtN, fromStored, lid, lineDisc, lineGross, lineHT, r2, toStored, withAcompte, type DevisMeta, type EdLine, type LineKind } from "../../lib/devisCalc"
 import { dropLocal, keepLocal, nextDevisNum, readLocal, saveDevis } from "../../lib/devisSave"
 import type { Devis } from "../../lib/store"
 import type { Prestation } from "../../lib/prestations"
@@ -59,6 +59,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
   // update63 · feuille de choix du client, coordonnées repliables, adresse de chantier distincte
   const [pickC, setPickC] = useState(false), [coordOpen, setCoordOpen] = useState(() => !(doc.client.trim() && (doc.email || doc.phone || doc.addr)))
   const [siteDiff, setSiteDiff] = useState(() => !!doc.meta.site)
+  const [remOpen, setRemOpen] = useState(() => !!(doc.meta.remise && doc.meta.remise.v > 0)), [moreOpen, setMoreOpen] = useState(false) // update73
   useEffect(() => { if (doc.meta.site && !siteDiff) setSiteDiff(true) }, [doc.meta.site]) // eslint-disable-line react-hooks/exhaustive-deps
   const docRef = useRef(doc), idRef = useRef(id), numRef = useRef(num), saving = useRef<Promise<boolean> | null>(null), again = useRef(false), lastJson = useRef(init ? JSON.stringify(serialize(base)) : "")
   docRef.current = doc; idRef.current = id; numRef.current = num
@@ -170,7 +171,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
 
   /* ---------- rendu ---------- */
   const mk = isMac() ? "⌘" : "Ctrl"
-  const sub = (lineIdx: number) => { let t = 0; for (let i = lineIdx + 1; i < doc.items.length && doc.items[i].k !== "sec"; i++) t += r2(doc.items[i].q * doc.items[i].pu); return t }
+  const sub = (lineIdx: number) => { let t = 0; for (let i = lineIdx + 1; i < doc.items.length && doc.items[i].k !== "sec"; i++) t += lineHT(doc.items[i]); return t }
   const missing = missingLegal("devis")
   const pdoc = () => buildDoc({ num: num || 0, objet: doc.objet || "Travaux", amount: T.ttc, client: doc.client || "Client", lines: serialize(doc).lines, addr: doc.addr, email: doc.email, phone: doc.phone }, undefined, tv0, today())
 
@@ -199,7 +200,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
 
   const coordSum = [doc.phone, doc.email, doc.addr].filter(Boolean).join(" · ")
   const clientCard = <div className={desk ? "grid items-start gap-6 lg:grid-cols-2" : "space-y-7"}>
-    <IGroup title="Client" id="dv-g-client">
+    <IGroup title={<StepT n={1} t="Client" />} id="dv-g-client">
       <ClientRow value={doc.client} phone={doc.phone} email={doc.email} onOpen={() => setPickC(true)} />
       <DisclosureRow open={coordOpen} onToggle={() => setCoordOpen(o => !o)} title="Coordonnées" sub={coordSum || "E-mail, téléphone, adresse"} />
       <Reveal open={coordOpen}><div>
@@ -208,7 +209,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
         <IRow label="Adresse" htmlFor="dv-addr"><input id="dv-addr" autoComplete="street-address" autoCapitalize="words" enterKeyHint="done" className={ival} value={doc.addr} placeholder="N°, rue, code postal, ville" onChange={e => set({ addr: e.target.value })} /></IRow>
       </div></Reveal>
     </IGroup>
-    <IGroup title="Chantier" id="dv-g-chantier">
+    <IGroup title={<StepT n={2} t="Chantier" />} id="dv-g-chantier">
       <IRow label="Objet" htmlFor="dv-objet"><input id="dv-objet" className={ival} value={doc.objet} maxLength={160} autoCapitalize="sentences" enterKeyHint="done" placeholder="Ex. Rénovation salle de bain" onChange={e => set({ objet: e.target.value })} /></IRow>
       <IToggleRow label="Identique à l'adresse client" sub={!siteDiff ? (doc.addr || "Adresse du client à compléter") : undefined} on={!siteDiff} onChange={v => { setSiteDiff(!v); if (v) setMeta({ site: "" }) }} />
       <Reveal open={siteDiff}><IRow label="Adresse" htmlFor="dv-site"><input id="dv-site" autoComplete="street-address" autoCapitalize="words" enterKeyHint="done" className={ival} value={doc.meta.site || ""} placeholder="Adresse du chantier" onChange={e => setMeta({ site: e.target.value })} /></IRow></Reveal>
@@ -222,7 +223,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
   const nLines = doc.items.filter(x => x.k !== "sec").length
   const lines = <section>
     <div className="mb-1.5 flex items-end justify-between gap-3 px-4">
-      <h2 className="text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations{nLines > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {nLines} ligne{nLines > 1 ? "s" : ""}</span>}</h2>
+      <h2 className="text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42"><StepT n={3} t="Prestations" />{nLines > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {nLines} ligne{nLines > 1 ? "s" : ""}</span>}</h2>
       <button type="button" onClick={() => setPicker(true)} className="-mb-0.5 flex h-8 items-center gap-1.5 rounded-full pl-1 pr-1 text-[14px] font-medium text-[#7EA6FF] transition-colors hover:text-white"><Search size={14} strokeWidth={2} />Mes prestations{desk && <Kbd>{mk} K</Kbd>}</button>
     </div>
     {doc.items.length > 0 && lineHead}
@@ -232,35 +233,45 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
     </Reorder.Group>
       : <div className="rounded-[18px] bg-[#141416] px-6 py-9 text-center">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full" style={{ background: TEAL + "22", color: TEAL_T }}><Package size={21} strokeWidth={1.6} /></div>
-        <div className="mt-3 text-[15.5px] font-medium">Commencez par vos prestations</div>
-        <p className="mx-auto mt-1 max-w-[340px] text-[13px] leading-5 text-white/45">Ajoutez en un clic une tâche à l'heure, une fourniture ou un forfait déjà chiffré, ou saisissez une ligne libre.</p>
-        <button type="button" onClick={() => setPicker(true)} className="mx-auto mt-4 flex h-10 items-center gap-2 rounded-full px-5 text-[14px] font-semibold text-white" style={{ background: TEAL }}><Search size={15} />Choisir une prestation</button>
+        <div className="mt-3 text-[16px] font-medium">Ajoutez ce que vous facturez</div>
+        <p className="mx-auto mt-1 max-w-[340px] text-[14px] leading-5 text-white/50">Choisissez une prestation déjà enregistrée, ou écrivez une ligne vous-même.</p>
+        <button type="button" onClick={() => setPicker(true)} className="mx-auto mt-4 flex h-12 w-full max-w-[320px] items-center justify-center gap-2 rounded-full px-5 text-[16px] font-semibold text-white" style={{ background: TEAL }}><Search size={17} />Choisir une prestation</button>
+        <button type="button" onClick={() => addKind("fft")} className="mx-auto mt-2 flex h-12 w-full max-w-[320px] items-center justify-center gap-2 rounded-full bg-white/[.08] px-5 text-[16px] font-medium text-white"><Plus size={17} />Écrire une ligne</button>
       </div>}
-    <div className="mt-3 flex flex-wrap gap-2">
-      {([["mo", "Main-d'œuvre"], ["fo", "Fourniture"], ["fft", "Forfait"], ["sec", "Section"]] as [LineKind | "sec", string][]).map(([k, l]) => { const I = k === "sec" ? Layers : KIND_ICON[k]; return <button key={k} type="button" onClick={() => addKind(k)} className="flex h-9 items-center gap-1.5 rounded-full bg-white/[.06] px-3.5 text-[14px] font-medium text-white/75 transition-colors hover:bg-white/[.1] hover:text-white active:scale-[.97]"><Plus size={14} strokeWidth={2.2} className="text-[#7EA6FF]" /><I size={14} strokeWidth={1.7} />{l}</button> })}
+    {doc.items.length > 0 && <button type="button" onClick={() => setPicker(true)} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-dashed border-white/[.14] text-[15.5px] font-medium text-[#7EA6FF] active:bg-white/[.04]"><Plus size={17} />Ajouter une prestation</button>}
+    <div className="mt-3 px-1 text-[13px] text-white/40">Ou une ligne libre :</div>
+    <div className="mt-1.5 flex flex-wrap gap-2">
+      {([["mo", "À l'heure"], ["fo", "Fourniture"], ["fft", "Forfait"], ["sec", "Titre de partie"]] as [LineKind | "sec", string][]).map(([k, l]) => { const I = k === "sec" ? Layers : KIND_ICON[k]; return <button key={k} type="button" onClick={() => addKind(k)} className="flex h-9 items-center gap-1.5 rounded-full bg-white/[.06] px-3.5 text-[14px] font-medium text-white/75 transition-colors hover:bg-white/[.1] hover:text-white active:scale-[.97]"><Plus size={14} strokeWidth={2.2} className="text-[#7EA6FF]" /><I size={14} strokeWidth={1.7} />{l}</button> })}
     </div>
     {desk && <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 px-1 text-[12px] text-white/35"><span><Kbd>{mk} K</Kbd> prestations</span><span><Kbd>{mk} ↵</Kbd> nouvelle ligne</span><span><Kbd>Alt ↑↓</Kbd> déplacer</span><span><Kbd>{mk} S</Kbd> enregistrer</span><span><Kbd>{mk} P</Kbd> aperçu</span></div>}
   </section>
 
   const numIn = desk ? "!h-9" : "!h-10 !border-0 !bg-white/[.06] !text-[16px]"
   const recap = <div className="space-y-7">
-    <IGroup title="Conditions" id="dv-g-cond" foot={missing.length > 0 ? undefined : "Mentions légales ajoutées automatiquement au devis."}>
-      <div className="ig-row flex min-h-12 items-center gap-3 py-1.5 pl-4 pr-3"><span className="w-[92px] shrink-0 text-[15px] text-white/50">Remise</span>
-        <div className="ml-auto flex items-center gap-2"><Seg size="sm" label="Type de remise" value={doc.meta.remise?.t || "pct"} onChange={t => setMeta({ remise: { t, v: doc.meta.remise?.v || 0 } })} opts={[["pct", "%"], ["eur", "€"]]} />
-          <NumField className="w-[96px]" inputClass={numIn} value={doc.meta.remise?.v || null} placeholder="0" onChange={n => setMeta({ remise: { t: doc.meta.remise?.t || "pct", v: n || 0 } })} max={doc.meta.remise?.t === "eur" ? undefined : 100} ariaLabel="Montant de la remise" suffix={doc.meta.remise?.t === "eur" ? "€" : "%"} /></div></div>
+    <IGroup title={<StepT n={4} t="Total" />} id="dv-g-total">
+      {/* update73 · remise globale visible ici, en % ou en € (les remises par ligne sont dans le menu « … » de chaque ligne) */}
+      {!remOpen ? <button type="button" onClick={() => { setRemOpen(true); if (!doc.meta.remise) setMeta({ remise: { t: "pct", v: 0 } }) }} className="ig-row flex min-h-12 w-full items-center gap-2 pl-4 pr-4 text-left text-[15px] text-[#7EA6FF]"><Percent size={16} />Ajouter une remise</button>
+        : <div data-remise-globale className="ig-row flex min-h-12 items-center gap-2 py-1.5 pl-4 pr-2"><span className="min-w-0 flex-1 text-[15px] text-white/60">Remise</span>
+          <Seg size="sm" label="Type de remise" value={doc.meta.remise?.t || "pct"} onChange={t => setMeta({ remise: { t, v: doc.meta.remise?.v || 0 } })} opts={[["pct", "%"], ["eur", "€"]]} />
+          <NumField className="w-[96px]" inputClass={numIn} value={doc.meta.remise?.v || null} placeholder="0" onChange={n => setMeta({ remise: { t: doc.meta.remise?.t || "pct", v: n || 0 } })} max={doc.meta.remise?.t === "eur" ? undefined : 100} ariaLabel="Montant de la remise" suffix={doc.meta.remise?.t === "eur" ? "€" : "%"} />
+          <button type="button" aria-label="Retirer la remise" onClick={() => { setRemOpen(false); setMeta({ remise: undefined }) }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/40"><X size={16} /></button></div>}
+      <TotRow l={T.remise > 0 ? "Total HT avant remise" : "Total HT"} v={fmtE(T.brut)} />
+      {T.remise > 0 && <><TotRow l="Remise" v={`− ${fmtE(T.remise)}`} /><TotRow l="Total HT après remise" v={fmtE(T.ht)} strong /></>}
+      {CO.tvaNA ? <TotRow l="TVA non applicable, art. 293 B du CGI" v="0,00 €" /> : T.rates.map(r => <TotRow key={r.r} l={`TVA ${fmtN(r.r)} %`} hint={`sur ${fmtE(r.base)}`} v={fmtE(r.tva)} />)}
+      <div className="ig-row flex items-baseline justify-between gap-3 py-3.5 pl-4 pr-4"><span className="text-[16px] font-semibold">Total TTC</span><motion.span key={T.ttc} initial={{ opacity: .4 }} animate={{ opacity: 1 }} className="text-[24px] font-semibold tabular-nums tracking-[-0.03em]">{fmtE(T.ttc)}</motion.span></div>
+      {(doc.meta.acompte ?? 30) > 0 && <TotRow l={`Acompte à la signature (${fmtN(doc.meta.acompte ?? 30)} %)`} v={fmtE(T.acompte)} />}
+      {T.marge != null && <div className="ig-row flex items-center justify-between gap-3 py-3 pl-4 pr-4 text-[14px]"><span className="min-w-0 text-white/50">Marge estimée<span className="block text-[12px] text-white/30">sur les coûts d'achat renseignés</span></span><span className="shrink-0 whitespace-nowrap tabular-nums text-white/80">{fmtE(T.marge)}{T.ht > 0 && <span className="ml-1.5 text-white/40">{Math.round(T.marge / T.ht * 100)} %</span>}</span></div>}
+    </IGroup>
+    {missing.length > 0 && <div className="-mt-4 rounded-[14px] bg-[#FFB340]/[.09] px-4 py-3 text-[13px] leading-5 text-white/75">Mentions obligatoires manquantes : {missing.join(", ")}. À compléter dans Réglages → Entreprise avant l'envoi.</div>}
+    <IGroup id="dv-g-cond" foot={missing.length > 0 ? undefined : "Les mentions légales sont ajoutées automatiquement au devis."}>
+      <DisclosureRow open={moreOpen} onToggle={() => setMoreOpen(o => !o)} title="Plus d'options" sub={`Acompte ${fmtN(doc.meta.acompte ?? 30)} % · valable ${doc.meta.validite || 30} jours${doc.meta.notes ? " · remarques" : ""}`} />
+      <Reveal open={moreOpen}><div>
       <div className="ig-row flex min-h-12 items-center gap-3 py-1.5 pl-4 pr-3"><span className="min-w-0 flex-1 text-[15px] text-white/50">Acompte<span className="block text-[12.5px] text-white/35 tabular-nums">{fmtE(T.acompte)} à la signature</span></span>
         <NumField className="w-[84px]" inputClass={numIn} value={doc.meta.acompte ?? 30} max={100} onChange={n => setDoc(d => ({ ...d, meta: { ...d.meta, acompte: n ?? 0, conditions: withAcompte(d.meta.conditions || "", n ?? 0) } }))} ariaLabel="Pourcentage d'acompte" suffix="%" /></div>
       <div className="ig-row flex min-h-12 items-center gap-3 py-1.5 pl-4 pr-3"><span className="min-w-0 flex-1 text-[15px] text-white/50">Validité</span><Seg size="sm" label="Validité du devis" value={doc.meta.validite || 30} onChange={v => setMeta({ validite: v })} opts={[[15, "15 j"], [30, "30 j"], [60, "60 j"], [90, "90 j"]]} /></div>
       <IRow top label="Paiement" htmlFor="dv-cond"><textarea id="dv-cond" rows={2} style={{ fieldSizing: "content" } as any} className={ival + " !h-auto min-h-12 resize-none py-[13px] leading-[22px]"} maxLength={300} value={doc.meta.conditions || ""} onChange={e => setMeta({ conditions: e.target.value, acompte: acompteFrom(e.target.value) ?? doc.meta.acompte })} /></IRow>
       <IRow top label="Remarques" htmlFor="dv-notes"><textarea id="dv-notes" rows={1} style={{ fieldSizing: "content" } as any} className={ival + " !h-auto min-h-12 resize-none py-[13px] leading-[22px]"} maxLength={1000} placeholder="Facultatif : accès, délais…" value={doc.meta.notes || ""} onChange={e => setMeta({ notes: e.target.value })} /></IRow>
-    </IGroup>
-    {missing.length > 0 && <div className="-mt-4 rounded-[14px] bg-[#FFB340]/[.09] px-4 py-3 text-[13px] leading-5 text-white/75">Mentions obligatoires manquantes : {missing.join(", ")}. À compléter dans Réglages → Entreprise avant l'envoi.</div>}
-    <IGroup title="Total" id="dv-g-total">
-      <TotRow l={T.remise > 0 ? "Total HT avant remise" : "Total HT"} v={fmtE(T.brut)} />
-      {T.remise > 0 && <><TotRow l="Remise" v={`− ${fmtE(T.remise)}`} /><TotRow l="Total HT" v={fmtE(T.ht)} strong /></>}
-      {CO.tvaNA ? <TotRow l="TVA non applicable, art. 293 B du CGI" v="0,00 €" /> : T.rates.map(r => <TotRow key={r.r} l={`TVA ${fmtN(r.r)} %`} hint={`sur ${fmtE(r.base)}`} v={fmtE(r.tva)} />)}
-      <div className="ig-row flex items-baseline justify-between gap-3 py-3.5 pl-4 pr-4"><span className="text-[16px] font-semibold">Total TTC</span><motion.span key={T.ttc} initial={{ opacity: .4 }} animate={{ opacity: 1 }} className="text-[24px] font-semibold tabular-nums tracking-[-0.03em]">{fmtE(T.ttc)}</motion.span></div>
-      {T.marge != null && <div className="ig-row flex items-center justify-between gap-3 py-3 pl-4 pr-4 text-[14px]"><span className="min-w-0 text-white/50">Marge estimée<span className="block text-[12px] text-white/30">sur les coûts d'achat renseignés</span></span><span className="shrink-0 whitespace-nowrap tabular-nums text-white/80">{fmtE(T.marge)}{T.ht > 0 && <span className="ml-1.5 text-white/40">{Math.round(T.marge / T.ht * 100)} %</span>}</span></div>}
+      </div></Reveal>
     </IGroup>
   </div>
 
@@ -286,7 +297,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
         {restorePill}
         <div className="space-y-8">{clientCard}{lines}{recap}</div>
       </div>
-      <div className="kb-hide absolute inset-x-0 bottom-0 z-10 border-t border-white/[.06] bg-[#0B0B0C]/85 px-4 pt-2.5 backdrop-blur-2xl backdrop-saturate-150" style={{ paddingBottom: "max(10px, var(--sab))" }}>
+      <div className="kb-hide absolute inset-x-0 bottom-0 z-10 border-t border-white/[.06] bg-[#0B0B0C] px-4 pt-2.5" style={{ paddingBottom: "max(10px, var(--sab))" }}>
         <div className="flex items-center gap-2.5">
           <div className="min-w-0 flex-1" aria-label={`Total ${fmtE(T.ttc)} TTC`}>
             <div className="flex gap-2.5 truncate text-[11.5px] tabular-nums text-white/45"><span>HT {fmtE(T.ht)}</span>{!CO.tvaNA && <span>TVA {fmtE(T.tva)}</span>}{T.remise > 0 && <span>remise incluse</span>}</div>
@@ -322,17 +333,20 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
     : <ModalSheet label={label} onClose={() => void close()} z={45} size="large" escape={false} className="bg-black">{body}</ModalSheet>
 }
 
+/** update73 · titre d'étape numéroté (1. Client, 2. Chantier, 3. Prestations, 4. Total) */
+const StepT = ({ n, t }: { n: number; t: string }) => <span className="inline-flex items-center gap-2"><span aria-hidden className="flex h-5 w-5 items-center justify-center rounded-full bg-white/[.1] text-[11.5px] font-semibold tabular-nums text-white/80">{n}</span>{t}</span>
 const COLS = (tvaNA: boolean) => tvaNA ? "20px minmax(0,1fr) 132px 84px 120px 116px 36px" : "20px minmax(0,1fr) 132px 84px 120px 84px 116px 36px"
 const TotRow = ({ l, v, strong, hint }: { l: string; v: string; strong?: boolean; hint?: string }) => <div className="ig-row flex min-h-11 items-center justify-between gap-3 py-2 pl-4 pr-4 text-[15px]"><span className={strong ? "font-medium text-white" : "text-white/55"}>{l}{hint && <span className="ml-1.5 text-[12.5px] text-white/30">{hint}</span>}</span><span className={`tabular-nums ${strong ? "font-medium text-white" : "text-white/85"}`}>{v}</span></div>
 
 function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPatch, onMove, onDup, onRemove, onSave, onEnter }: { x: EdLine; desk: boolean; focused: boolean; taux: number | null; subtotal: number; first: boolean; last: boolean; onFocus: () => void; onPatch: (p: Partial<EdLine>) => void; onMove: (d: -1 | 1) => void; onDup: () => void; onRemove: () => void; onSave: () => void; onEnter: () => void }) {
   const controls = useDragControls(), [menu, setMenu] = useState(false), [desc, setDesc] = useState(!!x.d)
-  const total = r2(x.q * x.pu)
+  const total = lineHT(x), disc = lineDisc(x), [remOpen, setRemOpen] = useState(!!x.rl)
   const setKind = (k: LineKind) => onPatch({ k, u: k === "mo" ? "h" : k === "fft" ? "forfait" : x.u === "h" || x.u === "forfait" ? "u" : x.u, ...(k === "mo" && !x.pu && taux ? { pu: taux } : {}) })
   const handle = <button type="button" data-nodrag aria-label="Déplacer la ligne" onPointerDown={e => { e.preventDefault(); controls.start(e) }} className="flex h-10 w-5 shrink-0 cursor-grab touch-none items-center justify-center text-white/20 transition-colors hover:text-white/60 active:cursor-grabbing"><GripVertical size={16} /></button>
   const menuEl = <Menu open={menu} setOpen={setMenu} trigger={<button type="button" aria-label="Actions de la ligne" aria-haspopup="menu" onClick={() => setMenu(o => !o)} className={`flex h-9 w-9 items-center justify-center rounded-full text-white/40 transition-colors hover:bg-white/[.07] hover:text-white ${menu ? "bg-white/[.07] text-white" : ""}`}><MoreHorizontal size={17} /></button>}>
     {x.k !== "sec" && <>{(["mo", "fo", "fft"] as LineKind[]).map(k => { const I = KIND_ICON[k]; return <MenuItem key={k} I={I} onClick={() => { setKind(k); setMenu(false) }} hint={x.k === k ? "✓" : undefined}>{KIND_LABEL[k]}{k === "mo" ? " à l'heure" : ""}</MenuItem> })}<MenuSep />
       {!desc && <MenuItem I={AlignLeft} onClick={() => { setDesc(true); setMenu(false) }}>Ajouter une description</MenuItem>}
+      {!remOpen && <MenuItem I={Percent} onClick={() => { setRemOpen(true); if (!x.rl) onPatch({ rl: { t: "pct", v: 0 } }); setMenu(false) }}>Faire une remise sur cette ligne</MenuItem>}
       <MenuItem I={BookmarkPlus} onClick={() => { onSave(); setMenu(false) }}>Enregistrer comme prestation</MenuItem></>}
     <MenuItem I={Copy} onClick={() => { onDup(); setMenu(false) }}>Dupliquer</MenuItem>
     {!first && <MenuItem I={ArrowUp} hint="Alt ↑" onClick={() => { onMove(-1); setMenu(false) }}>Monter</MenuItem>}
@@ -355,13 +369,22 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
   </Reorder.Item>
 
   const I = KIND_ICON[x.k]
+  // update73 · remise sur la ligne : % ou €, montant retiré affiché, suppression en un geste
+  const remEl = remOpen && <div data-line-remise className="mt-2.5 flex items-center gap-2 rounded-[12px] bg-white/[.04] py-1.5 pl-3 pr-1.5">
+    <span className="text-[14px] text-white/60">Remise</span>
+    <Seg size="sm" label="Type de remise de la ligne" value={x.rl?.t || "pct"} onChange={t => onPatch({ rl: { t, v: x.rl?.v || 0 } })} opts={[["pct", "%"], ["eur", "€"]]} />
+    <NumField className="w-[84px]" inputClass={desk ? "!h-9" : "!h-10 !border-0 !bg-white/[.06] !text-[16px]"} value={x.rl?.v || null} placeholder="0" max={x.rl?.t === "eur" ? undefined : 100} onChange={n => onPatch({ rl: { t: x.rl?.t || "pct", v: n || 0 } })} ariaLabel="Remise de la ligne" />
+    <span className="ml-auto whitespace-nowrap text-[14px] tabular-nums text-[#7EE2A8]">{disc > 0 ? `− ${fmtE(disc)}` : ""}</span>
+    <button type="button" aria-label="Retirer la remise de la ligne" onClick={() => { setRemOpen(false); onPatch({ rl: undefined }) }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white/40 hover:text-white"><X size={15} /></button>
+  </div>
+  const totEl = (big: boolean) => <motion.div key={total} initial={{ opacity: .35 }} animate={{ opacity: 1 }} className="ml-auto text-right">{!desk && <div className="text-[11.5px] text-white/35">Total HT</div>}{disc > 0 && <div className="text-[12px] tabular-nums text-white/35 line-through">{fmtE(lineGross(x))}</div>}<div className={`${big ? "text-[17px]" : "text-[14.5px]"} font-semibold tabular-nums`}>{fmtE(total)}</div></motion.div>
   const qtyEl = x.k === "mo" ? <Stepper big={!desk} soft={!desk} value={x.q} onChange={q => onPatch({ q })} step={0.5} suffix="h" ariaLabel="Nombre d'heures" />
     : x.k === "fft" ? <Stepper big={!desk} soft={!desk} value={x.q} onChange={q => onPatch({ q })} step={1} ariaLabel="Quantité" />
     : <Stepper big={!desk} soft={!desk} value={x.q} onChange={q => onPatch({ q })} step={x.u === "u" || x.u === "lot" ? 1 : 0.5} ariaLabel="Quantité" />
   const unitEl = x.k === "mo" ? <div className="flex h-10 items-center justify-center text-[13px] text-white/40">heure</div>
-    : <select aria-label="Unité" value={x.u} onChange={e => onPatch({ u: e.target.value })} className={field + " !px-2 text-center" + (desk ? "" : " !h-10 !border-0 !bg-white/[.06] !text-[16px]")}>{[...new Set([x.u, ...UNITS.filter(u => u !== "h")])].map(u => <option key={u} value={u}>{u}</option>)}</select>
+    : <select aria-label="Unité" value={x.u} onChange={e => onPatch({ u: e.target.value })} className={field + " sel !pl-3 text-left" + (desk ? "" : " !h-10 !border-0 !bg-white/[.06] !text-[16px]")}>{[...new Set([x.u, ...UNITS.filter(u => u !== "h")])].map(u => <option key={u} value={u}>{u}</option>)}</select>
   const puEl = <NumField value={x.pu} onChange={n => onPatch({ pu: n ?? 0 })} suffix={x.k === "mo" ? "€/h" : "€"} ariaLabel={x.k === "mo" ? "Taux horaire HT" : "Prix unitaire HT"} onEnter={onEnter} inputClass={!desk ? "!h-11 !border-0 !bg-white/[.06] !text-[16px]" : ""} />
-  const tvaEl = <select aria-label="TVA" value={x.tv} onChange={e => onPatch({ tv: Number(e.target.value) })} className={field + " !px-2 text-center" + (desk ? "" : " !h-10 !border-0 !bg-white/[.06] !text-[16px]")}>{TVA_RATES.map(r => <option key={r} value={r}>{fmtN(r)} %</option>)}</select>
+  const tvaEl = <select aria-label="TVA" value={x.tv} onChange={e => onPatch({ tv: Number(e.target.value) })} className={field + " sel !pl-3 text-left" + (desk ? "" : " !h-10 !border-0 !bg-white/[.06] !text-[16px]")}>{TVA_RATES.map(r => <option key={r} value={r}>{fmtN(r)} %</option>)}</select>
   const label = <div className="min-w-0 flex-1">
     <input data-f="l" value={x.l} maxLength={280} placeholder={x.k === "mo" ? "Ex. Pose et raccordement" : x.k === "fft" ? "Ex. Mise en service" : "Ex. Mitigeur thermostatique"} onChange={e => onPatch({ l: e.target.value })} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); onEnter() } }} className={`h-10 w-full min-w-0 rounded-[10px] bg-transparent px-1.5 ${desk ? "text-[14.5px]" : "text-[16px]"} font-medium text-white outline-none transition-colors placeholder:font-normal placeholder:text-white/28 hover:bg-white/[.03] focus:bg-white/[.05]`} />
     {desc && <textarea value={x.d} maxLength={1000} rows={Math.min(6, Math.max(1, x.d.split("\n").reduce((a, l) => a + Math.max(1, Math.ceil(l.length / (desk ? 64 : 38))), 0)))} style={{ fieldSizing: "content" } as any} placeholder="Description (imprimée sous la ligne)" onChange={e => onPatch({ d: e.target.value })} onBlur={() => { if (!x.d.trim()) setDesc(false) }} autoFocus={!x.d} className={`mt-0.5 block w-full resize-none rounded-[10px] bg-transparent px-1.5 py-1 ${desk ? "text-[13px] leading-5" : "text-[16px] leading-[22px]"} text-white/60 outline-none placeholder:text-white/25 hover:bg-white/[.03] focus:bg-white/[.05]`} />}
@@ -370,8 +393,9 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
 
   if (desk) return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className={`grid items-start gap-2 rounded-[16px] border px-3 py-2 transition-colors ${ring}`} style={{ gridTemplateColumns: COLS(CO.tvaNA) }}>
     {handle}{label}<div>{qtyEl}</div><div>{unitEl}</div><div>{puEl}</div>{!CO.tvaNA && <div>{tvaEl}</div>}
-    <motion.div key={total} initial={{ opacity: .35 }} animate={{ opacity: 1 }} className="flex h-10 items-center justify-end text-[14.5px] font-semibold tabular-nums">{fmtE(total)}</motion.div>
+    <div className="flex min-h-10 items-center justify-end">{totEl(false)}</div>
     <div className="flex h-10 items-center justify-end">{menuEl}</div>
+    {remEl && <div className="col-span-full pl-7">{remEl}</div>}
   </Reorder.Item>
 
   return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className="relative">
@@ -389,8 +413,9 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
       <div className="mt-2.5 flex items-center gap-2">
         {x.k === "fo" && <div className="w-[92px]">{unitEl}</div>}
         {!CO.tvaNA && <div className="w-[92px]">{tvaEl}</div>}
-        <motion.div key={total} initial={{ opacity: .35 }} animate={{ opacity: 1 }} className="ml-auto text-right"><div className="text-[11.5px] text-white/35">Total HT</div><div className="text-[17px] font-semibold tabular-nums">{fmtE(total)}</div></motion.div>
+        {totEl(true)}
       </div>
+      {remEl}
     </motion.div>
   </Reorder.Item>
 }
