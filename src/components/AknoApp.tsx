@@ -1427,13 +1427,20 @@ function AknoApp() {
         const path = raw.startsWith("http") ? new URL(raw).pathname : raw
         slug = path.replace(/^\//, "").split("/")[0] || "reception"
       } catch { /* ignore */ }
-      navigate(`/${slugOf(SLUG[slug] || "rec")}`)
+      navigate(`/${slugOf(SLUG[slug] || "rec")}`, { replace: true })
     }
     navigator.serviceWorker.addEventListener("message", onMsg)
     return () => navigator.serviceWorker.removeEventListener("message", onMsg)
   }, [navigate])
   // update67 : une page chargée à part est d'abord reçue, puis affichée (la page courante reste visible en attendant : ni flash ni écran de chargement)
-  const go = (p: P) => { setQ(""); setM(null); if (p !== page) { const url = `/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`, L = LAZY[p]; if (L && !L.ready()) void L.preload().then(() => navigate(url), () => navigate(url)); else navigate(url) } if (!desk) setChatS(false) }
+  // update72 : changer d'onglet REMPLACE l'entrée d'historique au lieu d'en empiler une. Sinon le geste iOS « glisser depuis le
+  // bord gauche » (et history.back) ramenait l'onglet précédent (Factures → Chantiers). Les feuilles et fiches gardent leur entrée.
+  const go = (p: P) => { setQ(""); setM(null); if (p !== page) { const url = `/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`, L = LAZY[p], nav = () => navigate(url, { replace: true }); if (L && !L.ready()) void L.preload().then(nav, nav); else nav() } if (!desk) setChatS(false) }
+  // update72 · Android : le bouton retour, sans historique, ramène de Réglages / Relances / Équipe / Clients vers l'onglet d'accueil
+  // (ou Réglages) au lieu de quitter l'app ; sur un onglet principal, l'app se met en arrière-plan comme avant.
+  const goRef = useRef(go); goRef.current = go
+  useEffect(() => { const f = (e: Event) => { const b = page === "eq" || page === "cl" ? "set" : page === "set" || page === "rel" ? (rr.reception || !rr.ready ? "rec" : "ag") : null; if (b) { e.preventDefault(); goRef.current(b as P) } }
+    addEventListener("akno:back", f); return () => removeEventListener("akno:back", f) }, [page, rr.reception, rr.ready])
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }
   const modal = (x: Modal) => {
     if (x?.kind === "devis") { setM(null); setEd({ prefill: x.data }); return }
@@ -1461,7 +1468,7 @@ function AknoApp() {
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />
-    <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
+    <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`, { replace: true }); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(94px+max(var(--sab)-10px,12px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : toastT.info ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/[.12] text-white/85"><Clock size={13} strokeWidth={2.2} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
 }

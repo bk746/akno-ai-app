@@ -5,9 +5,9 @@ Le parcours complet est maintenant guidé, écran par écran, avec un gros bouto
 **Devis → Signé → Acompte → Chantier → Facturé → Payé**. Une frise en haut de chaque devis montre où on en est, et la prochaine étape est mise en avant (« Envoyez le devis au client », « Envoyez l'acompte », « Facturez le chantier », « Marquer comme payée »…).
 On corrige aussi le bas d'écran coupé sur iPhone et l'aperçu de devis qui ne s'ouvrait pas depuis la liste Devis.
 
-## ⚠️ Base de données : une migration à appliquer, sur « ok base » uniquement
-`supabase/migrations/20261122_14_update71_chaine_devis_paiement.sql` n'a **pas** été lancée en prod. Elle est idempotente et a été testée sur un Postgres 17 local : 2 passes, 68 tests RLS OK, dont 7 nouveaux u71.
-- `artisans.acompte_pct` (0–100, 30 par défaut) et `artisans.relances_auto` (envoi automatique des relances d'impayés, désactivé par défaut)
+## Base de données : migration 14 appliquée en prod le 22/11/2026 à 13:40 (heure de Paris), après l'« ok base » de Keryan
+`supabase/migrations/20261122_14_update71_chaine_devis_paiement.sql` a été appliquée sur le projet mmakyjgjhtxkklewrpeu. Elle est idempotente et a été testée sur un Postgres 17 local : 2 passes, 68 tests RLS OK, dont 7 nouveaux u71.
+- `artisans.acompte_pct` (0–100, 30 par défaut) et `artisans.relances_auto` (envoi automatique des relances d'impayés, **activé par défaut** : dès que le code update71 sera déployé, le cron de 8 h enverra seul les relances J+1/J+7/J+15 ; la mise en demeure reste toujours à valider)
 - `devis.ouvert_le` (date d'ouverture par le client) et `devis.parent_id` (avenants), plus des index
 - statut de devis « perdu » (contrainte `NOT VALID`, donc les anciennes lignes ne sont pas revérifiées)
 - index unique sur `factures.token`

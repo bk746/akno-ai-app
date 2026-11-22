@@ -26,7 +26,8 @@
     "cap:sync": "npm run build && node scripts/version.mjs sync && npx cap sync",
     "cap:assets": "npx capacitor-assets generate --ios --android --iconBackgroundColor '#000000' --iconBackgroundColorDark '#000000' --splashBackgroundColor '#000000' --splashBackgroundColorDark '#000000'",
     "test:bottom": "node scripts/test-bottom.mjs",
-    "test:navbar": "node scripts/test-navbar.mjs"
+    "test:navbar": "node scripts/test-navbar.mjs",
+    "test:history": "node scripts/test-history.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.2",
