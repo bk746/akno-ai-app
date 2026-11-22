@@ -95,6 +95,13 @@ const ChMap = forwardRef<MapApi, Props>(function ChMap({ items, selected, layer,
     const t = TILES[layer]
     const { base, group: next } = tileLayer(t); next.addTo(m)
     const prev = tiles.current; tiles.current = next
+    // update69 : premier affichage — la carte apparaît en fondu une fois ses premières tuiles reçues (plus d'apparition sèche)
+    if (!prev) {
+      const c = el.current!; c.style.opacity = "0"
+      let done = false
+      const show = () => { if (done) return; done = true; requestAnimationFrame(() => { c.style.transition = "opacity .45s cubic-bezier(.22,1,.36,1)"; c.style.opacity = "1" }) }
+      base.once("load", show); setTimeout(show, 1200)
+    }
     if (prev) base.once("load", () => { m.removeLayer(prev) })
     const safety = setTimeout(() => { if (prev && m.hasLayer(prev)) m.removeLayer(prev) }, 1500)
     el.current!.dataset.layer = layer

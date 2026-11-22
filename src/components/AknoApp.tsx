@@ -21,7 +21,7 @@ import { usePrestations } from "../lib/prestations"
 import { isPageLocked, openSetup } from "../lib/setup"
 import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } from "../lib/assistant"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Component, Suspense, lazy, type ReactNode, createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
+import { Component, Suspense, lazy, type ComponentType, type ReactNode, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, startTransition } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig, useIsPresent } from "motion/react"
 import { Plus, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, HardHat, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck, Package, FilePen } from "lucide-react"
 import { BLOB } from "./blobPath"
@@ -161,25 +161,45 @@ function SwapBody({ k, dir, className, children }: { k?: string; dir: number; cl
     </AnimatePresence>
   </motion.div>
 }
-function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string }) {
+/* update69 · Devis ↔ Factures : les deux volets restent montés ; le volet choisi glisse en même temps que la pilule (même
+   ressort SNAP, transform uniquement), l'autre sort de l'autre côté puis est masqué. Plus aucun rendu de liste au moment du tap. */
+function DuoPanes({ active, panes, className }: { active: string; panes: [string, ReactNode][]; className: string }) {
+  const sorted = [...panes].sort((a, b) => DOC_ORDER(a[0]) - DOC_ORDER(b[0])), ai = sorted.findIndex(p => p[0] === active)
+  // les deux volets sont visibles pendant le glissement, le volet quitté est masqué une fois arrivé
+  const [moving, setMoving] = useState(false), [was, setWas] = useState(active), reduce = useReducedMotion()
+  if (was !== active) { setWas(active); setMoving(true) }
+  // mouvements réduits : fondu enchaîné en transition CSS (l'opacité via WAAPI « revenait » une image à la fin sur WebKit)
+  useEffect(() => { if (!reduce || !moving) return; const t = setTimeout(() => setMoving(false), 320); return () => clearTimeout(t) }, [reduce, moving, active])
+  return <div className="relative [overflow:clip]">
+    {sorted.map(([key, node], i) => { const on = i === ai
+      return <motion.div key={key} data-doc-pane={key} aria-hidden={on ? undefined : true} inert={!on} className={`${on ? "relative" : "absolute inset-x-0 top-0"}${reduce ? " rm-fade" : ""}`}
+        style={{ visibility: on || moving ? undefined : "hidden", ...(reduce ? { opacity: on ? 1 : 0 } : null) }} onAnimationComplete={() => { if (on && !reduce) setMoving(false) }}
+        initial={false} animate={reduce ? { x: "0%" } : { x: `${(i - ai) * 100}%`, opacity: 1 }} transition={reduce ? { duration: 0 } : SNAP}>
+        <div className={className}>{node}</div></motion.div> })}
+  </div>
+}
+function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string; alt?: { key: string; actions: QAi[]; children: ReactNode } }) {
   const { desk, s, setChat } = useC(), on = k ? s.settings.agents[k] : true
   // update63 · contenu interchangeable (Devis | Factures) : fondu + glissement, le haut de page (bot) ne bouge pas
   const prevKey = useRef(bodyKey), dir = useRef(1)
   if (bodyKey !== prevKey.current) { dir.current = DOC_ORDER(bodyKey) >= DOC_ORDER(prevKey.current) ? 1 : -1; prevKey.current = bodyKey }
-  const swap = (node: ReactNode, cls: string) => <SwapBody k={bodyKey} dir={dir.current} className={cls}>{node}</SwapBody>
+  // update69 : avec « alt », les deux contenus restent montés côte à côte (DuoPanes) au lieu d'être recréés à chaque bascule
+  const swap = (mk: (a: QAi[], c: ReactNode) => ReactNode, cls: string) => alt && bodyKey !== undefined
+    ? <DuoPanes active={bodyKey} className={cls} panes={[[bodyKey, mk(actions, children)], [alt.key, mk(alt.actions, alt.children)]]} />
+    : <SwapBody k={bodyKey} dir={dir.current} className={cls}>{mk(actions, children)}</SwapBody>
   const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${A[k].c === "#E6E6E6" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
   const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
   const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-4 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`${desk ? "mt-1 text-[52px]" : "mt-3 text-[44px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const LB = L && <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block cursor-pointer select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{L}</button>
   const foot = null
-  if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0">{bodyKey === undefined ? <QA items={actions} /> : swap(<QA items={actions} />, "")}</div></motion.div>{mid && <motion.div variants={rise} className="mt-8">{mid}</motion.div>}{bodyKey === undefined ? <div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div> : swap(children, "mt-10 grid grid-cols-2 items-start gap-6")}{foot}</motion.div></div>
+  if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0">{bodyKey === undefined ? <QA items={actions} /> : swap(a => <QA items={a} />, "")}</div></motion.div>{mid && <motion.div variants={rise} className="mt-8">{mid}</motion.div>}{bodyKey === undefined ? <div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div> : swap((_a, c) => c, "mt-10 grid grid-cols-2 items-start gap-6")}{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
     <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
     <MobileHead k={k} />
     <motion.div variants={rise} className="mt-6 flex flex-col items-center px-5">{LB}{H}</motion.div>
     {mid && <motion.div variants={rise} className="mt-6 px-5">{mid}</motion.div>}
     {bodyKey === undefined ? <><motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
-    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div></> : swap(<><div className="mt-7 px-4"><QA items={actions} /></div><div className="mt-5 flex flex-col gap-8 px-4">{children}</div></>, "")}{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
+    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div></> : swap((a, c) => <><div className="mt-7 px-4"><QA items={a} /></div><div className="mt-5 flex flex-col gap-8 px-4">{c}</div></>, "")}{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
 const meName = (s: St) => s.settings.name?.trim() || s.settings.company?.trim() || s.settings.email?.split("@")[0] || "Mon compte"
@@ -581,22 +601,29 @@ function useFacturesView() {
 }
 /* update63 · Page unifiée Devis | Factures : un seul bot bleu, le sélecteur ne change que le contenu dessous */
 function DevFac() {
-  // pendant l'animation de sortie (page suivante déjà active), on garde le dernier mode : ni saut de contenu ni mémorisation erronée
-  const { page } = useC(), own = page === "dev" || page === "fac", last = useRef<"dev" | "fac">(page === "fac" ? "fac" : "dev")
-  if (own) last.current = page === "fac" ? "fac" : "dev"
-  const mode = last.current
-  const dv = useDevisView(own && mode === "dev"), fv = useFacturesView(), v = mode === "dev" ? dv : fv
+  // update69 : le mode change localement au tap (pilule et contenu partent ensemble) ; l'adresse suit juste après l'animation
+  const { page } = useC(), shownSlot = useContext(SlotActive), own = shownSlot && (page === "dev" || page === "fac")
+  const [mode, setMode] = useState<"dev" | "fac">(page === "fac" ? "fac" : "dev")
+  useEffect(() => { if (own) setMode(page === "fac" ? "fac" : "dev") }, [page, own])
+  const dv = useDevisView(own && mode === "dev"), fv = useFacturesView(), v = mode === "dev" ? dv : fv, o = mode === "dev" ? fv : dv
   useEffect(() => { if (own) rememberDocMode(mode) }, [mode, own])
-  return <Shell k="dev" fig={v.fig} sub={v.sub} actions={v.actions} mid={<DocSwitch mode={mode} />} bodyKey={mode}>{v.body}</Shell>
+  return <Shell k="dev" fig={v.fig} sub={v.sub} actions={v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alt={{ key: mode === "dev" ? "fac" : "dev", actions: o.actions, children: o.body }}>{v.body}</Shell>
 }
-function DocSwitch({ mode }: { mode: "dev" | "fac" }) {
-  const navigate = useNavigate(), { desk } = useC()
+function DocSwitch({ mode, onPick }: { mode: "dev" | "fac"; onPick?: (m: "dev" | "fac") => void }) {
+  const navigate = useNavigate(), { desk } = useC(), timer = useRef(0)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const pick = (id: "dev" | "fac", url: string) => {
+    if (!onPick) { navigate(url + location.search, { replace: true }); return }
+    onPick(id); clearTimeout(timer.current)
+    // l'URL (et le re-rendu de l'app qu'elle entraîne) suit une fois le glissement presque fini, et seulement si on est resté ici
+    timer.current = window.setTimeout(() => { const cur = location.pathname.split("/")[1]; if ((cur === "devis" || cur === "factures") && location.pathname !== url) startTransition(() => navigate(url + location.search, { replace: true })) }, 380)
+  }
   const items: ["dev" | "fac", string, string][] = [["dev", "Devis", "/devis"], ["fac", "Factures", "/factures"]]
   // update67 : une seule pilule qui glisse en ressort (plus de layoutId, qui sautait quand la page était défilée)
   return <div role="tablist" aria-label="Devis ou factures" className={`relative grid h-11 grid-cols-2 rounded-full bg-white/[.07] p-1 ${desk ? "w-[280px]" : "mx-auto w-full max-w-[340px]"}`}>
     <motion.span aria-hidden data-doc-pill className="absolute bottom-1 left-1 top-1 w-[calc(50%-4px)] rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,.10)]" style={{ background: `linear-gradient(180deg, ${A.dev.c}55, ${A.dev.c}33)` }}
       initial={false} animate={{ x: mode === "fac" ? "100%" : "0%" }} transition={SNAP} />
-    {items.map(([id, l, url]) => { const on = mode === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => { if (!on) navigate(url + location.search, { replace: true }) }}
+    {items.map(([id, l, url]) => { const on = mode === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => { if (!on) pick(id, url) }}
       className={`relative rounded-full text-[15px] font-semibold outline-none transition-colors duration-200 [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-white/40 ${on ? "text-white" : "text-white/55 hover:text-white/80"}`}>
       <span className="relative">{l}</span></motion.button> })}
   </div>
@@ -1165,16 +1192,51 @@ const ORDER: Partial<Record<string, number>> = { rec: 0, ag: 1, ch: 2, dev: 3, e
 const isPushP = (p: string) => p === "set" || p === "rel"
 type PT = { kind: "fade" | "push" | "pop"; dir: number }
 const OPA = { duration: .24, ease: [.22, 1, .36, 1] as const }
-const pageV = {
-  enter: (t: PT) => t.kind === "push" ? { x: "100%", opacity: 1, zIndex: 2 } : t.kind === "pop" ? { x: "-28%", opacity: .55, zIndex: 0 } : { x: t.dir * 22, opacity: 0, zIndex: 1 },
-  center: (t: PT) => ({ x: 0, opacity: 1, zIndex: t.kind === "pop" ? 0 : t.kind === "push" ? 2 : 1, pointerEvents: "auto" as const, transition: { x: t.kind === "fade" ? TAB : PUSH, opacity: OPA, zIndex: { duration: 0 } } }),
-  exit: (t: PT) => ({ ...(t.kind === "push" ? { x: "-28%", opacity: .55, zIndex: 0 } : t.kind === "pop" ? { x: "100%", opacity: 1, zIndex: 2 } : { x: t.dir * -12, opacity: 1, zIndex: 0 }), pointerEvents: "none" as const, transition: { x: t.kind === "fade" ? TAB : PUSH, opacity: OPA, zIndex: { duration: 0 } } }),
+/* update69 · Pages conservées (Réception, Agenda, Chantiers, Devis | Factures) : une fois ouvertes (ou préparées au repos),
+   elles restent montées et sont seulement masquées. Changer d'onglet ne recrée donc plus la page : aucun rendu lourd au
+   moment du tap, la carte des chantiers n'est pas recréée, chaque onglet garde sa position de défilement.
+   Les animations sont lancées à la main (transform + opacity uniquement, ressorts de lib/motion), une image après que la
+   page entrante est prête : sur iPhone, l'animation ne « démarre » plus pendant un rendu bloquant (ce qui la rendait
+   invisible : coupe sèche). Mouvements réduits : fondu enchaîné court, jamais de coupe. */
+const KEEP = new Set(["rec", "ag", "ch", "dev"])
+/** update69 · la page conservée est-elle celle affichée ? (une page masquée ne déclenche rien : fenêtres auto, etc.) */
+const SlotActive = createContext(true)
+const PAGE_C: Record<string, ComponentType> = { rec: Rec, ag: Ag, rel: RelP, dev: DevFac, set: SetP, ch: ChP, eq: EqP, cl: ClP }
+const prefersReduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches
+type SlotBase = { fns: Partial<Ctx>; s: Ctx["s"]; desk: boolean; chat: boolean; q: string; loading: boolean }
+function PageSlot({ k, page, active, base, setEl }: { k: string; page: P; active: boolean; base: SlotBase; setEl: (k: string, el: HTMLDivElement | null) => void }) {
+  const Comp = PAGE_C[k] || Rec
+  // valeur du contexte stable tant que rien de ce que lit la page ne change → une page masquée ne se re-rend pas au changement d'onglet
+  const value = useMemo(() => ({ ...base.fns, s: base.s, desk: base.desk, page, chat: base.chat, q: base.q }) as Ctx, [base.fns, base.s, base.desk, page, base.chat, base.q])
+  const el = useMemo(() => <Comp />, [Comp])
+  const ref = useMemo(() => (n: HTMLDivElement | null) => setEl(k, n), [k, setEl])
+  return <div ref={ref} data-page={active ? k : undefined} data-slot={k} aria-hidden={active ? undefined : true} inert={!active}
+    className="absolute inset-0 flex flex-col bg-black">
+    <C.Provider value={value}><SlotActive.Provider value={active}><Suspense fallback={<div className="absolute inset-0 bg-black" />}>
+      <SetupGate page={page} loading={base.loading} mobile={!base.desk} active={active}>{el}</SetupGate>
+    </Suspense></SlotActive.Provider></C.Provider>
+  </div>
 }
-function Pages({ pkey, desk, children }: { pkey: string; desk: boolean; children: ReactNode }) {
+const PAGE_SHADOW = "-16px 0 40px -8px rgba(0,0,0,.75)"
+function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boolean; loading: boolean }) {
+  const ctx = useC()
+  const latest = useRef(ctx); latest.current = ctx
+  // fonctions du contexte stables (elles appellent toujours la version courante) : pas de re-rendu, pas de fermeture périmée
+  const fns = useMemo(() => { const o: Record<string, unknown> = {}; for (const key of Object.keys(ctx)) if (typeof (ctx as any)[key] === "function") o[key] = (...a: unknown[]) => (latest.current as any)[key](...a); return o as Partial<Ctx> }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const base = useMemo<SlotBase>(() => ({ fns, s: ctx.s, desk, chat: ctx.chat, q: ctx.q, loading }), [fns, ctx.s, desk, ctx.chat, ctx.q, loading])
+  const lastDoc = useRef<P>(page === "fac" ? "fac" : "dev"); if (page === "dev" || page === "fac") lastDoc.current = page
+  const [slots, setSlots] = useState<string[]>(() => [pkey])
+  if (!slots.includes(pkey)) setSlots([...slots, pkey])
+  const els = useRef(new Map<string, HTMLDivElement>()), shown = useRef(pkey), cur = useRef(pkey); cur.current = pkey
+  const setEl = useMemo(() => (k: string, el: HTMLDivElement | null) => {
+    if (!el) { els.current.delete(k); return }
+    els.current.set(k, el)
+    if (k !== cur.current) { el.style.visibility = "hidden"; el.style.zIndex = "0" }
+  }, [])
+  // type de transition (inchangé depuis update67)
   const prev = useRef(pkey), pt = useRef<PT>({ kind: "fade", dir: 1 }), fromSet = useRef(false)
   if (prev.current !== pkey) {
     const a = prev.current, b = pkey, sub = (x: string) => x === "eq" || x === "cl"
-    // Réglages → Équipe / Clients : on avance (push) ; retour vers Réglages : pop
     if (!desk && a === "set" && sub(b)) { pt.current = { kind: "push", dir: 1 }; fromSet.current = true }
     else if (!desk && sub(a) && b === "set" && fromSet.current) { pt.current = { kind: "pop", dir: -1 }; fromSet.current = false }
     else {
@@ -1183,15 +1245,62 @@ function Pages({ pkey, desk, children }: { pkey: string; desk: boolean; children
     }
     prev.current = b
   }
+  const run = useRef<{ token: number; anims: { stop: () => void }[]; from: string | null }>({ token: 0, anims: [], from: null })
+  const rest = (el: HTMLElement | undefined, hide: boolean) => { if (!el) return; el.style.transform = ""; el.style.opacity = ""; el.style.boxShadow = ""; el.style.zIndex = hide ? "0" : "1"; el.style.visibility = hide ? "hidden" : "" }
+  const drop = (k: string) => { if (!KEEP.has(k) && k !== cur.current) setSlots(l => l.includes(k) && k !== cur.current ? l.filter(x => x !== k) : l) }
+  useLayoutEffect(() => {
+    const from = shown.current, to = pkey
+    if (from === to) return
+    shown.current = to
+    const r = run.current, token = ++r.token
+    r.anims.forEach(a => a.stop()); r.anims = []
+    // transition interrompue : l'ancienne page sortante disparaît tout de suite
+    for (const [k, el] of els.current) if (k !== from && k !== to) { rest(el, true); if (r.from === k) drop(k) }
+    r.from = from
+    const elIn = els.current.get(to), elOut = els.current.get(from), t = pt.current
+    if (!elIn) return
+    const reduce = prefersReduced()
+    const zIn = t.kind === "pop" && !reduce ? "1" : "2", zOut = zIn === "2" ? "1" : "2"
+    // état de départ posé immédiatement (aucune image de la nouvelle page à sa place finale avant l'animation)
+    const fromIn: Record<string, string> = reduce ? { opacity: "0" } : t.kind === "push" ? { transform: "translateX(100%)" } : t.kind === "pop" ? { transform: "translateX(-28%)", opacity: ".55" } : { transform: `translateX(${t.dir * 22}px)`, opacity: "0" }
+    elIn.style.visibility = ""; elIn.style.zIndex = zIn; elIn.style.transform = fromIn.transform || ""; elIn.style.opacity = fromIn.opacity || ""
+    if (!reduce && (t.kind === "push")) elIn.style.boxShadow = PAGE_SHADOW
+    if (elOut) { elOut.style.visibility = ""; elOut.style.zIndex = zOut; if (!reduce && t.kind === "pop") elOut.style.boxShadow = PAGE_SHADOW }
+    const xT = t.kind === "fade" ? TAB : PUSH
+    // lancement à l'image suivante : la page entrante est mise en page avant que l'horloge de l'animation parte
+    const raf = requestAnimationFrame(() => {
+      if (run.current.token !== token) return
+      const list: any[] = []
+      if (reduce) list.push(animate(elIn, { opacity: [0, 1] }, { duration: .26, ease: [.22, 1, .36, 1] }))
+      else if (t.kind === "push") { list.push(animate(elIn, { x: ["100%", "0%"] }, xT)); if (elOut) list.push(animate(elOut, { x: ["0%", "-28%"], opacity: [1, .55] }, { x: xT, opacity: xT })) }
+      else if (t.kind === "pop") { list.push(animate(elIn, { x: ["-28%", "0%"], opacity: [.55, 1] }, { x: xT, opacity: xT })); if (elOut) list.push(animate(elOut, { x: ["0%", "100%"] }, xT)) }
+      else { list.push(animate(elIn, { x: [t.dir * 22, 0], opacity: [0, 1] }, { x: xT, opacity: OPA })); if (elOut) list.push(animate(elOut, { x: [0, t.dir * -12] }, xT)) }
+      // opacité finale posée tout de suite (l'animation à images-clés explicites prime pendant qu'elle tourne) : sur WebKit, la fin
+      // de l'animation laissait réapparaître l'opacité de départ une image avant le nettoyage → éclair de l'ancienne page
+      elIn.style.opacity = ""
+      run.current.anims = list
+      Promise.all(list.map(a => a.finished ?? a)).then(() => {
+        if (run.current.token !== token) return
+        rest(elIn, false); if (elOut && from !== cur.current) { rest(elOut, true); drop(from) }
+        run.current.anims = []; run.current.from = null
+      }, () => {})
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [pkey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // pages principales préparées au repos (montées masquées) : le premier passage sur un onglet n'a plus rien à construire
+  useEffect(() => {
+    if (loading) return
+    let stop = false, i = 0
+    const todo = ["rec", "ag", "dev", "ch"]
+    const next = () => { if (stop) return; while (i < todo.length && slots.includes(todo[i])) i++; if (i >= todo.length) return; const k = todo[i++]; const L = LAZY[k as P]; const add = () => { if (!stop) setSlots(l => l.includes(k) ? l : [...l, k]); setTimeout(() => idle(next, 3000), 400) }; if (L && !L.ready()) void L.preload().then(add, () => {}); else add() }
+    const t = setTimeout(() => idle(next, 3000), 1800)
+    return () => { stop = true; clearTimeout(t) }
+  }, [loading]) // eslint-disable-line react-hooks/exhaustive-deps
   return <div className="relative min-h-0 flex-1 overflow-hidden">
-    <Suspense fallback={<div className="absolute inset-0 bg-black" />}>
-      <AnimatePresence initial={false} custom={pt.current}>
-        <motion.div key={pkey} data-page={pkey} custom={pt.current} variants={pageV} initial="enter" animate="center" exit="exit"
-          className={`absolute inset-0 flex flex-col bg-black will-change-transform ${(isPushP(pkey) || pt.current.kind === "push") && !desk ? "shadow-[-16px_0_40px_-8px_rgba(0,0,0,.75)]" : ""}`}>{children}</motion.div>
-      </AnimatePresence>
-    </Suspense>
+    {slots.map(k => <PageSlot key={k} k={k} page={(k === "dev" ? (pkey === "dev" ? page : lastDoc.current) : k) as P} active={k === pkey} base={base} setEl={setEl} />)}
   </div>
 }
+
 function AknoApp() {
   const pathname = useLocation().pathname, navigate = useNavigate()
   const [s, setS, loading, put] = useStore(), desk = useDesk()
@@ -1267,14 +1376,13 @@ function AknoApp() {
     else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
   }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
-  const Pg = { rec: Rec, ag: Ag, rel: RelP, dev: DevFac, set: SetP, fac: DevFac, ch: ChP, eq: EqP, cl: ClP }[page]
   const pkey = page === "fac" ? "dev" : page // update63 : Devis ↔ Factures sans re-monter la page (le bot reste en place)
   // update67 : préchargement des pages et feuilles chargées à part, au repos (puis au toucher, cf. MobileNav)
   useEffect(() => { idle(() => { for (const L of [ChantiersPage, ClientsPage, EquipePage, FacturesSheet, ReceptionnisteStudio]) void L.preload().catch(() => {}); void loadChantiers() }) }, []) // update67 : pages et données Chantiers / Équipe prêtes avant le premier tap (pas de squelette)
   const prefetch = (p: P) => { void LAZY[p]?.preload().catch(() => {}) }
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
-    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} desk><SetupGate page={page} loading={loading} mobile={false}><Pg /></SetupGate></Pages></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} desk={false}><SetupGate page={page} loading={loading} mobile><Pg /></SetupGate></Pages><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+    {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} page={page} desk loading={loading} /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
+      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} />}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />

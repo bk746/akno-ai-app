@@ -40,7 +40,9 @@ function alreadyUsed(k: K, s: St, p: Profile | null, calcom: boolean) {
 const opened = new Set<string>() // une page ouverte le reste pendant la session (pas de re-verrouillage si les données changent)
 
 type Status = "pending" | "locked" | "open"
-export default function SetupGate({ page, loading, mobile, children }: { page: P; loading: boolean; mobile: boolean; children: ReactNode }) {
+/* update69 · active : les pages principales restent montées (masquées) ; seule la page affichée agit sur l'état global
+   (page verrouillée, ouverture de l'assistant de configuration). */
+export default function SetupGate({ page, loading, mobile, children, active = true }: { page: P; loading: boolean; mobile: boolean; children: ReactNode; active?: boolean }) {
   const { s, toast } = useC(), rr = useRights(), acc = useAccount(), { p } = useProfile(), fl = useSetupFlags()
   const reduce = useReducedMotion()
   const k: K | null = isK(page) ? page : null
@@ -61,8 +63,8 @@ export default function SetupGate({ page, loading, mobile, children }: { page: P
     const prev = was.current; was.current = st
     if (prev === "locked" && st === "open") { setWiz(false); setReveal(true); const t = setTimeout(() => setReveal(false), 950); return () => clearTimeout(t) }
   }, [st])
-  useEffect(() => { setLockedPage(st === "locked" ? page : null); return () => setLockedPage(null) }, [st, page])
-  useEffect(() => { const f = () => { if (st === "locked") setWiz(true) }; addEventListener("akno-setup-open", f); return () => removeEventListener("akno-setup-open", f) }, [st])
+  useEffect(() => { if (!active) return; setLockedPage(st === "locked" ? page : null); return () => setLockedPage(null) }, [st, page, active])
+  useEffect(() => { if (!active) return; const f = () => { if (st === "locked") setWiz(true) }; addEventListener("akno-setup-open", f); return () => removeEventListener("akno-setup-open", f) }, [st, active])
 
   const locked = st === "locked", hidden = st === "pending"
   const box = mobile ? "relative flex min-h-0 flex-1 flex-col" : "relative h-full"
@@ -78,7 +80,7 @@ export default function SetupGate({ page, loading, mobile, children }: { page: P
       <div aria-hidden className="absolute inset-0" style={{ background: `radial-gradient(60% 50% at 50% 46%, ${c}${c === "#E6E6E6" ? "12" : "1F"} 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%)` }} />
       <motion.div className="relative flex w-full justify-center" animate={{ opacity: wiz ? 0 : 1, scale: wiz ? .98 : 1 }} transition={{ duration: .25, ease: EASE }}><Intro k={k} onStart={() => setWiz(true)} /></motion.div>
     </motion.div>}</AnimatePresence>
-    {createPortal(<AnimatePresence>{wiz && locked && k && (k === "rec"
+    {createPortal(<AnimatePresence>{wiz && locked && k && active && (k === "rec"
       ? <Suspense key="rec-studio" fallback={null}><ReceptionnisteStudio setup close={() => setWiz(false)} onDone={() => toast(COPY.rec.done)} /></Suspense>
       : <Wizard key={k} k={k} onClose={() => setWiz(false)} onDone={() => toast(COPY[k].done)} />)}</AnimatePresence>, document.body)}
   </div>

@@ -1,14 +1,14 @@
 /* update62 · Barre d'onglets mobile (maquettes navbar.jpg + bouton-plus.jpg)
    Pilule sombre flottante : Réception · Agenda · [+] · Chantiers · Factures.
-   Le « + » ouvre la feuille « Créer » (grille 3 × 2) au-dessus d'un fond flouté.
+   Le « + » déploie le menu « Créer » depuis le bouton (update69), au-dessus d'un fond légèrement flouté.
    Animations : ressorts (transform / opacity uniquement), indicateur d'onglet glissant (layoutId),
    respect de prefers-reduced-motion via le MotionConfig de l'app.
-   Fermeture : ×, tap sur le fond, glisser vers le bas, Échap, bouton retour Android (entrée d'historique). */
+   Fermeture : ×, tap sur le fond, Échap, bouton retour Android (entrée d'historique). */
 import { useCallback, useEffect, useRef, useState } from "react"
-import { AnimatePresence, motion, type PanInfo } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
 import { Lock, MapPin, Plus, UserRound, Users } from "lucide-react"
 import type { P } from "../ui"
-import { EASE_OUT, SHEET } from "../../lib/motion"
+import { EASE_OUT } from "../../lib/motion"
 import { lastDocMode } from "../../lib/facturesLite"
 
 export type CreateKind = "chantier" | "equipe" | "clients" // update67 : RDV / devis / facture retirés (déjà dans Agenda et Devis | Factures)
@@ -35,8 +35,13 @@ const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 
    transition CSS depuis l'état de départ (opacité 0, y 14) : les tuiles disparaissaient puis réapparaissaient.
    Les tuiles ne gardent donc que les transitions de couleur ; opacité/transform restent pilotés par motion seul. */
 const TILE_NO_CSS_TR = { transitionProperty: "color, background-color, border-color" } as const
-const TILE_V = { h: { opacity: 0, y: 14, scale: .96 }, s: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, stiffness: 500, damping: 34 } } }
+const TILE_V = { h: { opacity: 0, y: 8, scale: .94 }, s: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, stiffness: 520, damping: 34 } } }
 const BAR_BOTTOM = "max(calc(var(--sab) - 10px), 12px)"
+/* update69 · menu « Créer » : naît du centre du « + » (12 px d'écart + demi-barre de 36 px sous le menu) */
+const MENU_ORIGIN = "50% calc(100% + 48px)"
+const MENU_HIDDEN = { opacity: 0, scale: .3, y: 10 }
+const MENU_IN = { type: "spring" as const, stiffness: 560, damping: 38, mass: .8 }
+const MENU_OUT = { type: "spring" as const, stiffness: 620, damping: 46, restDelta: .01 }
 
 function TabBtn({ t, on, badge, recLocked, onTap, onIntent }: { t: Tab; on: boolean; badge: number; recLocked: boolean; onTap: (t: Tab) => void; onIntent?: (p: P) => void }) {
   return <motion.button type="button" onClick={() => onTap(t)} onPointerDown={() => onIntent?.(t)} onPointerEnter={() => onIntent?.(t)} aria-label={t === "fac" && badge > 0 ? `${LABEL[t]}, ${badge} à encaisser` : LABEL[t]} aria-current={on ? "page" : undefined} whileTap={{ scale: .92 }} transition={spring}
@@ -101,22 +106,22 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate, onInte
   const dest = (t: Tab): P => t === "fac" ? lastDocMode() : t
   const tapTab = (t: Tab) => { const run = () => { if (tabOf(pageRef.current) !== t) go(dest(t)) }; if (openRef.current) hide(run); else run() }
   const pick = (k: CreateKind) => hide(() => onCreate(k))
-  const onDragEnd = (_: unknown, i: PanInfo) => { if (i.offset.y > 90 || i.velocity.y > 600) hide() }
   const active = tabOf(page)
   return <>
-    {/* update67 : la feuille « Créer » monte une seule fois — fond en fondu (sans flou animé, coûteux), feuille en ressort,
-        tuiles en légère cascade ; fermeture en ressort, y compris en la glissant vers le bas. */}
-    <AnimatePresence>{open && <motion.div key="cr-bg" aria-hidden className="fixed inset-0 z-[34] touch-none overscroll-none bg-black/50"
-      initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .26, ease: EASE_OUT } }} exit={{ opacity: 0, transition: { duration: .22, ease: EASE_OUT } }} onClick={() => hide()} />}</AnimatePresence>
-    <AnimatePresence>{open && <motion.div key="cr-sheet" role="dialog" aria-modal="true" aria-labelledby="cr-title" data-create-sheet className="fixed inset-x-0 bottom-0 z-[35] mx-auto w-full max-w-[560px] touch-none overscroll-none rounded-t-[28px] border-t border-white/[.08] bg-[#161618] px-4 pt-2.5 shadow-[0_-30px_60px_-20px_rgba(0,0,0,.9)] will-change-transform"
-      style={{ paddingBottom: `calc(72px + ${BAR_BOTTOM} + 18px)` }}
-      initial={{ y: "100%" }} animate={{ y: 0, transition: SHEET }} exit={{ y: "100%", transition: { type: "spring", stiffness: 420, damping: 46, restDelta: 1 } }}
-      drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: .04, bottom: .7 }} dragMomentum={false} onDragEnd={onDragEnd}>
-      <div aria-hidden className="mx-auto h-[5px] w-9 rounded-full bg-white/20" />
-      <h2 id="cr-title" className="mt-4 px-1 text-[20px] font-semibold tracking-[-0.02em]">Créer</h2>
-      <motion.div className="mt-4 grid grid-cols-3 gap-2.5" initial="h" animate="s" variants={{ h: {}, s: { transition: { staggerChildren: .045, delayChildren: .05 } } }}>
+    {/* update69 : le « + » déploie un menu flottant qui naît du bouton (au-dessus de la barre, centré sur le +) au lieu
+        d'une feuille montant du bas de l'écran. Fond légèrement assombri et flouté, menu en ressort depuis le +
+        (transform-origin = centre du +), tuiles en légère cascade (une seule fois, cf. update68) ; la fermeture rejoue
+        l'animation à l'envers, vers le +. La barre reste visible et au-dessus. */}
+    <AnimatePresence>{open && <motion.div key="cr-bg" aria-hidden data-create-backdrop className="fixed inset-0 z-[34] touch-none overscroll-none bg-black/45 backdrop-blur-[3px]"
+      initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .22, ease: EASE_OUT } }} exit={{ opacity: 0, transition: { duration: .2, ease: EASE_OUT } }} onClick={() => hide()} />}</AnimatePresence>
+    <AnimatePresence>{open && <motion.div key="cr-menu" role="dialog" aria-modal="true" aria-labelledby="cr-title" data-create-sheet data-create-menu
+      className="fixed inset-x-0 z-[35] mx-auto w-[min(352px,calc(100vw-32px))] touch-none overscroll-none rounded-[28px] border border-white/[.09] bg-[#1C1C1E] p-2 shadow-[0_30px_60px_-18px_rgba(0,0,0,.95),0_10px_24px_-12px_rgba(0,0,0,.7),inset_0_1px_0_rgba(255,255,255,.05)] will-change-transform"
+      style={{ bottom: `calc(${BAR_BOTTOM} + 72px + 12px)`, transformOrigin: MENU_ORIGIN }}
+      initial={MENU_HIDDEN} animate={{ opacity: 1, scale: 1, y: 0, transition: MENU_IN }} exit={{ ...MENU_HIDDEN, transition: MENU_OUT }}>
+      <h2 id="cr-title" className="sr-only">Créer</h2>
+      <motion.div className="grid grid-cols-3 gap-2" initial="h" animate="s" variants={{ h: {}, s: { transition: { staggerChildren: .035, delayChildren: .04 } } }}>
         {TILES.map(x => <motion.button key={x.k} type="button" onClick={() => pick(x.k)} variants={TILE_V} whileTap={{ scale: .95 }} style={TILE_NO_CSS_TR}
-          className="flex h-[104px] flex-col items-center justify-center gap-2.5 rounded-[20px] border border-white/[.05] bg-white/[.06] px-2 text-center text-[13.5px] font-medium leading-[1.2] text-white outline-none transition-colors [-webkit-tap-highlight-color:transparent] hover:bg-white/[.09] focus-visible:ring-2 focus-visible:ring-white/40">
+          className="flex h-[92px] flex-col items-center justify-center gap-2 rounded-[21px] bg-white/[.07] px-2 text-center text-[13px] font-medium leading-[1.2] text-white outline-none transition-colors [-webkit-tap-highlight-color:transparent] hover:bg-white/[.1] active:bg-white/[.12] focus-visible:ring-2 focus-visible:ring-white/40">
           <x.I size={22} strokeWidth={1.75} aria-hidden />{x.l}
         </motion.button>)}
       </motion.div>

@@ -119,15 +119,16 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
     return () => { p.removeEventListener("touchstart", ts); p.removeEventListener("touchmove", tm); p.removeEventListener("touchend", te); p.removeEventListener("touchcancel", te); p.removeEventListener("pointerdown", pd) }
   }, [desk, y, dim])
 
-  const H = size === "full" ? "100dvh" : size === "large" ? "calc(100dvh - var(--sat, 0px) - 10px)" : undefined
-  const mobile: any = { y, height: H, maxHeight: size === "full" ? undefined : "calc(100dvh - var(--sat, 0px) - 10px - var(--kb, 0px))", ...style }
+  // update69 : hauteur de référence --sheet-vh (index.css) = 100dvh, ou 100lvh en PWA installée (plein écran, zones sûres comprises)
+  const H = size === "full" ? "var(--sheet-vh, 100dvh)" : size === "large" ? "calc(var(--sheet-vh, 100dvh) - var(--sat, 0px) - 10px)" : undefined
+  const mobile: any = { y, height: H, maxHeight: size === "full" ? undefined : "calc(var(--sheet-vh, 100dvh) - var(--sat, 0px) - 10px - var(--kb, 0px))", ...style }
   const anim = desk
     ? { initial: { opacity: 0, scale: .96, y: 8 }, animate: { opacity: 1, scale: 1, y: 0, transition: SNAP }, exit: { opacity: 0, scale: .97, transition: { duration: .16 } } }
     : reduce
       ? { initial: { opacity: 0 }, animate: { opacity: 1, transition: { duration: .2 } }, exit: { opacity: 0, transition: { duration: .16 } } }
       : { initial: { y: "100%" }, animate: { y: 0, transition: SHEET }, exit: { y: "100%", transition: { type: "spring" as const, stiffness: 420, damping: 46, restDelta: 1 } } }
 
-  const node = <div className={`fixed inset-0 flex ${desk ? (deskAlign === "top" ? "items-start justify-center pt-[12vh]" : "items-center justify-center p-6") : "items-end justify-center"}`} style={{ zIndex: z }}>
+  const node = <div className={`fixed inset-0 flex ${desk ? (deskAlign === "top" ? "items-start justify-center pt-[12vh]" : "items-center justify-center p-6") : "items-end justify-center"}`} style={desk ? { zIndex: z } : { zIndex: z, bottom: "auto", height: "var(--sheet-vh, 100dvh)" }}>
     <motion.div aria-hidden className="absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .28, ease: [.22, 1, .36, 1] } }} exit={{ opacity: 0, transition: { duration: .24 } }}
       onClick={() => { if (canDismiss.current) close.current() }}>
       <motion.div className={`absolute inset-0 ${backdrop}`} style={{ opacity: dim }} />

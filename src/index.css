@@ -177,6 +177,10 @@ body{background:#000;color:#fff;font-family:'Geist Variable',sans-serif;-webkit-
 
 /* Polish : focus visibles, transitions, interactions */
 button, a, [role="switch"] { -webkit-tap-highlight-color: transparent; transition: color .2s, background-color .2s, opacity .2s, transform .15s; }
+/* update69 · éléments animés par motion (style en ligne transform / opacity) : pas de transition CSS sur ces propriétés.
+   Sinon WebKit (Safari, PWA iPhone) rejoue une transition CSS à la fin de chaque animation motion (double animation,
+   éléments qui disparaissent puis réapparaissent — cause du bug update68). Les couleurs gardent leur transition. */
+:is(button, a, [role="switch"])[style*="transform"], :is(button, a, [role="switch"])[style*="opacity"] { transition-property: color, background-color; }
 button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid rgba(255,255,255,.55); outline-offset: 2px; border-radius: 10px; }
 input:focus, input:focus-visible, textarea:focus, textarea:focus-visible { outline: none !important; box-shadow: none; }
 button:active { transform: scale(.97); }
@@ -215,6 +219,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+/* update69 · mouvements réduits : jamais de coupure sèche, un court fondu enchaîné (opacité seule) entre Devis et Factures */
+.rm-fade { transition: opacity .26s cubic-bezier(.22,1,.36,1) !important; }
 /* Feuilles du bas : remontent au-dessus du clavier virtuel (--kb, calculé dans lib/mobile.ts) */
 .kb-sheet { padding-bottom: var(--kb, 0px); }
 .kb-bottom { bottom: var(--kb, 0px) !important; }
@@ -286,6 +292,10 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .eq-sep + .eq-sep.eq-sep-cl::before { left: 64px; }
 
 /* update67 · feuilles modales (ModalSheet) : remontée au-dessus du clavier, en douceur et sans saut */
+/* update69 · hauteur des feuilles : écran visible ; en PWA installée (pas de barres Safari), plein écran « large » (100lvh)
+   pour ne jamais s'arrêter avant le bas de l'écran si iOS rapporte un 100dvh trop court */
+:root { --sheet-vh: 100dvh; }
+@media (display-mode: standalone) { @supports (height: 100lvh) { :root { --sheet-vh: 100lvh; } } }
 .sheet-kb { transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform .32s cubic-bezier(.22, 1, .36, 1); }
 .sheet-kb > * { transition: max-height .32s cubic-bezier(.22, 1, .36, 1); }
 @media (prefers-reduced-motion: reduce) { .sheet-kb, .sheet-kb > * { transition: none; } }

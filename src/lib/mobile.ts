@@ -15,10 +15,16 @@ export function initMobile() {
   const vv = window.visualViewport
   if (!vv) return
   const root = document.documentElement
+  /* update69 · Le clavier ne peut être ouvert que si un champ de saisie a le focus. Sur iPhone (surtout en PWA),
+     visualViewport reste parfois « rétréci » après la fermeture du clavier (événement manqué ou valeurs figées) :
+     --kb gardait ~300 px sans clavier et les feuilles (ModalSheet) restaient remontées et raccourcies, coupées à
+     mi-écran. --kb vaut donc 0 sans champ actif, et on re-mesure à chaque prise / perte de focus. */
+  const FIELD = "input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]):not([type=file]),textarea,select,[contenteditable=true],[contenteditable='']"
+  const typing = () => { const a = document.activeElement as HTMLElement | null; return !!a && a !== document.body && a.matches(FIELD) }
   let raf = 0
   const sync = () => {
     raf = 0
-    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
+    const kb = typing() ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0
     // < 80 px : barres d'outils Safari qui bougent, pas un clavier
     root.style.setProperty("--kb", `${kb > 80 ? kb : 0}px`)
     root.classList.toggle("kb-open", kb > 80)
@@ -26,6 +32,10 @@ export function initMobile() {
   }
   const onVV = () => { if (!raf) raf = requestAnimationFrame(sync) }
   vv.addEventListener("resize", onVV); vv.addEventListener("scroll", onVV); sync()
+  const later = () => { onVV(); setTimeout(onVV, 120); setTimeout(onVV, 400); setTimeout(onVV, 800) }
+  document.addEventListener("focusin", later); document.addEventListener("focusout", later)
+  addEventListener("resize", onVV); addEventListener("orientationchange", later); addEventListener("pageshow", later)
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) later() })
 
   const coarse = window.matchMedia("(pointer: coarse)")
   document.addEventListener("focusin", e => {
