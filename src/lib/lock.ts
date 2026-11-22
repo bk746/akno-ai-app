@@ -19,12 +19,25 @@ export async function checkCode(uid: string, code: string): Promise<"ok" | "bad"
   if (await derive(code, unb64(r.salt)) === r.hash) { save(uid, { ...r, fails: 0 }); return "ok" }
   const fails = (r.fails || 0) + 1; save(uid, { ...r, fails }); return fails >= 5 ? "locked" : "bad"
 }
-export const bioAvailable = async () => { try { return !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable() } catch { return false } }
+/* update70 · App native (iOS / Android) : Face ID / empreinte via le plugin Capacitor natif (pas de WebAuthn dans la webview).
+   Sur le web, WebAuthn plateforme reste inchangé. Marqueur stocké : cred = "native". */
+const NATIVE_CRED = "native"
+const isNativeApp = () => typeof window !== "undefined" && !!(window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+const nativeBio = async () => (await import("@capgo/capacitor-native-biometric")).NativeBiometric
+async function nativeVerify(reason: string) {
+  const NB = await nativeBio()
+  try { await NB.verifyIdentity({ reason, title: "Akno", subtitle: reason, description: "", negativeButtonText: "Annuler", useFallback: true, maxAttempts: 3 }); return true } catch { return false }
+}
+export const bioAvailable = async () => {
+  if (isNativeApp()) { try { return (await (await nativeBio()).isAvailable({ useFallback: false })).isAvailable } catch { return false } }
+  try { return !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable() } catch { return false }
+}
 
 /** rpId = hostname actuel (obligatoire). Le bandeau iOS affiche le domaine, pas rp.name. */
 const rpId = () => location.hostname
 
 export async function enableBio(uid: string, email: string) {
+  if (isNativeApp()) { if (!await nativeVerify("Activer le déverrouillage d'Akno")) throw new Error("annulé"); const r = getLock(uid); if (r) save(uid, { ...r, cred: NATIVE_CRED }); return }
   const c = await navigator.credentials.create({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: "Akno", id: rpId() }, user: { id: new TextEncoder().encode(uid), name: email || "akno", displayName: email || "Akno" }, pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }], authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "preferred" }, timeout: 60000, attestation: "none" } }) as PublicKeyCredential | null
   if (!c) throw new Error("annulé"); const r = getLock(uid); if (r) save(uid, { ...r, cred: b64(c.rawId) })
 }
@@ -41,6 +54,7 @@ export async function unlockBio(uid: string) {
 
 async function doUnlock(uid: string) {
   const r = getLock(uid); if (!r?.cred) return false
+  if (isNativeApp() || r.cred === NATIVE_CRED) { if (r.cred !== NATIVE_CRED || !isNativeApp()) return false; const ok = await nativeVerify("Déverrouiller Akno"); if (ok) save(uid, { ...r, fails: 0 }); return ok }
   // allowCredentials + transports internal + UV required : Face ID appareil, sans sélecteur de comptes.
   // Pas de mediation: "conditional" (autofill clavier, pas de scan immédiat).
   const a = await navigator.credentials.get({

@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 import { Link, useParams } from "react-router-dom"
-import { CGV_VERSION, EDITOR as E } from "../lib/legal"
+import { CGV_VERSION, EDITOR as E, contactRgpd } from "../lib/legal"
 
 /* update45 · Pages légales publiques. MODÈLES À FAIRE RELIRE PAR UN JURISTE avant mise en production. */
 type Doc = { title: string; body: [string, string[]][] }
@@ -19,18 +19,26 @@ const DOCS: Record<string, Doc> = {
     ["10. Droit applicable", ["Les présentes sont soumises au droit français. À défaut d'accord amiable, tout litige relève des tribunaux compétents du ressort du siège de l'Éditeur."]],
   ] },
   "mentions-legales": { title: "Mentions légales", body: [
-    ["Éditeur", [`${E.name} — ${E.form}`, `Siège : ${E.address}`, `SIRET : ${E.siret} · TVA : ${E.tva}`, `Directeur de la publication : ${E.director}`, `Contact : ${E.email}`]],
+    // update70 : seules les informations renseignées (VITE_LEGAL_*) s'affichent
+    ["Éditeur", ([E.form ? `${E.name} — ${E.form}` : E.name, E.address && `Siège : ${E.address}`, [E.siret && `SIRET : ${E.siret}`, E.tva && `TVA : ${E.tva}`].filter(Boolean).join(" · "), E.director && `Directeur de la publication : ${E.director}`, `Contact : ${E.email || contactRgpd()}`].filter(Boolean) as string[])],
     ["Hébergement", ["Application : Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, États-Unis — fonctions exécutées dans la région Paris (cdg1).", "Données : Supabase Inc., 970 Toa Payoh North #07-04, Singapour 318992 — base hébergée dans l'Union européenne (à vérifier selon la région du projet)."]],
     ["Propriété intellectuelle", ["Le logiciel Akno, sa marque et ses contenus sont la propriété de l'Éditeur. Toute reproduction non autorisée est interdite."]],
   ] },
   confidentialite: { title: "Politique de confidentialité", body: [
-    ["Qui traite vos données ?", [`${E.name} (${E.address}) pour la gestion des comptes artisans et de l'abonnement. Pour les données des clients des artisans (appels, devis, factures, rendez-vous), l'artisan est responsable de traitement et Akno agit pour son compte (voir le DPA). Contact RGPD : ${E.dpo}.`]],
+    ["Qui traite vos données ?", [`${E.name}${E.address ? ` (${E.address})` : ""} pour la gestion des comptes artisans et de l'abonnement. Pour les données des clients des artisans (appels, devis, factures, rendez-vous), l'artisan est responsable de traitement et Akno agit pour son compte (voir le DPA). Contact RGPD : ${contactRgpd()}.`]],
     ["Données traitées", ["Compte artisan : identité, coordonnées, informations d'entreprise, données de facturation (la carte bancaire est gérée par Stripe, Akno n'y a pas accès). Clients des artisans : nom, téléphone, e-mail, adresse du chantier, contenu des appels (transcription, résumé, enregistrement audio), devis, factures, rendez-vous, demandes reçues via le site de l'artisan."]],
     ["Finalités et bases légales", ["Fourniture du service (exécution du contrat), facturation (obligation légale), sécurité et prévention des abus (intérêt légitime), amélioration du service à partir de statistiques agrégées (intérêt légitime). Aucune donnée n'est vendue ni utilisée pour de la publicité."]],
     ["Enregistrement des appels", ["La réceptionniste annonce en début d'appel qu'il peut être enregistré pour le suivi de la demande. Les enregistrements sont stockés dans un espace privé propre à chaque artisan et supprimés automatiquement après la durée choisie par l'artisan (180 jours par défaut, 1 an maximum)."]],
     ["Durées de conservation", ["Compte : durée de l'abonnement puis 90 jours. Factures et pièces comptables : 10 ans (Code de commerce). Devis non signés et prospects : 3 ans après le dernier contact. Journaux techniques : 12 mois maximum."]],
     ["Sous-traitants", [SUBS + ". Certains sont établis hors de l'Union européenne ; les transferts sont encadrés par les clauses contractuelles types de la Commission européenne ou le Data Privacy Framework."]],
-    ["Vos droits", ["Accès, rectification, effacement, limitation, opposition, portabilité : écrivez à " + E.dpo + ". Vous pouvez introduire une réclamation auprès de la CNIL (www.cnil.fr). Les clients d'un artisan s'adressent en priorité à cet artisan ; Akno l'aidera à répondre.", "Pour ne plus recevoir de SMS d'un artisan, répondez STOP."]],
+    ["Vos droits", ["Accès, rectification, effacement, limitation, opposition, portabilité : écrivez à " + contactRgpd() + ". Vous pouvez introduire une réclamation auprès de la CNIL (www.cnil.fr). Les clients d'un artisan s'adressent en priorité à cet artisan ; Akno l'aidera à répondre.", "Pour ne plus recevoir de SMS d'un artisan, répondez STOP."]],
+  ] },
+  // update70 · page publique exigée par Google Play (lien « suppression de compte » de la fiche Play)
+  "suppression-compte": { title: "Supprimer votre compte Akno", body: [
+    ["Depuis l'application (le plus rapide)", ["Ouvrez Akno, puis Réglages › Données › « Supprimer mon compte ». Confirmez en tapant SUPPRIMER : la suppression est immédiate."]],
+    ["Sans accès à l'application", ["Écrivez à " + contactRgpd() + " depuis l'adresse e-mail de votre compte, avec l'objet « Suppression de compte ». La demande est traitée sous 30 jours au plus, après vérification que vous êtes bien titulaire du compte."]],
+    ["Données supprimées", ["Votre compte et vos réglages ; vos appels, enregistrements audio et transcriptions ; vos clients, rendez-vous, relances, chantiers et fiches d'équipe ; vos devis non signés et brouillons de factures ; vos fichiers (logo, documents de conformité, photos) ; votre numéro Akno. L'abonnement en cours est résilié."]],
+    ["Données conservées", ["Les factures émises et les devis signés électroniquement sont conservés 10 ans (obligation comptable, art. L123-22 du Code de commerce, et preuve de signature), de façon sécurisée et sans accès au compte. Les journaux techniques sont effacés sous 12 mois au plus."]],
   ] },
   dpa: { title: "Accord de sous-traitance des données (DPA)", body: [
     ["Objet", ["Le présent accord, conclu en application de l'article 28 du RGPD, encadre les traitements réalisés par Akno (« le Sous-traitant ») pour le compte de l'artisan abonné (« le Responsable de traitement ») et fait partie intégrante des CGV."]],
@@ -47,7 +55,7 @@ export default function Legal({ doc }: { doc?: string }) {
   return <div className="min-h-[100dvh] bg-black text-white antialiased"><div className="mx-auto max-w-[720px] px-5 py-12">
     <Link to="/reception" className="text-[14px] text-white/50">← Akno</Link>
     <h1 className="mt-6 text-[30px] font-semibold tracking-[-0.03em]">{d.title}</h1>
-    <p className="mt-2 rounded-[12px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-3 py-2 text-[13px] text-white/75">Modèle à faire relire par un juriste avant mise en ligne. Version {CGV_VERSION}.</p>
+    <p className="mt-2 text-[13px] text-white/40">Version {CGV_VERSION}</p>
     {d.body.map(([h, ps]) => <section key={h} className="mt-8"><h2 className="text-[18px] font-semibold">{h}</h2>{ps.map((p, i) => <p key={i} className="mt-2 text-[15px] leading-relaxed text-white/75">{p}</p>)}</section>)}
     <nav className="mt-12 flex flex-wrap gap-4 border-t border-white/10 pt-6 text-[13.5px] text-white/50">{Object.entries(DOCS).map(([k, x]) => <Link key={k} to={`/${k}`}>{x.title}</Link>)}</nav>
   </div></div>

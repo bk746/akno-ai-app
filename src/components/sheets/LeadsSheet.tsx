@@ -3,13 +3,14 @@ import { Copy, Globe, Mail, Phone } from "lucide-react"
 import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, inp, tx, useC } from "../ui"
 import { supabase } from "../../lib/supabase"
 import { useProfile } from "../../lib/profile"
+import { webOrigin } from "../../lib/native"
 
 /* update47 · Demandes reçues par le formulaire du site (POST /api/lead). */
 type Lead = { id: string; nom: string | null; telephone: string | null; email: string | null; adresse: string | null; code_postal: string | null; ville: string | null; message: string | null; source: string | null; statut: string; notes: string | null; created_at: string }
 const ST: [string, string, string][] = [["nouveau", "Nouveau", AMBER], ["contacte", "Contacté", GREY], ["devis", "Devis envoyé", GREY], ["gagne", "Gagné", GREEN], ["perdu", "Perdu", RED]]
 const when = (iso: string) => new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })
 
-export function leadSnippet(key: string, origin = location.origin) {
+export function leadSnippet(key: string, origin = webOrigin()) {
   return `<form action="${origin}/api/lead" method="POST">
   <input type="hidden" name="lead_key" value="${key}">
   <input type="hidden" name="redirect" value="https://VOTRE-SITE.fr/merci">

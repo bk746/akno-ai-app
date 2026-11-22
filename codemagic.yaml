@@ -1,0 +1,69 @@
+# update70 · Builds stores sans Mac : iOS → TestFlight, Android → Play Console (test interne).
+# À brancher dans Codemagic (voir docs/STORES-GUIDE.md) :
+#   - intégration « App Store Connect » nommée  akno_asc  (clé API .p8, Issuer ID, Key ID)
+#   - keystore Android référencé  akno_keystore  (Code signing identities > Android keystores)
+#   - groupe de variables  google_play  contenant GCLOUD_SERVICE_ACCOUNT_CREDENTIALS (JSON du compte de service Play)
+#   - groupe de variables  akno_env  contenant les VITE_* publiques (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_LEGAL_*…)
+# Le numéro de version vient de package.json (npm run version:patch / version:build), synchronisé dans les projets natifs.
+workflows:
+  ios-testflight:
+    name: iOS → TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: akno_asc
+    environment:
+      groups: [akno_env]
+      node: 22
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.akno.app
+    scripts:
+      - name: Dépendances
+        script: npm ci
+      - name: Build web + synchro version
+        script: |
+          npm run build
+          npm run version:sync
+          npx cap sync ios
+      - name: Signature
+        script: xcode-project use-profiles
+      - name: Build IPA
+        script: xcode-project build-ipa --workspace ios/App/App.xcworkspace --scheme App
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        expire_build_submitted_for_review: true
+
+  android-internal:
+    name: Android → Play (test interne)
+    max_build_duration: 45
+    instance_type: linux_x2
+    environment:
+      groups: [akno_env, google_play]
+      node: 22
+      java: 21
+      android_signing:
+        - akno_keystore
+    scripts:
+      - name: Dépendances
+        script: npm ci
+      - name: Build web + synchro version
+        script: |
+          npm run build
+          npm run version:sync
+          npx cap sync android
+      - name: Build AAB signé
+        script: cd android && ./gradlew bundleRelease
+    artifacts:
+      - android/app/build/outputs/bundle/release/*.aab
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true

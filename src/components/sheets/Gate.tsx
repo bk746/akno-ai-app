@@ -7,6 +7,8 @@ import { CGV_VERSION } from "../../lib/legal"
 import { supabase } from "../../lib/supabase"
 import Offres from "../billing/Offres"
 import { hasLock } from "../../lib/lock"
+import { billingHidden } from "../../lib/native"
+import { NativeNoAccess } from "../billing/NativeAccess"
 
 /* update45 · Écrans plein écran : retour de paiement, mur de paiement (essai terminé), onboarding, nouvelles CGV.
    update46 · Le mur de paiement devient le parcours « Choisissez votre offre » (billing/Offres.tsx), affiché AVANT l'app
@@ -44,6 +46,8 @@ export default function Gate() {
     const uid: string = (window as any).__aknoUid || "" // eslint-disable-line @typescript-eslint/no-explicit-any
     if (uid && !hasLock(uid) && !localStorage.getItem(`akno-lock-asked:${uid}`)) dispatchEvent(new Event("akno-lock-setup"))
   }, [blocked])
+  // update70 · app native : jamais de choix d'offre ni de paiement, écran neutre si le compte n'a pas d'accès
+  if (billingHidden && (offers || needsPlan || (!!e && e.billingEnabled && !e.access))) return <NativeNoAccess />
   if (offers || needsPlan) return <Offres mode="gate" returnSession={ret || undefined} onDone={() => { setOffers(false); setRet("") }} />
   if (e && e.billingEnabled && !e.access) return <Full>
     <div className="text-[26px] font-semibold tracking-[-0.03em]">Paiement en échec</div>

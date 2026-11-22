@@ -77,6 +77,8 @@ async function persistSubscription(sub: PushSubscription) {
 }
 
 export async function enablePush(): Promise<{ ok: boolean; error?: string }> {
+  // update70 · app native : notifications natives (APNs / FCM) prévues dans une prochaine version
+  if ((window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()) return { ok: false, error: "Les notifications arrivent dans une prochaine version de l'app." }
   if (isIos() && !isStandalone()) {
     return { ok: false, error: "Ajoute Akno à l’écran d’accueil depuis Safari" }
   }

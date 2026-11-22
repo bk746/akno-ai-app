@@ -98,13 +98,26 @@ function quotasFor(plan: PlanId, reception: boolean) {
   }
 }
 
+/** update70 · Accès bêta (TestFlight / test interne Play) sans écriture en base :
+    AKNO_BETA_ACCESS = liste d'e-mails séparés par des virgules (ou « * » pour tous les comptes, à éviter en production).
+    Un compte listé a tous les droits (offre Clients + Réceptionniste), comme un plan_override. */
+export function betaAccess(email?: string | null, raw = env("AKNO_BETA_ACCESS") || "") {
+  const list = raw.split(/[\s,;]+/).map(x => x.trim().toLowerCase()).filter(Boolean)
+  if (!list.length) return false
+  if (list.includes("*")) return true
+  return !!email && list.includes(email.trim().toLowerCase())
+}
+
 /** Lit l'abonnement (table protégée, lecture autorisée à l'artisan) et calcule les droits. */
 export async function loadEntitlements(sb: SupabaseClient, artisanId: string): Promise<Entitlements> {
   const [{ data: sub }, { data: artisan }] = await Promise.all([
     sb.from("subscriptions").select("plan, reception_option, status, trial_end, current_period_end, cancel_at_period_end, plan_override, override_reception, stripe_customer_id").eq("artisan_id", artisanId).maybeSingle(),
-    sb.from("artisans").select("created_at").eq("id", artisanId).maybeSingle(),
+    sb.from("artisans").select("created_at, email").eq("id", artisanId).maybeSingle(),
   ])
-  return computeEntitlements((sub || null) as SubRow | null, (artisan as { created_at?: string } | null)?.created_at)
+  const a = artisan as { created_at?: string; email?: string | null } | null
+  let row = (sub || null) as SubRow | null
+  if (!asPlan(row?.plan_override) && betaAccess(a?.email)) row = { ...(row || {}), plan_override: "clients", override_reception: true }
+  return computeEntitlements(row, a?.created_at)
 }
 
 export function can(e: Entitlements, f: Feature) {

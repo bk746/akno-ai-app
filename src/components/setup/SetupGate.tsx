@@ -3,6 +3,7 @@
    et un mini-assistant en 2 ou 3 étapes. Une fois terminé : réglages enregistrés dans la fiche artisan
    (champs existants), page marquée configurée côté serveur (lib/setup.ts), le flou s'efface.
    Les comptes qui ont déjà de l'activité sur la page (appels, RDV, relances, devis) ne sont pas bloqués. */
+import PageSkeleton from "../PageSkeleton"
 import { Suspense, lazy, useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -74,6 +75,7 @@ export default function SetupGate({ page, loading, mobile, children, active = tr
       style={{ opacity: hidden ? 0 : 1, filter: locked ? "blur(18px) saturate(.7)" : reveal ? "blur(0px) saturate(1)" : undefined, transition: reduce ? "none" : "filter .9s cubic-bezier(.22,1,.36,1), opacity .35s ease", userSelect: locked ? "none" : undefined }}>
       {children}
     </div>
+    {hidden && k && <PageSkeleton mobile={mobile} />}
     <AnimatePresence>{locked && k && <motion.div key="setup-ov" className="absolute inset-0 z-20 flex items-center justify-center px-5"
       style={mobile ? { paddingTop: "calc(var(--sat) + 16px)", paddingBottom: "calc(96px + max(var(--sab) - 10px, 12px))" } : { paddingBottom: 24 }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: .45, ease: EASE } }} transition={{ duration: .35, ease: EASE }}>

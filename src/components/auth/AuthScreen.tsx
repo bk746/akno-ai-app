@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react"
 import { AnimatePresence, MotionConfig, motion, useAnimate, useReducedMotion } from "motion/react"
 import { Eye, EyeOff, MailCheck } from "lucide-react"
 import { supabase } from "../../lib/supabase"
+import { authRedirect, isRealNative, openOAuth, webOrigin } from "../../lib/native"
 import { Blob } from "../ui"
 import { EASE, Ghost, Spinner, Strength } from "./fields"
 import { authErrorFr } from "./authErrors"
@@ -19,11 +20,12 @@ type Alert = { t: string; action?: { l: string; on: () => void } } | null
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const RESEND_S = 45
 const ENV = (import.meta.env || {}) as Record<string, string | undefined>
-/** update61 : boutons toujours affichés (maquette) ; s'ils ne sont pas encore activés dans Supabase, un message clair s'affiche au clic.
-    Mettre VITE_AUTH_GOOGLE=0 / VITE_AUTH_APPLE=0 pour les masquer. */
-export const SHOW: Record<Provider, boolean> = { google: ENV.VITE_AUTH_GOOGLE !== "0", apple: ENV.VITE_AUTH_APPLE !== "0" }
+/** update70 : boutons MASQUÉS par défaut (web et app native) tant que les providers ne sont pas activés dans Supabase.
+    Mettre VITE_AUTH_GOOGLE=1 / VITE_AUTH_APPLE=1 (Vercel + build natif) une fois Google / Apple configurés.
+    App Store 4.8 : si Google est proposé, proposer aussi Apple (activer les deux ensemble). */
+export const SHOW: Record<Provider, boolean> = { google: ENV.VITE_AUTH_GOOGLE === "1", apple: ENV.VITE_AUTH_APPLE === "1" }
 const NAME: Record<Provider, string> = { google: "Google", apple: "Apple" }
-const home = () => location.origin + "/"
+const home = () => webOrigin() + "/"
 
 /** Le provider est-il activé dans Supabase ? (GET /auth/v1/settings, public). null = inconnu (réseau). */
 async function providerEnabled(p: Provider): Promise<boolean | null> {
@@ -77,7 +79,9 @@ export default function AuthScreen({ initial = "signup", onForgot }: { initial?:
     setBusy(p); setAlert(null)
     const on = await providerEnabled(p)
     if (on === false) { setBusy(""); fail({}, { t: `La connexion avec ${NAME[p]} n'est pas encore activée sur Akno. Continuez avec votre e-mail en attendant.`, action: { l: "Continuer avec un e-mail", on: () => { switchMode("signup"); go("email") } } }); return }
-    const { error } = await supabase.auth.signInWithOAuth({ provider: p, options: { redirectTo: home() } })
+    // update70 · app native : la page Google / Apple s'ouvre dans le navigateur système et revient par com.akno.app://auth/callback
+    const { data, error } = await supabase.auth.signInWithOAuth({ provider: p, options: { redirectTo: authRedirect(), skipBrowserRedirect: isRealNative } })
+    if (!error && isRealNative && data?.url) { try { await openOAuth(data.url) } finally { setBusy("") } return }
     if (error) { setBusy(""); fail({}, { t: /not enabled|unsupported provider/i.test(error.message) ? `La connexion avec ${NAME[p]} n'est pas encore activée sur Akno.` : authErrorFr(error, "login") }) }
     // Sinon : le navigateur part chez Google / Apple, puis revient sur l'app connecté.
   }

@@ -1,3 +1,4 @@
+import { nativeCors } from "./_lib/http.js"
 import { createClient } from "@supabase/supabase-js"
 import { can, loadEntitlements, upgradeError } from "./_lib/plans.js"
 import { consume, dayKey, monthKey, rateLimit, usage } from "./_lib/limits.js"
@@ -105,6 +106,7 @@ type Res = { status: (n: number) => Res; json: (b: unknown) => void; setHeader: 
 
 export default async function handler(req: { method?: string; headers: Record<string, string | string[] | undefined> }, res: Res) {
   res.setHeader("Cache-Control", "no-store")
+  nativeCors(req.headers, res) // update70 · app native (Capacitor)
   if (req.method === "OPTIONS") { res.status(204).end(); return }
   if (req.method !== "POST") {
     res.status(405).json({ error: "Méthode non autorisée." })

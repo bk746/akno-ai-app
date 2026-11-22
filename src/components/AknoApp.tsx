@@ -1,3 +1,4 @@
+import PageSkeleton from "./PageSkeleton"
 import DevisPaper from "./DevisPaper"
 import VoiceCall from "./VoiceCall"
 import { formatVoiceTimings, isVoiceDebugEnabled, setVoiceDebugEnabled, subscribeVoiceTimings } from "../lib/voice/timing"
@@ -9,6 +10,8 @@ import { Lock as LockIco } from "lucide-react"
 import { useProfile } from "../lib/profile"
 import EntrepriseSheet from "./sheets/EntrepriseSheet"
 import AbonnementSheet from "./sheets/AbonnementSheet"
+import DeleteAccountSheet from "./sheets/DeleteAccountSheet"
+import { APP_BUILD, APP_VERSION } from "../lib/version"
 import ConformiteSheet from "./sheets/ConformiteSheet"
 import LeadsSheet from "./sheets/LeadsSheet"
 import { AgendaCalSheet, ReceptionSheet, SmsSheet } from "./sheets/ReglagesSheets"
@@ -53,6 +56,7 @@ import { clientsState, loadClients, requestNewClient, requestOpenClient, useClie
 // update57 · configurateur « Ma réceptionniste » (chargé à la demande)
 const ReceptionnisteStudio = lazyPage(() => import("./reception/ReceptionnisteStudio"))
 import UpdateButton from "./UpdateButton"
+import { billingHidden, isNative, webOrigin } from "../lib/native"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
 import MobileNav, { type CreateKind } from "./nav/MobileNav"
@@ -194,8 +198,8 @@ function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt 
   const foot = null
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0">{bodyKey === undefined ? <QA items={actions} /> : swap(a => <QA items={a} />, "")}</div></motion.div>{mid && <motion.div variants={rise} className="mt-8">{mid}</motion.div>}{bodyKey === undefined ? <div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div> : swap((_a, c) => c, "mt-10 grid grid-cols-2 items-start gap-6")}{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-    <div aria-hidden className="shrink-0" style={{ height: "calc(var(--sat) + 2px)" }} />
-    <MobileHead k={k} />
+    {/* update70 · en-tête fixe et translucide (façon Revolut) : le contenu défile dessous, rien n'est coupé */}
+    <div data-mobile-head className="sticky top-0 z-20 shrink-0 bg-black/55 backdrop-blur-[20px] backdrop-saturate-150" style={{ paddingTop: "calc(var(--sat) + 2px)" }}><MobileHead k={k} /></div>
     <motion.div variants={rise} className="mt-6 flex flex-col items-center px-5">{LB}{H}</motion.div>
     {mid && <motion.div variants={rise} className="mt-6 px-5">{mid}</motion.div>}
     {bodyKey === undefined ? <><motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
@@ -665,7 +669,7 @@ function SetP() {
   useEffect(() => subscribeVoiceTimings(() => setVoiceLog(formatVoiceTimings())), [])
   const bioTg = async () => { if (!lk) { toast("Créez d'abord un code d'accès"); return } if (bio) { disableBio(uidL); setBio(false); toast("Face ID désactivé") } else { try { await enableBio(uidL, (window as any).__aknoEmail || ""); setBio(true); toast("Face ID activé") } catch { toast("Face ID non activé") } } }
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
-  const iosHint = isIos() && !isStandalone()
+  const iosHint = !isNative && isIos() && !isStandalone() // update70 : sans objet dans l'app native
   const pushOn = !!st.push && typeof Notification !== "undefined" && Notification.permission === "granted"
   const togglePush = async () => {
     if (pushBusy) return
@@ -694,9 +698,9 @@ function SetP() {
       : { ok: false, text: res.error || "Le test a échoué." })
   }
   const acc = useAccount(), ent = acc?.entitlements
-  const planL = !ent ? "…" : ent.status === "free" ? "Accès ouvert" : ent.status === "trial" ? `Essai · ${Math.max(0, Math.ceil((new Date(ent.trialEndsAt || Date.now()).getTime() - Date.now()) / 864e5))} j` : ent.status === "active" ? (ent.plan === "clients" ? "Clients + Bureau" : "Bureau") + (ent.reception ? " + Récept." : "") : ent.status === "past_due" ? "Paiement en échec" : ent.status === "none" ? "Choisir une offre" : "Essai terminé"
+  const planL = !ent ? "…" : ent.status === "free" ? "Accès ouvert" : ent.status === "trial" ? `Essai · ${Math.max(0, Math.ceil((new Date(ent.trialEndsAt || Date.now()).getTime() - Date.now()) / 864e5))} j` : ent.status === "active" ? (ent.plan === "clients" ? "Clients + Bureau" : "Bureau") + (ent.reception ? " + Récept." : "") : ent.status === "past_due" ? "Paiement en échec" : ent.status === "none" ? (billingHidden ? "Accès non activé" : "Choisir une offre") : (billingHidden ? "Accès non activé" : "Essai terminé")
   const support = (import.meta.env.VITE_SUPPORT_URL as string | undefined) || ((import.meta.env.VITE_SUPPORT_EMAIL as string | undefined) ? `mailto:${import.meta.env.VITE_SUPPORT_EMAIL}` : "")
-  const help = () => { if (support) window.open(support, "_blank", "noopener") }
+  const help = () => { if (!support) return; if (isNative && support.startsWith("mailto:")) location.href = support; else window.open(support, "_blank", "noopener") }
   const { p: prof, save: saveProf } = useProfile()
   const cycR = async () => { const opts = [[3, 7], [2, 5, 10], [7, 14], [3, 7, 15]], cur = JSON.stringify(relDelays(prof?.relance_delais)), i = opts.findIndex(o => JSON.stringify(o) === cur), nx = opts[(i + 1) % opts.length]; const e = await saveProf({ relance_delais: nx }); toast(e || `Relances : ${relDelaysL(nx)}`) }
   const hor = prof?.horaires && typeof prof.horaires === "object" ? Object.values(prof.horaires as Record<string, unknown>).filter(Boolean).length : 0
@@ -712,16 +716,19 @@ function SetP() {
   return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u={`/ ${mine.length}`} />} sub={`agents actifs · ${planL}`} actions={[
     { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => recLock ? openUpgrade("reception") : modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col><Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
-      <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} /><Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} /></List>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</Section>
+      <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} />{isNative ? <Row label="Notifications sur le téléphone" lead={<Ic I={Bell} />} t="Notifications sur le téléphone" s="Arrivent dans une prochaine version de l'app" /> : <Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} />}</List>{!isNative && <>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}<Btn className="mt-3 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Tester les notifications"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</>}</Section>
       <Section t="Gestion"><List><S first I={Building2} l="Entreprise" v={missingLegal("facture").length ? "À compléter" : "Complet"} onClick={() => modal({ kind: "entreprise" })} /><S I={Users} l="Clients" v="" onClick={() => go("cl")} /><S I={HardHat} l="Équipe" v={equipeN ? `${equipeN} membre${equipeN > 1 ? "s" : ""}` : ""} onClick={() => go("eq")} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
-      <Section t="Compte"><List><S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section></Col>
+      <Section t="Compte"><List>{!billingHidden && <S first I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />}{support && <S I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} />{canBio && <Row label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section>
+      {/* update70 · suppression du compte (App Store 5.1.1(v), Google Play) */}
+      <Section t="Données"><List><Row first label="Supprimer mon compte" onClick={() => modal({ kind: "deleteAccount" })} lead={<Circ c={RED}><Trash2 size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Supprimer mon compte</span>} s="Efface votre compte et vos données" r={<Chev />} /></List></Section>
+      <p data-testid="app-version" className="mt-1 px-1 pb-2 text-center text-[12px] text-white/30">Version {APP_VERSION} (build {APP_BUILD})</p></Col>
     <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><Row first label="Ma réceptionniste" onClick={() => modal({ kind: "studio" })} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Ma réceptionniste" s={`Voix ${voiceInfo(prof?.reception_config?.voice).name} · script, prestations, FAQ`} r={<Chev />} /><S I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={Package} l="Mes prestations" v={presta.ready ? String(presta.items.length) : "…"} onClick={() => modal({ kind: "prestations" })} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={ImageIcon} l="Logo" v={prof?.logo_path ? "Ajouté" : "À ajouter"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /></List></Section>
       <Section t="Avis clients"><List>{cliLock ? <Row first label="Demandes d'avis Google" onClick={() => openUpgrade("clients")} lead={<Ic I={Sparkles} />} t="Demandes d'avis Google" s="Automatiques après chaque chantier" r={<LockTag />} /> : <S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} />}</List></Section>
-      <Section t="Informations légales"><List>{[["CGV", "/cgv"], ["Mentions légales", "/mentions-legales"], ["Confidentialité", "/confidentialite"], ["Sous-traitance des données (DPA)", "/dpa"]].map(([l, h], i) => <S key={h} first={!i} I={FileText} l={l} v="" onClick={() => window.open(h, "_blank", "noopener")} />)}</List></Section></Col>
+      <Section t="Informations légales"><List>{[["CGV", "/cgv"], ["Mentions légales", "/mentions-legales"], ["Confidentialité", "/confidentialite"], ["Sous-traitance des données (DPA)", "/dpa"]].map(([l, h], i) => <S key={h} first={!i} I={FileText} l={l} v="" onClick={() => isNative ? location.assign(h) : window.open(h, "_blank", "noopener")} />)}</List></Section></Col>
   </Shell>
 }
 
@@ -941,7 +948,7 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     {dv.status === "val" && <div className="mb-3 grid grid-cols-2 gap-2"><Btn primary c={A.dev.c} disabled={factBusy} onClick={() => toFacture("facture")}><Receipt size={16} />{factBusy ? "…" : "Créer la facture"}</Btn><Btn disabled={factBusy} onClick={() => toFacture("acompte")}>Acompte</Btn><Btn className="col-span-2" disabled={factBusy} onClick={() => toFacture("situation")}>Situation d'avancement</Btn></div>}
     <DevisPaper d={doc} sig={signed || undefined} />
     <div className="mt-3"><Btn className="w-full" onClick={download}><Download size={15} strokeWidth={1.5} />{signed ? "PDF signé + certificat" : "Télécharger PDF"}</Btn></div>
-    {dv.token && !draft && <div className="mt-2"><Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${location.origin}/accept/${dv.token}`); toast("Lien de signature copié") }}>Copier le lien de signature</Btn></div>}
+    {dv.token && !draft && <div className="mt-2"><Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${webOrigin()}/accept/${dv.token}`); toast("Lien de signature copié") }}>Copier le lien de signature</Btn></div>}
     {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
   </Sheet>
 }
@@ -1046,7 +1053,8 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
   if (m.kind === "entreprise") return <EntrepriseSheet close={close} />
-  if (m.kind === "abonnement") return <AbonnementSheet close={close} />
+  if (m.kind === "abonnement") return billingHidden ? null : <AbonnementSheet close={close} />
+  if (m.kind === "deleteAccount") return <DeleteAccountSheet close={close} />
   if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet close={close} openId={d?.id} startNew={!!d?.create} clients={ctInfos(s)} /></Suspense>
   if (m.kind === "conformite") return <ConformiteSheet close={close} />
   if (m.kind === "leads") return rr.clients ? <LeadsSheet close={close} /> : null
@@ -1192,6 +1200,8 @@ const ORDER: Partial<Record<string, number>> = { rec: 0, ag: 1, ch: 2, dev: 3, e
 const isPushP = (p: string) => p === "set" || p === "rel"
 type PT = { kind: "fade" | "push" | "pop"; dir: number }
 const OPA = { duration: .24, ease: [.22, 1, .36, 1] as const }
+/** update70 · fondu enchaîné des onglets : court et sans déplacement (la page entrante, opaque, se pose sur l'ancienne) */
+const TAB_FADE = { duration: .18, ease: [.25, .1, .25, 1] as const }
 /* update69 · Pages conservées (Réception, Agenda, Chantiers, Devis | Factures) : une fois ouvertes (ou préparées au repos),
    elles restent montées et sont seulement masquées. Changer d'onglet ne recrée donc plus la page : aucun rendu lourd au
    moment du tap, la carte des chantiers n'est pas recréée, chaque onglet garde sa position de défilement.
@@ -1212,7 +1222,7 @@ function PageSlot({ k, page, active, base, setEl }: { k: string; page: P; active
   const ref = useMemo(() => (n: HTMLDivElement | null) => setEl(k, n), [k, setEl])
   return <div ref={ref} data-page={active ? k : undefined} data-slot={k} aria-hidden={active ? undefined : true} inert={!active}
     className="absolute inset-0 flex flex-col bg-black">
-    <C.Provider value={value}><SlotActive.Provider value={active}><Suspense fallback={<div className="absolute inset-0 bg-black" />}>
+    <C.Provider value={value}><SlotActive.Provider value={active}><Suspense fallback={<PageSkeleton mobile={!base.desk} />}>
       <SetupGate page={page} loading={base.loading} mobile={!base.desk} active={active}>{el}</SetupGate>
     </Suspense></SlotActive.Provider></C.Provider>
   </div>
@@ -1262,7 +1272,7 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
     const reduce = prefersReduced()
     const zIn = t.kind === "pop" && !reduce ? "1" : "2", zOut = zIn === "2" ? "1" : "2"
     // état de départ posé immédiatement (aucune image de la nouvelle page à sa place finale avant l'animation)
-    const fromIn: Record<string, string> = reduce ? { opacity: "0" } : t.kind === "push" ? { transform: "translateX(100%)" } : t.kind === "pop" ? { transform: "translateX(-28%)", opacity: ".55" } : { transform: `translateX(${t.dir * 22}px)`, opacity: "0" }
+    const fromIn: Record<string, string> = reduce ? { opacity: "0" } : t.kind === "push" ? { transform: "translateX(100%)" } : t.kind === "pop" ? { transform: "translateX(-28%)", opacity: ".55" } : { opacity: "0" }
     elIn.style.visibility = ""; elIn.style.zIndex = zIn; elIn.style.transform = fromIn.transform || ""; elIn.style.opacity = fromIn.opacity || ""
     if (!reduce && (t.kind === "push")) elIn.style.boxShadow = PAGE_SHADOW
     if (elOut) { elOut.style.visibility = ""; elOut.style.zIndex = zOut; if (!reduce && t.kind === "pop") elOut.style.boxShadow = PAGE_SHADOW }
@@ -1274,7 +1284,8 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
       if (reduce) list.push(animate(elIn, { opacity: [0, 1] }, { duration: .26, ease: [.22, 1, .36, 1] }))
       else if (t.kind === "push") { list.push(animate(elIn, { x: ["100%", "0%"] }, xT)); if (elOut) list.push(animate(elOut, { x: ["0%", "-28%"], opacity: [1, .55] }, { x: xT, opacity: xT })) }
       else if (t.kind === "pop") { list.push(animate(elIn, { x: ["-28%", "0%"], opacity: [.55, 1] }, { x: xT, opacity: xT })); if (elOut) list.push(animate(elOut, { x: ["0%", "100%"] }, xT)) }
-      else { list.push(animate(elIn, { x: [t.dir * 22, 0], opacity: [0, 1] }, { x: xT, opacity: OPA })); if (elOut) list.push(animate(elOut, { x: [0, t.dir * -12] }, xT)) }
+      // update70 · onglets : remplacement sur place, fondu court (≈180 ms), sans glissement ni chevauchement décalé (façon Revolut)
+      else list.push(animate(elIn, { opacity: [0, 1] }, TAB_FADE))
       // opacité finale posée tout de suite (l'animation à images-clés explicites prime pendant qu'elle tourne) : sur WebKit, la fin
       // de l'animation laissait réapparaître l'opacité de départ une image avant le nettoyage → éclair de l'ancienne page
       elIn.style.opacity = ""

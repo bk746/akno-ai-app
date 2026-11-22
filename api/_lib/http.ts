@@ -95,3 +95,21 @@ export function readRawNode(req: { on?: (ev: string, cb: (x?: unknown) => void) 
     req.on("error", reject)
   })
 }
+
+/* update70 · App native (Capacitor) : le build embarqué appelle l'API depuis capacitor://localhost (iOS)
+   ou https://localhost (Android). On autorise UNIQUEMENT ces origines (+ NATIVE_ORIGINS en option).
+   Aucune incidence sur l'authentification : chaque appel reste vérifié par le jeton Bearer Supabase (pas de cookie). */
+const NATIVE_ORIGINS = ["capacitor://localhost", "https://localhost", "http://localhost", "ionic://localhost"]
+export function allowedNativeOrigin(origin: string, extra = env("NATIVE_ORIGINS") || "") {
+  const list = [...NATIVE_ORIGINS, ...extra.split(/[\s,]+/).filter(Boolean)]
+  return list.includes(origin) ? origin : ""
+}
+export function nativeCors(h: Headers | undefined, res: { setHeader: (k: string, v: string) => void }) {
+  const o = allowedNativeOrigin(header(h, "origin"))
+  if (!o) return
+  res.setHeader("Access-Control-Allow-Origin", o)
+  res.setHeader("Vary", "Origin")
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
+  res.setHeader("Access-Control-Max-Age", "600")
+}

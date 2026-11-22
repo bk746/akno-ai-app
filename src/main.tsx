@@ -8,13 +8,15 @@ import AknoApp from "./components/AknoApp"
 import AcceptDevis from "./components/AcceptDevis"
 import { initMonitoring } from "./lib/monitoring"
 import { initMobile } from "./lib/mobile"
+import { initNative } from "./lib/native"
 
 const Legal = lazy(() => import("./components/Legal"))
 const DossierPublic = lazy(() => import("./components/DossierPublic"))
-const LEGAL = ["cgv", "mentions-legales", "confidentialite", "dpa"]
+const LEGAL = ["cgv", "mentions-legales", "confidentialite", "dpa", "suppression-compte"] // update70 : page publique de suppression de compte (Google Play)
 const Lazy = ({ children }: { children: React.ReactNode }) => <Suspense fallback={<div className="fixed inset-0 bg-black" />}>{children}</Suspense>
 initMonitoring()
 initMobile()
+initNative() // update70 · app iOS / Android (Capacitor)
 
 const PAGES = ["reception", "agenda", "relance", "devis", "parametres", "factures", "chantiers", "equipe", "clients"] // update62 : onglets Factures et Chantiers
 

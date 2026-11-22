@@ -66,7 +66,8 @@ export function recoverChunkError() {
 
 let started = false
 export function initAppUpdate() {
-  if (started || typeof window === "undefined") return
+  // update70 · app native : le code est embarqué dans l'app (mises à jour via les stores), pas de /version.json local
+  if (started || typeof window === "undefined" || (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()) return
   started = true
   // On ne masque l'erreur que si on recharge ; sinon elle remonte jusqu'à l'écran « nouvelle version ».
   window.addEventListener("vite:preloadError", e => { if (recoverChunkError()) e.preventDefault() })

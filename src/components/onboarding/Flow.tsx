@@ -18,6 +18,8 @@ import { Blob } from "../ui"
 import { EASE, Field, Ghost, Spinner, Submit } from "../auth/fields"
 import FlowShell, { AlertBox, FlowSteps } from "../auth/FlowShell"
 import Offres from "../billing/Offres"
+import { billingHidden } from "../../lib/native"
+import { NativeNoAccess } from "../billing/NativeAccess"
 import { MButton, MChoice, MInput, MScreen, MSub, MTitle } from "./Mobile"
 import { LockSetup } from "../Lock"
 
@@ -61,7 +63,8 @@ export default function Flow({ ses, children }: { ses: Session; children: ReactN
       {/* opacité seulement : un transform ici casserait les écrans en position fixe (offre, code) */}
       <motion.div key={step} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .25, ease: EASE }}>
         {step === "vous" && <Vous p={p} ses={ses} />}
-        {step === "offre" && <Offres mode="gate" flow returnSession={ret || undefined} onDone={() => setOfferOpen(false)} />}
+        {step === "offre" && billingHidden && <NativeNoAccess />}
+        {step === "offre" && !billingHidden && <Offres mode="gate" flow returnSession={ret || undefined} onDone={() => setOfferOpen(false)} />}
         {step === "entreprise" && p && <Entreprise p={p} />}
         {step === "code" && <LockSetup flow uid={uid} email={ses.user.email || ""} onDone={() => { try { localStorage.setItem(`akno-lock-asked:${uid}`, "1") } catch { /* ignore */ } setLockDone(true) }} />}
       </motion.div>

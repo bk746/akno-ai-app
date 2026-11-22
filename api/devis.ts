@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { adminClient, devisAcceptUrl, devisEmailHtml, env, factureEmailHtml, looksLikeEmail, reminderDelays, replyToFor, scheduleDevisReminders, sendResend, textToHtml } from "./_lib/mail.js"
 import { notifyArtisan } from "./_lib/push.js"
-import { authed as authSession, isResult } from "./_lib/http.js"
+import { authed as authSession, isResult, nativeCors } from "./_lib/http.js"
 import { can, loadEntitlements, upgradeError, type Entitlements } from "./_lib/plans.js"
 import { consume, monthKey, rateLimit } from "./_lib/limits.js"
 import { reportError } from "./_lib/monitoring.js"
@@ -540,6 +540,7 @@ type Res = { status: (n: number) => Res; json: (b: unknown) => void; setHeader: 
 
 export default async function handler(req: { method?: string; headers: Record<string, string | string[] | undefined>; body?: unknown }, res: Res) {
   res.setHeader("Cache-Control", "no-store")
+  nativeCors(req.headers, res) // update70 · app native (Capacitor)
   if (req.method === "OPTIONS") { res.status(204).end(); return }
   if (req.method !== "POST") { res.status(405).json({ error: "Méthode non autorisée." }); return }
   const raw = req.headers.authorization ?? req.headers.Authorization

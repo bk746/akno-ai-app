@@ -12,6 +12,8 @@ import { EASE, Spinner } from "../auth/fields"
 import { api, reloadAccount, useRights, type UpgradeKind } from "../../lib/accountApi"
 import { OFFERS, RECEPTION, TVA, dateFr, eur, yearly, type Interval } from "../../lib/offers"
 import ModalSheet from "../sheet/ModalSheet"
+import { billingHidden } from "../../lib/native"
+import { NativeNotIncluded, NativeReceptionOff } from "./NativeAccess"
 
 type Preview = { kind: UpgradeKind; interval: Interval; trialing: boolean; trialEnd: string | null; periodEnd: string | null; current: number; next: number; added: number; proration: number; taxPct: number }
 
@@ -32,7 +34,8 @@ const c2e = (c: number) => c / 100
 
 /** Cadenas discret « Offre Clients » affiché à droite d'une ligne de réglages. */
 export const LockTag = ({ children = "Offre Clients" }: { children?: ReactNode }) =>
-  <span className="inline-flex h-[24px] items-center gap-1.5 whitespace-nowrap rounded-full bg-white/[.06] px-2.5 text-[12px] font-medium text-white/60"><Lock size={11} strokeWidth={2} aria-hidden />{children}</span>
+  // update70 · app native : aucune mention d'offre ni d'achat
+  <span className="inline-flex h-[24px] items-center gap-1.5 whitespace-nowrap rounded-full bg-white/[.06] px-2.5 text-[12px] font-medium text-white/60"><Lock size={11} strokeWidth={2} aria-hidden />{billingHidden ? "Non incluse" : children}</span>
 
 /* ---------------- Page Réception sans l'option ---------------- */
 const FEATS = [
@@ -42,7 +45,11 @@ const FEATS = [
   { I: FileText, t: "Prépare le devis", d: "Un brouillon à partir de l'appel, prêt à valider." },
 ]
 
-export function ReceptionLocked({ desk, calls, onCalls }: { desk: boolean; calls: number; onCalls: () => void }) {
+export function ReceptionLocked(props: { desk: boolean; calls: number; onCalls: () => void }) {
+  if (billingHidden) return <NativeReceptionOff {...props} /> // update70 · app native : ni prix ni bouton d'achat
+  return <ReceptionLockedWeb {...props} />
+}
+function ReceptionLockedWeb({ desk, calls, onCalls }: { desk: boolean; calls: number; onCalls: () => void }) {
   const r = useRights(), reduce = useReducedMotion()
   const [p, setP] = useState<Preview | null>(null)
   useEffect(() => { if (r.canUpgrade) void fetchPreview("reception").then(x => x.p && setP(x.p)) }, [r.canUpgrade])
@@ -151,5 +158,7 @@ function Sheet({ kind, close }: { kind: UpgradeKind; close: () => void }) {
 export function UpgradeHost() {
   const [k, setK] = useState<UpgradeKind | null>(null)
   useEffect(() => { const f = (e: Event) => setK((e as CustomEvent<UpgradeKind>).detail); addEventListener("akno-upgrade", f); return () => removeEventListener("akno-upgrade", f) }, [])
+  // update70 · app native : feuille neutre, sans aperçu de prix ni confirmation d'achat
+  if (billingHidden) return createPortal(<AnimatePresence>{k && <NativeNotIncluded key={k} what={k === "reception" ? "Réceptionniste IA" : "Offre Clients"} close={() => setK(null)} />}</AnimatePresence>, document.body)
   return createPortal(<AnimatePresence>{k && <Sheet key={k} kind={k} close={() => setK(null)} />}</AnimatePresence>, document.body)
 }

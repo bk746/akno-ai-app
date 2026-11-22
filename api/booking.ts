@@ -1,3 +1,4 @@
+import { nativeCors } from "./_lib/http.js"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { adminClient } from "./_lib/mail.js"
 import { bridgeArtisan } from "./_lib/twilioVoice.js"
@@ -464,6 +465,7 @@ type Res = { status: (n: number) => Res; json: (b: unknown) => void; setHeader: 
 
 export default async function handler(req: { method?: string; headers: Record<string, string | string[] | undefined>; body?: unknown }, res: Res) {
   res.setHeader("Cache-Control", "no-store")
+  nativeCors(req.headers, res) // update70 · app native (Capacitor)
   if (req.method === "OPTIONS") { res.status(204).end(); return }
   if (req.method !== "POST") { res.status(405).json({ error: "Méthode non autorisée." }); return }
   const raw = req.headers.authorization ?? req.headers.Authorization

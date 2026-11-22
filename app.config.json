@@ -1,0 +1,6 @@
+{
+  "appId": "com.akno.app",
+  "appName": "Akno",
+  "urlScheme": "com.akno.app",
+  "apiOrigin": "https://akno-ai-app-v2.vercel.app"
+}

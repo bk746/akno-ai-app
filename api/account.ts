@@ -1,5 +1,5 @@
 import { adminClient, appUrl, env } from "./_lib/mail.js"
-import { authed, header, isResult, parseBody, type ApiResult, type Headers, type Json, type Req, type Res } from "./_lib/http.js"
+import { authed, header, isResult, parseBody, type ApiResult, type Headers, type Json, type Req, type Res, nativeCors } from "./_lib/http.js"
 import { billingEnabled, can, loadEntitlements, PLAN_LABEL, TRIAL_DAYS, upgradeError, type PlanId } from "./_lib/plans.js"
 import { consume, dayKey, monthKey, rateLimit } from "./_lib/limits.js"
 import { annualAvailable, priceFor, priceIds, stripe, STRIPE_VERSION_ELEMENTS, type Interval } from "./_lib/stripe.js"
@@ -8,6 +8,7 @@ import { upgradeSubscription } from "./_lib/upgrade.js"
 import { sendSmsMetered, smsConfigured } from "./_lib/sms.js"
 import { reportError } from "./_lib/monitoring.js"
 import { handleEquipeInvite } from "./_lib/equipe.js"
+import { deleteAccount } from "./_lib/deleteAccount.js"
 
 /* update45 · compte artisan : abonnement Stripe, réglages sensibles (clé Cal.com), recherche SIRET,
    acceptation des CGV, état d'usage. Une seule fonction Vercel pour rester sous la limite du plan. */
@@ -336,6 +337,12 @@ export async function handleAccount(authorization?: string, body?: unknown, head
       const r = await sendSmsMetered({ artisanId: userId, to, body: "Akno : ceci est un SMS de test. Vos SMS clients sont prêts.", kind: "test", sender: a?.sms_sender || a?.entreprise_nom || a?.nom_entreprise }, ent.quotas.sms)
       return r.ok ? { status: 200, body: { ok: true } } : { status: r.skipped ? 503 : 502, body: { error: r.error } }
     }
+    if (action === "delete_account") { // update70 · suppression du compte (App Store / Google Play)
+      if (!await rateLimit(userId, "delete_account", 3)) return { status: 429, body: { error: "Trop de tentatives. Patientez une minute." } }
+      let admin
+      try { admin = adminClient() } catch { return { status: 503, body: { error: "Suppression indisponible pour le moment. Écrivez au support." } } }
+      return await deleteAccount(admin, userId, input)
+    }
     if (action === "equipe_invite") { // update65 · invitation SMS d'un membre de l'équipe
       const ent = await loadEntitlements(supabase, userId)
       return await handleEquipeInvite(supabase, userId, input, { send: x => sendSmsMetered(x, ent.quotas.sms), consume, day: dayKey(), url: appUrl() })
@@ -349,6 +356,7 @@ export async function handleAccount(authorization?: string, body?: unknown, head
 
 export default async function handler(req: Req, res: Res) {
   res.setHeader("Cache-Control", "no-store")
+  nativeCors(req.headers, res) // update70 · app native (Capacitor)
   if (req.method === "OPTIONS") { res.status(204).end(); return }
   if (req.method !== "POST") { res.status(405).json({ error: "Méthode non autorisée." }); return }
   const { status: code, body } = await handleAccount(header(req.headers, "authorization") || undefined, req.body, req.headers)

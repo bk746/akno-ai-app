@@ -2,6 +2,7 @@ import { useState } from "react"
 import { supabase } from "../lib/supabase"
 import { Blob } from "./ui"
 import AuthScreen from "./auth/AuthScreen"
+import { webOrigin } from "../lib/native"
 
 const inp = "h-[52px] w-full rounded-[16px] bg-white/[.06] px-4 text-[16px] text-white outline-none placeholder:text-white/35 focus:bg-white/[.09] focus:ring-1 focus:ring-white/20"
 const btn = "mt-5 h-[52px] w-full rounded-full bg-white text-[16px] font-semibold text-black transition-opacity disabled:opacity-50"
@@ -15,7 +16,7 @@ export default function Login({ mode: m0 = "login", onDone }: { mode?: "login" |
     if (mode === "reset" && (pw.length < 8 || pw !== pw2)) return setMsg({ t: pw.length < 8 ? "8 caractères minimum." : "Les mots de passe ne correspondent pas." })
     setBusy(true)
     try {
-    if (mode === "forgot") { const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin + "/reception?reset=1" }); setMsg(error ? { t: "Impossible d'envoyer l'e-mail. Réessayez." } : { t: "E-mail envoyé. Ouvrez le lien pour choisir un nouveau mot de passe.", ok: true }) }
+    if (mode === "forgot") { const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: webOrigin() + "/reception?reset=1" }); setMsg(error ? { t: "Impossible d'envoyer l'e-mail. Réessayez." } : { t: "E-mail envoyé. Ouvrez le lien pour choisir un nouveau mot de passe.", ok: true }) }
     else { const { error } = await supabase.auth.updateUser({ password: pw }); if (error) setMsg({ t: "Impossible d'enregistrer ce mot de passe." }); else onDone?.() }
     } catch { setMsg({ t: "Connexion impossible. Vérifiez votre réseau." }) } finally { setBusy(false) }
   }

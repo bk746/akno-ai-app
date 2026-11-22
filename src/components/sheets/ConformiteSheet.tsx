@@ -3,6 +3,7 @@ import { Copy, FileCheck2, Link2, Plus, Trash2 } from "lucide-react"
 import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, inp, tx, useC } from "../ui"
 import { supabase } from "../../lib/supabase"
 import { useProfile } from "../../lib/profile"
+import { webOrigin } from "../../lib/native"
 
 /* update46 · Dossier de conformité : attestations Urssaf, Kbis, décennale… avec alertes d'expiration et lien de partage. */
 export const DOC_TYPES: [string, string, number][] = [["urssaf", "Attestation de vigilance Urssaf", 6], ["kbis", "Extrait Kbis / avis de situation", 3], ["decennale", "Attestation décennale", 12], ["rc_pro", "Attestation RC Pro", 12], ["fiscale", "Attestation de régularité fiscale", 12], ["rge", "Certificat RGE", 48], ["qualibat", "Qualibat / Qualifelec", 48], ["autre", "Autre document", 12]]
@@ -55,7 +56,7 @@ export default function ConformiteSheet({ close }: { close: () => void }) {
     void load()
   }
   const token = p?.dossier_token as string | null | undefined
-  const link = token ? `${location.origin}/dossier/${token}` : ""
+  const link = token ? `${webOrigin()}/dossier/${token}` : ""
   const share = async (on: boolean) => { const e = await save({ dossier_token: on ? crypto.randomUUID() : null }); if (e) setErr(e); else toast(on ? "Lien de partage créé" : "Partage désactivé") }
   if (add) return <Sheet title="Ajouter un document" c="#FFFFFF" onClose={() => setAdd(false)} footer={<Btn primary className="w-full" disabled={busy} onClick={submit}>{busy ? "Envoi…" : "Ajouter"}</Btn>}>
     <div className="space-y-3">

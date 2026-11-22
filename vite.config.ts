@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
+import { readFileSync } from "node:fs"
 
 type Req = { method?: string; url?: string; headers: { authorization?: string; host?: string } & Record<string, string | undefined>; on?: (ev: string, cb: (x?: unknown) => void) => void }
 type Res = { statusCode: number; setHeader: (k: string, v: string) => void; end: (b?: string) => void }
@@ -130,7 +131,10 @@ function versionFile(): Plugin {
   }
 }
 
+// update70 · version de l'app (package.json : "version" + "buildNumber"), affichée dans Réglages
+const PKG = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; buildNumber?: number }
+
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss(), apiDev(), versionFile()],
-  define: { __AKNO_BUILD__: JSON.stringify(command === "build" ? BUILD_ID : "dev") },
+  define: { __AKNO_BUILD__: JSON.stringify(command === "build" ? BUILD_ID : "dev"), __AKNO_VERSION__: JSON.stringify(PKG.version), __AKNO_BUILD_NUMBER__: JSON.stringify(Number(PKG.buildNumber) || 1) },
 }))

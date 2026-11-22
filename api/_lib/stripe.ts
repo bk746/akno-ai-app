@@ -20,11 +20,11 @@ function flatten(obj: Record<string, unknown>, prefix = "", out: [string, string
 /** update46 · version d'API récente, utilisée seulement pour créer la session de paiement intégré (ui_mode "elements"). */
 export const STRIPE_VERSION_ELEMENTS = "2026-10-28.endive"
 
-export async function stripe(method: "GET" | "POST", path: string, params?: Record<string, unknown>, version = "2024-06-20"): Promise<{ ok: boolean; status: number; data: StripeObj }> {
+export async function stripe(method: "GET" | "POST" | "DELETE", path: string, params?: Record<string, unknown>, version = "2024-06-20"): Promise<{ ok: boolean; status: number; data: StripeObj }> {
   const key = (env("STRIPE_SECRET_KEY") || "").trim()
   if (!key) return { ok: false, status: 503, data: { error: { message: "STRIPE_SECRET_KEY manquante." } } }
   const qs = params ? new URLSearchParams(flatten(params)).toString() : ""
-  const url = `https://api.stripe.com/v1${path}${method === "GET" && qs ? `?${qs}` : ""}`
+  const url = `https://api.stripe.com/v1${path}${method !== "POST" && qs ? `?${qs}` : ""}`
   const r = await fetch(url, {
     method,
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/x-www-form-urlencoded", "Stripe-Version": version },
