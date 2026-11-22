@@ -317,9 +317,9 @@ html.akno-portrait-only::after {
    pour ne jamais s'arrêter avant le bas de l'écran si iOS rapporte un 100dvh trop court */
 /* update71 : la hauteur vient de la mesure réelle (--app-h, lib/mobile.ts) ; 100lvh en PWA dépassait l'écran visible (pieds de page coupés) */
 :root { --sheet-vh: var(--app-h, 100dvh); }
-.sheet-kb { transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform .32s cubic-bezier(.22, 1, .36, 1); }
-.sheet-kb > * { transition: max-height .32s cubic-bezier(.22, 1, .36, 1); }
-@media (prefers-reduced-motion: reduce) { .sheet-kb, .sheet-kb > * { transition: none; } }
+/* update81 · plus de translate sur la feuille : ça la décollait du clavier (trou + carte visible).
+   Le bas de la zone utile est `bottom: var(--kb)` dans ModalSheet ; le fond (overlay) reste plein écran. */
+.sheet-open .ch-map { visibility: hidden !important; }
 
 
 /* update77 · champs date/heure iOS : pas de chrome gris natif, pas de padding interne, 16 px min (évite le zoom) */

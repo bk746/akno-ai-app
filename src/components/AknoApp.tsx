@@ -1554,6 +1554,7 @@ function AknoApp() {
     if (k === "clients") go("cl") // update66 : la tuile Contact devient Clients
     else if (k === "chantier") { requestNewChantier(); go("ch") }
     else if (k === "equipe") go("eq") // update65 : Équipe remplace Note
+    else if (k === "relances") go("rel") // update81 : accès Relances depuis le +
     else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
   }
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }

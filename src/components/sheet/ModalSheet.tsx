@@ -56,7 +56,7 @@ const scrollerOf = (el: HTMLElement | null, stop: HTMLElement) => {
   return null
 }
 
-export default function ModalSheet({ label, labelledBy, onClose, children, desk, z = 50, size = "auto", className = "", deskClass = "max-w-[480px]", style, handle = true, escape = true, dismissible = true, deskAlign = "center", role = "dialog", backdrop = "bg-black/55", onEntered }: Props) {
+export default function ModalSheet({ label, labelledBy, onClose, children, desk, z = 50, size = "auto", className = "", deskClass = "max-w-[480px]", style, handle = true, escape = true, dismissible = true, deskAlign = "center", role = "dialog", backdrop = "bg-black/85", onEntered }: Props) {
   const reduce = useReducedMotion()
   const panel = useRef<HTMLDivElement>(null), id = useRef(0)
   const y = useMotionValue<any>(0), dim = useMotionValue(1)
@@ -143,21 +143,24 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
   // update69 : hauteur de référence --sheet-vh (index.css) = 100dvh, ou 100lvh en PWA installée (plein écran, zones sûres comprises)
   // update71 : jamais plus haut que la zone réellement visible (min(--sheet-vh, 100 %)) — sinon le bas de la feuille
   // (total, boutons « PDF / Envoyer ») passait sous le bord de l'écran sur iPhone.
-  const VH = "min(var(--sheet-vh, 100dvh), 100%)"
+  // update81 · le calage clavier n'est plus un translate ni une hauteur visuelle « calée en haut » :
+  // le fond (overlay) couvre tout l'écran, y compris derrière le clavier ; la zone utile de la feuille
+  // s'arrête à --kb (bas au ras du clavier). On ne retranche --kb qu'une seule fois.
   const H = size === "full" ? "100%" : size === "large" ? "calc(100% - var(--sat, 0px) - 10px)" : undefined
-  const mobile: any = { y, height: H, maxHeight: size === "full" ? undefined : isTop ? "calc(100% - var(--sat, 0px) - 10px - var(--kb, 0px))" : "calc(100% - var(--sat, 0px) - 10px)", ...style }
+  const mobile: any = { y, height: H, maxHeight: size === "full" ? undefined : "calc(100% - var(--sat, 0px) - 10px)", ...style }
   const anim = desk
     ? { initial: { opacity: 0, scale: .96, y: 8 }, animate: { opacity: 1, scale: 1, y: 0, transition: SNAP }, exit: { opacity: 0, scale: .97, transition: { duration: .16 } } }
     : reduce
       ? { initial: { opacity: 0 }, animate: { opacity: 1, transition: { duration: .2 } }, exit: { opacity: 0, transition: { duration: .16 } } }
       : { initial: { y: "100%" }, animate: { y: 0, transition: SHEET }, exit: { y: "100%", transition: { type: "spring" as const, stiffness: 420, damping: 46, restDelta: 1 } } }
 
-  const node = <div className={`fixed inset-0 flex ${desk ? (deskAlign === "top" ? "items-start justify-center pt-[12vh]" : "items-center justify-center p-6") : "items-end justify-center"}`} style={desk ? { zIndex: z } : { zIndex: z, bottom: "auto", height: VH }}>
-    <motion.div aria-hidden className="absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .28, ease: [.22, 1, .36, 1] } }} exit={{ opacity: 0, transition: { duration: .24 } }}
+  const node = <div data-sheet-root className={`fixed inset-0 flex ${desk ? (deskAlign === "top" ? "items-start justify-center pt-[12vh]" : "items-center justify-center p-6") : "items-end justify-center"}`} style={{ zIndex: z }}>
+    <motion.div aria-hidden data-sheet-backdrop className="absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .28, ease: [.22, 1, .36, 1] } }} exit={{ opacity: 0, transition: { duration: .24 } }}
       onClick={() => { if (canDismiss.current) close.current() }}>
-      <motion.div className={`absolute inset-0 ${under ? "bg-black/35" : backdrop}`} style={{ opacity: dim }} />
+      <motion.div className={`absolute inset-0 ${under ? "bg-black/70" : backdrop}`} style={{ opacity: dim }} />
     </motion.div>
-    <div className={desk ? "relative flex w-full justify-center" : `${isTop ? "sheet-kb " : ""}pointer-events-none relative flex h-full w-full items-end justify-center`}>
+    <div className={desk ? "relative flex w-full justify-center" : "pointer-events-none absolute inset-x-0 top-0 flex items-end justify-center"}
+      style={desk ? undefined : { bottom: isTop ? "var(--kb, 0px)" : 0 }}>
       <motion.div ref={panel} role={role} aria-modal="true" aria-label={labelledBy ? undefined : label} aria-labelledby={labelledBy} tabIndex={-1}
         {...anim} style={desk ? style : mobile}
         onAnimationComplete={() => { if (!entered.current) { entered.current = true; onEntered?.() } }}

@@ -6,12 +6,12 @@
    Fermeture : ×, tap sur le fond, Échap, bouton retour Android (entrée d'historique). */
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { Lock, MapPin, Plus, UserRound, Users } from "lucide-react"
+import { Lock, MapPin, Plus, Repeat2, UserRound, Users } from "lucide-react"
 import type { P } from "../ui"
 import { EASE_OUT } from "../../lib/motion"
 import { lastDocMode } from "../../lib/facturesLite"
 
-export type CreateKind = "chantier" | "equipe" | "clients" // update67 : RDV / devis / facture retirés (déjà dans Agenda et Devis | Factures)
+export type CreateKind = "chantier" | "equipe" | "clients" | "relances" // update67 : RDV / devis / facture retirés ; update81 : Relances
 type Tab = "rec" | "ag" | "ch" | "fac"
 
 const Ico = ({ d }: { d: React.ReactNode }) => <svg width={23} height={23} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{d}</svg>
@@ -27,6 +27,7 @@ export const tabOf = (p: P): Tab | null => p === "rec" || p === "ag" || p === "c
 
 const TILES: { k: CreateKind; l: string; I: typeof MapPin; p: P }[] = [
   { k: "chantier", l: "Nouveau chantier", I: MapPin, p: "ch" }, { k: "clients", l: "Clients", I: UserRound, p: "cl" }, { k: "equipe", l: "Équipe", I: Users, p: "eq" },
+  { k: "relances", l: "Relances", I: Repeat2, p: "rel" },
 ]
 const spring = { type: "spring" as const, stiffness: 520, damping: 38, mass: .8 }
 /** update70 · pastille de l'onglet actif : glissement visible et net (≈ 250 ms, sans rebond), façon Revolut */
