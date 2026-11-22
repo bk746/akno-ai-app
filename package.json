@@ -36,6 +36,7 @@
     "test:rdv-fields": "node scripts/test-rdv-fields.mjs",
     "test:doc-swipe": "node scripts/test-doc-swipe.mjs",
     "test:agenda-78": "node scripts/test-agenda-78.mjs",
+    "test:cal-tabs": "node scripts/test-cal-tabs.mjs",
     "test:client-picker": "node scripts/test-client-picker.mjs",
     "test:devis-ui": "node scripts/test-devis-ui.mjs",
     "test:devis-pdf": "esbuild scripts/render-devis-pdf.ts --bundle --platform=node --format=esm --packages=external --outfile=node_modules/.cache/akno-render-devis.mjs --log-level=warning && node node_modules/.cache/akno-render-devis.mjs"
