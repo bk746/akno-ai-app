@@ -15,7 +15,7 @@ import { APP_BUILD, APP_VERSION } from "../lib/version"
 import ConformiteSheet from "./sheets/ConformiteSheet"
 import LeadsSheet from "./sheets/LeadsSheet"
 import { AgendaCalSheet, ReceptionSheet, SmsSheet } from "./sheets/ReglagesSheets"
-import ReceptionnisteReglagesSheet, { ReceptionnisteControls } from "./reception/ReceptionnisteReglages"
+import ReceptionnisteReglagesSheet, { ActivateReceptionniste, ReceptionnisteControls } from "./reception/ReceptionnisteReglages"
 import { voiceInfo } from "../lib/voice/receptionist"
 import Gate from "./sheets/Gate"
 import SetupGate from "./setup/SetupGate"
@@ -369,6 +369,7 @@ function Rec() {
 }
 function RecFull() {
   const { s, set, modal, q, setChat, toast } = useC(), c = A.rec.c
+  const acc = useAccount()
   const [voiceOn, setVoiceOn] = useState(false)
   const today = s.calls.filter(x => !x.day && match(q, x.name, x.topic, x.note)), hier = s.calls.filter(x => x.day && match(q, x.name, x.topic, x.note))
   const [sel] = useState(s.calls[0]?.id), [all, setAll] = useState(false)
@@ -385,6 +386,7 @@ function RecFull() {
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Settings, l: "Réglages", label: "Réglages de la réceptionniste", on: () => modal({ kind: "recReglages" }) }]}>
     <div className="col-span-2">
+      {!acc?.integrations.twilio_number && <div className="mb-4"><ActivateReceptionniste home onActivated={() => modal({ kind: "recReglages" })} /></div>}
       <button type="button" onClick={() => { primeCallWakeLock(); setVoiceOn(true) }} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium transition active:scale-[.98]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 12px 32px -12px ${c}99` }}>
         <Phone size={18} strokeWidth={1.75} />
         Appeler ma réceptionniste

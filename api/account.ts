@@ -10,6 +10,7 @@ import { reportError } from "./_lib/monitoring.js"
 import { handleEquipeInvite } from "./_lib/equipe.js"
 import { deleteAccount } from "./_lib/deleteAccount.js"
 import { connectOnboard, connectRefresh } from "./_lib/chain.js"
+import { bundlePerArtisan, FALLBACK_MSG, provisionArtisanNumber, submitRegulatory, twilioNumbers } from "./_lib/phoneProvision.js"
 
 /* update45 · compte artisan : abonnement Stripe, réglages sensibles (clé Cal.com), recherche SIRET,
    acceptation des CGV, état d'usage. Une seule fonction Vercel pour rester sous la limite du plan. */
@@ -26,7 +27,7 @@ async function status(sb: import("@supabase/supabase-js").SupabaseClient, userId
   const month = monthKey(), day = dayKey()
   const { data: counters } = await sb.from("usage_counters").select("metric, period, count").eq("artisan_id", userId).in("period", [month, day])
   const get = (m: string, p: string) => Number((counters || []).find(c => c.metric === m && c.period === p)?.count || 0)
-  let calcom = false, twilioNumber = "", forwardTo = ""
+  let calcom = false, twilioNumber = "", forwardTo = "", pendingNumber = false, bundleStatus = ""
   try {
     const { data } = await adminClient().from("artisan_secrets").select("calcom_api_key, twilio_number, forward_to").eq("artisan_id", userId).maybeSingle()
     calcom = !!(data as { calcom_api_key?: string } | null)?.calcom_api_key
@@ -35,6 +36,10 @@ async function status(sb: import("@supabase/supabase-js").SupabaseClient, userId
     // update56 : numéro Akno de la réceptionniste IA (table artisan_phone_numbers) en priorité
     const { data: num } = await adminClient().from("artisan_phone_numbers").select("phone_number").eq("artisan_id", userId).eq("active", true).limit(1).maybeSingle()
     if (num?.phone_number) { twilioNumber = String(num.phone_number); forwardTo = "" }
+    const { data: lock } = await adminClient().from("phone_provision_locks").select("status").eq("artisan_id", userId).maybeSingle()
+    pendingNumber = (lock as { status?: string } | null)?.status === "pending"
+    const { data: art } = await adminClient().from("artisans").select("twilio_bundle_status").eq("id", userId).maybeSingle()
+    bundleStatus = String((art as { twilio_bundle_status?: string } | null)?.twilio_bundle_status || "") || ""
   } catch { /* pas de service role en local */ }
   const prices = priceIds()
   return {
@@ -62,6 +67,9 @@ async function status(sb: import("@supabase/supabase-js").SupabaseClient, userId
         resend: !!env("RESEND_API_KEY"),
         twilio_number: twilioNumber,
         forward_to: forwardTo ? `${forwardTo.slice(0, 5)}…${forwardTo.slice(-2)}` : "",
+        twilio_number_pending: pendingNumber,
+        regulatory_per_artisan: bundlePerArtisan(),
+        regulatory_status: bundleStatus,
       },
     },
   }
@@ -350,6 +358,38 @@ export async function handleAccount(authorization?: string, body?: unknown, head
     if (action === "equipe_invite") { // update65 · invitation SMS d'un membre de l'équipe
       const ent = await loadEntitlements(supabase, userId)
       return await handleEquipeInvite(supabase, userId, input, { send: x => sendSmsMetered(x, ent.quotas.sms), consume, day: dayKey(), url: appUrl() })
+    }
+    if (action === "provision_number") { // update76 · achat autonome du numéro Twilio (compte Akno)
+      const ent = await loadEntitlements(supabase, userId)
+      if (!can(ent, "reception")) return { status: 403, body: { error: upgradeError("reception", ent) } }
+      if (!await rateLimit(userId, "provision_number", 3)) return { status: 429, body: { error: "Attribution déjà en cours. Patiente une minute." } }
+      let admin
+      try { admin = adminClient() } catch { return { status: 503, body: { error: FALLBACK_MSG, fallback: true } } }
+      const { data: a } = await admin.from("artisans").select("email, entreprise_nom, nom_entreprise, prenom").eq("id", userId).maybeSingle()
+      const row = a as { email?: string; entreprise_nom?: string; nom_entreprise?: string; prenom?: string } | null
+      let bundleSid = "", addressSid = "", bundleStatus = ""
+      try {
+        const { data: reg } = await admin.from("artisans").select("twilio_bundle_sid, twilio_address_sid, twilio_bundle_status").eq("id", userId).maybeSingle()
+        const g = reg as { twilio_bundle_sid?: string; twilio_address_sid?: string; twilio_bundle_status?: string } | null
+        bundleSid = g?.twilio_bundle_sid || ""; addressSid = g?.twilio_address_sid || ""; bundleStatus = g?.twilio_bundle_status || ""
+      } catch { /* colonnes absentes tant que la migration update76 n'est pas appliquée */ }
+      const r = await provisionArtisanNumber(admin, userId, {
+        twilio: twilioNumbers(),
+        artisanEmail: row?.email || session.email,
+        artisanName: row?.entreprise_nom || row?.nom_entreprise || row?.prenom,
+        bundleSid, addressSid, bundleStatus,
+        appUrl: appUrl() || origin(headers),
+      })
+      if (r.ok) return { status: 200, body: { ok: true, phone: r.phone, existing: !!r.existing, pending: !!r.pending } }
+      return { status: r.pending ? 202 : 503, body: { error: r.error, fallback: true, pending: !!r.pending, needs_bundle: !!r.needs_bundle } }
+    }
+    if (action === "regulatory_submit") { // update76 · justificatifs (flag TWILIO_BUNDLE_PER_ARTISAN)
+      if (!bundlePerArtisan()) return { status: 404, body: { error: "Action inconnue." } }
+      if (!await rateLimit(userId, "regulatory_submit", 5)) return { status: 429, body: { error: "Trop de tentatives. Patientez une minute." } }
+      let admin
+      try { admin = adminClient() } catch { return { status: 503, body: { error: "Enregistrement impossible pour le moment." } } }
+      const r = await submitRegulatory(admin, userId, input as { company?: string; siret?: string; address?: string; city?: string; postal?: string; representative?: string; email?: string })
+      return r.ok ? { status: 200, body: { ok: true, status: r.status } } : { status: 400, body: { error: r.error } }
     }
     return { status: 400, body: { error: "Action inconnue." } }
   } catch (e) {

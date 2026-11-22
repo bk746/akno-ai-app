@@ -30,6 +30,9 @@
     "test:history": "node scripts/test-history.mjs",
     "test:rec-reglages": "node scripts/test-rec-reglages.mjs",
     "test:forward": "esbuild scripts/test-forward.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-forward.mjs --log-level=warning && node /tmp/akno-test-forward.mjs",
+    "test:phone-provision": "esbuild scripts/test-phone-provision.ts --bundle --platform=node --format=esm --outfile=/tmp/akno-test-phone-provision.mjs --log-level=warning && node /tmp/akno-test-phone-provision.mjs",
+    "test:safe-top": "node scripts/test-safe-top.mjs",
+    "test:facture-open": "node scripts/test-facture-open.mjs",
     "test:client-picker": "node scripts/test-client-picker.mjs",
     "test:devis-ui": "node scripts/test-devis-ui.mjs",
     "test:devis-pdf": "esbuild scripts/render-devis-pdf.ts --bundle --platform=node --format=esm --packages=external --outfile=node_modules/.cache/akno-render-devis.mjs --log-level=warning && node node_modules/.cache/akno-render-devis.mjs"

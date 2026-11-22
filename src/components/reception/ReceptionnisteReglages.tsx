@@ -1,13 +1,90 @@
 /* update74 · Réglages rapides de la réceptionniste (voix, IA on/off, mode de décrochage).
    update75 · Renvoi depuis le portable de l'artisan (codes GSM, confirmation, copie si iOS bloque tel:).
+   update76 · Activation autonome de la ligne (achat du numéro), puis étape de renvoi.
    Même source : artisans.reception_config, via useProfile().save. */
-import { useState } from "react"
-import { AudioLines, Check, Clock, Copy, Phone } from "lucide-react"
+import { useState, type ChangeEvent } from "react"
+import { AudioLines, Check, Clock, Copy, Loader2, Phone } from "lucide-react"
 import { A, Btn, Card, Chev, Chip, GREY, Row, Sheet, Tg, tx, useC } from "../ui"
 import { useProfile } from "../../lib/profile"
-import { useAccount } from "../../lib/accountApi"
+import { api, reloadAccount, useAccount } from "../../lib/accountApi"
 import { DEFAULT_VOICE, VOICES, normalizeConfig, serializeConfig, voiceInfo, type PickupMode, type ReceptionConfig } from "../../lib/voice/receptionist"
 import { OPERATORS, forwardSteps, intendedForward, nationalFr, type ForwardOperator } from "../../lib/voice/forward"
+
+
+const FALLBACK = "On n'a pas pu attribuer ton numéro tout de suite. On t'attribue ton numéro sous 24 h."
+
+/** update76 · Bouton d'activation de la ligne. Invisible si le numéro est déjà attribué. */
+export function ActivateReceptionniste({ onActivated, className = "", home = false }: { onActivated?: (phone: string) => void; className?: string; home?: boolean }) {
+  const { toast } = useC()
+  const a = useAccount()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState("")
+  const num = a?.integrations.twilio_number || ""
+  const pending = !!a?.integrations.twilio_number_pending
+  const perArtisan = !!a?.integrations.regulatory_per_artisan
+  const st = a?.integrations.regulatory_status || ""
+  const needsBundle = perArtisan && st !== "twilio-approved"
+  if (num) return null
+
+  const run = async () => {
+    if (busy) return
+    setBusy(true); setErr("")
+    const r = await api("/api/account", { action: "provision_number" })
+    await reloadAccount()
+    setBusy(false)
+    if (r.ok && typeof r.phone === "string" && r.phone) {
+      toast("Numéro attribué. Compose le renvoi depuis ton portable.")
+      onActivated?.(r.phone)
+      return
+    }
+    if (r.pending) { setErr("Attribution de ton numéro en cours…"); return }
+    setErr(r.error || FALLBACK)
+    if (r.fallback !== false) toast(r.error || FALLBACK)
+  }
+
+  if (needsBundle) return <RegulatoryBundleCard className={className} status={st} />
+
+  return <div data-activate-line className={className}>
+    {home && <p className={`mb-3 ${tx.cap}`}>Pour mettre ta réceptionniste en ligne, on t'attribue un numéro français. Tes clients gardent ton portable : tu n'auras plus qu'à composer le renvoi.</p>}
+    <Btn primary className="h-14 w-full" disabled={busy || pending} onClick={() => void run()}>
+      {busy || pending ? <><Loader2 size={18} className="animate-spin" />Attribution en cours…</> : "Activer ma réceptionniste"}
+    </Btn>
+    {err && <p data-activate-error className="mt-3 text-[13.5px] leading-snug text-white/70">{err}</p>}
+  </div>
+}
+
+function RegulatoryBundleCard({ className = "", status }: { className?: string; status: string }) {
+  const { toast } = useC()
+  const [busy, setBusy] = useState(false)
+  const [f, setF] = useState({ company: "", siret: "", address: "", postal: "", city: "", representative: "" })
+  const waiting = status === "pending" || status === "in-review"
+  const set = (k: keyof typeof f) => (e: ChangeEvent<HTMLInputElement>) => setF(s => ({ ...s, [k]: e.target.value }))
+  const send = async () => {
+    if (busy) return
+    setBusy(true)
+    const r = await api("/api/account", { action: "regulatory_submit", ...f })
+    await reloadAccount()
+    setBusy(false)
+    if (r.ok) toast("Justificatifs envoyés. Statut : en vérification.")
+    else toast(r.error || "Envoi impossible.")
+  }
+  return <Card data-regulatory-bundle className={`p-4 ${className}`}>
+    <div className="text-[15px] font-medium">Justificatifs pour ta ligne</div>
+    <p className={`mt-1 ${tx.cap}`}>{waiting ? "Tes justificatifs sont en vérification. On t'écrit dès que le numéro peut être attribué." : "KBIS, pièce d'identité et adresse de l'entreprise sont demandés pour l'attribution du numéro."}</p>
+    {!waiting && <div className="mt-3 grid gap-2">
+      <input aria-label="Raison sociale" placeholder="Raison sociale" value={f.company} onChange={set("company")} className="h-11 rounded-[14px] bg-white/[.07] px-3 text-[15px] outline-none" />
+      <input aria-label="SIRET" placeholder="SIRET" value={f.siret} onChange={set("siret")} className="h-11 rounded-[14px] bg-white/[.07] px-3 text-[15px] outline-none" />
+      <input aria-label="Adresse" placeholder="Adresse" value={f.address} onChange={set("address")} className="h-11 rounded-[14px] bg-white/[.07] px-3 text-[15px] outline-none" />
+      <div className="grid grid-cols-2 gap-2">
+        <input aria-label="Code postal" placeholder="Code postal" value={f.postal} onChange={set("postal")} className="h-11 rounded-[14px] bg-white/[.07] px-3 text-[15px] outline-none" />
+        <input aria-label="Ville" placeholder="Ville" value={f.city} onChange={set("city")} className="h-11 rounded-[14px] bg-white/[.07] px-3 text-[15px] outline-none" />
+      </div>
+      <input aria-label="Nom du dirigeant" placeholder="Nom du dirigeant" value={f.representative} onChange={set("representative")} className="h-11 rounded-[14px] bg-white/[.07] px-3 text-[15px] outline-none" />
+      <p className={tx.cap}>Tu pourras aussi transmettre le KBIS et une pièce d'identité au support si besoin.</p>
+      <Btn primary className="h-12 w-full" disabled={busy} onClick={() => void send()}>{busy ? "Envoi…" : "Envoyer pour vérification"}</Btn>
+    </div>}
+  </Card>
+}
 
 export function ReceptionnisteControls({ className = "" }: { className?: string }) {
   const { toast } = useC()
@@ -92,7 +169,7 @@ function ForwardCard({ c, num, busy, onPatch }: { c: ReceptionConfig; num: strin
           return <button key={o.id} type="button" role="radio" aria-checked={on} data-operator={o.id} disabled={busy} onClick={() => on || onPatch({ operator: o.id as ForwardOperator }, `Opérateur : ${o.l}`)} className={`h-8 rounded-full px-3 text-[13px] font-medium ${on ? "bg-white text-black" : "bg-white/[.08] text-white/70"}`}>{o.l}</button>
         })}
       </div>
-      {!dest && want !== "off" && <p className={`mt-3 ${tx.cap}`}>Votre numéro Akno n'est pas encore attribué : le code de renvoi apparaîtra ici dès qu'il le sera.</p>}
+      {!dest && want !== "off" && <div className="mt-3"><ActivateReceptionniste /></div>}
       {ok && <p className="mt-3 text-[14px] leading-snug text-[#30D158]">{want === "off" ? "Renvoi annulé." : want === "direct" ? "Renvoi immédiat activé." : "Renvoi si vous ne décrochez pas : activé."}</p>}
       {steps.map(s => <div key={s.id} data-forward-step={s.id} className="mt-3 rounded-[16px] bg-white/[.05] p-3">
         <div className="text-[13.5px] font-medium">{s.label}</div>

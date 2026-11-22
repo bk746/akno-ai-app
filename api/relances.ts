@@ -10,6 +10,7 @@ import { sendSms, smsConfigured } from "./_lib/sms.js"
 import { consume, monthKey } from "./_lib/limits.js"
 import { notifyArtisan } from "./_lib/push.js"
 import { reportError } from "./_lib/monitoring.js"
+import { sweepPhoneNumbers, twilioNumbers } from "./_lib/phoneProvision.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
@@ -493,10 +494,11 @@ export async function handleRelancesCron(authorization?: string, opts?: { forceR
   const conformite = await step("conformite", () => conformiteAlerts(sb, ctx, now))
   const rapports = await step("rapport", () => monthlyReports(sb, ctx, now, !!opts?.forceReport))
   const purge = await step("purge", () => purgeRecordings(sb, now))
+  const phones = await step("phones", () => sweepPhoneNumbers(sb, now, { twilio: twilioNumbers() }))
   await step("rate_limits", async () => { await sb.rpc("purge_rate_limits"); return true })
   return {
     status: 200,
-    body: { ok: true, sweep_stopped: stopped, reminders, reviews, rdv, impayes, perdus, conformite, rapports, purge },
+    body: { ok: true, sweep_stopped: stopped, reminders, reviews, rdv, impayes, perdus, conformite, rapports, purge, phones },
   }
 }
 

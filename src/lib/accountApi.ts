@@ -31,7 +31,7 @@ export type AccountStatus = {
   entitlements: Entitlements
   usage: { voice_minutes: number; devis_drafts: number; sms: number; voice_sessions_today: number }
   billing: { enabled: boolean; prices: { bureau: boolean; clients: boolean; reception: boolean }; annual?: boolean; trial_days: number }
-  integrations: { calcom: boolean; calcom_global: boolean; sms: boolean; resend: boolean; twilio_number: string; forward_to: string }
+  integrations: { calcom: boolean; calcom_global: boolean; sms: boolean; resend: boolean; twilio_number: string; forward_to: string; twilio_number_pending?: boolean; regulatory_per_artisan?: boolean; regulatory_status?: string }
 }
 
 /* update49 · Cache du compte LIÉ À L'UTILISATEUR. Avant, le cache module survivait à une déconnexion :

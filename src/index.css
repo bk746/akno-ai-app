@@ -163,6 +163,9 @@
 }
 html{background:#000;color-scheme:dark}
 body{background:#000;color:#fff;font-family:'Geist Variable',sans-serif;-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
+/* update76 · le fond couvre l'encoche / la barre d'état (PWA + Capacitor). Les en-têtes gardent padding-top: var(--sat). */
+html,body,#root{height:100%;min-height:100%;min-height:100dvh;background:#000}
+#root{isolation:isolate}
 .text-balance{text-wrap:balance}
 .grad-text{background:linear-gradient(180deg,#fff 30%,rgba(255,255,255,.55));-webkit-background-clip:text;background-clip:text;color:transparent}
 .blue-text{background:linear-gradient(90deg,#7cb4ff,#2f7bff 60%,#7cb4ff);-webkit-background-clip:text;background-clip:text;color:transparent}

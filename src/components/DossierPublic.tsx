@@ -13,7 +13,7 @@ export default function DossierPublic() {
     document.title = "Dossier de conformité"
     fetch(`/api/devis-public?dossier=${encodeURIComponent(token)}`).then(async x => { const j = await x.json().catch(() => ({})); if (!x.ok || !Array.isArray(j.documents)) setErr(j.error || "Dossier indisponible."); else setR(j as R) }).catch(() => setErr("Dossier indisponible."))
   }, [token])
-  return <div className="min-h-[100dvh] bg-[#F6F6F8] text-[#141416] antialiased"><div className="mx-auto max-w-[640px] px-5 py-12">
+  return <div className="min-h-[100dvh] bg-[#F6F6F8] text-[#141416] antialiased"><div className="mx-auto max-w-[640px] px-5 pb-12 pt-[max(48px,calc(env(safe-area-inset-top)+24px))]">
     {err ? <p className="text-[15px] text-[#8A8A90]">{err}</p> : !r ? <p className="text-[15px] text-[#8A8A90]">Chargement…</p> : <>
       <div className="text-[13px] font-medium uppercase tracking-[.08em] text-[#0E8F8F]">Dossier de conformité</div>
       <h1 className="mt-2 text-[28px] font-semibold tracking-[-0.03em]">{r.company}</h1>

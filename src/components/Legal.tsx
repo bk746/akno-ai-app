@@ -52,7 +52,7 @@ const DOCS: Record<string, Doc> = {
 export default function Legal({ doc }: { doc?: string }) {
   const params = useParams(), key = doc || params.doc || "cgv", d = DOCS[key] || DOCS.cgv
   useEffect(() => { document.title = `Akno · ${d.title}` }, [d.title])
-  return <div className="min-h-[100dvh] bg-black text-white antialiased"><div className="mx-auto max-w-[720px] px-5 py-12">
+  return <div className="min-h-[100dvh] bg-black text-white antialiased"><div className="mx-auto max-w-[720px] px-5 pb-12 pt-[max(48px,calc(env(safe-area-inset-top)+24px))]">
     <Link to="/reception" className="text-[14px] text-white/50">← Akno</Link>
     <h1 className="mt-6 text-[30px] font-semibold tracking-[-0.03em]">{d.title}</h1>
     <p className="mt-2 text-[13px] text-white/40">Version {CGV_VERSION}</p>

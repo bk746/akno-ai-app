@@ -4,6 +4,7 @@
    - Abonnement : aucun achat, prix ni lien de paiement dans l'app native (App Store 3.1.1 / Google Play Payments).
    - Simulation pour les tests : en développement uniquement, ?native=ios|android (mémorisé pour l'onglet). */
 import { Capacitor } from "@capacitor/core"
+import { applyStatusBar } from "./statusBar"
 import cfg from "../../app.config.json"
 
 const env = (import.meta.env || {}) as Record<string, string | boolean | undefined>
@@ -56,7 +57,7 @@ export function initNative() {
       await App.addListener("appUrlOpen", ({ url }) => { void handleDeepLink(url) })
       await App.addListener("backButton", ({ canGoBack }) => { if (canGoBack) history.back(); else if (dispatchEvent(new Event("akno:back", { cancelable: true }))) void App.minimizeApp() })
     } catch { /* plugin absent */ }
-    try { const { StatusBar, Style } = await import("@capacitor/status-bar"); await StatusBar.setStyle({ style: Style.Dark }) } catch { /* ignore */ }
+    try { await applyStatusBar("light") } catch { /* ignore */ }
     try { const { SplashScreen } = await import("@capacitor/splash-screen"); setTimeout(() => void SplashScreen.hide(), 300) } catch { /* ignore */ }
   })()
 }

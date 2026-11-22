@@ -101,7 +101,7 @@ export default function AcceptDevis() {
   const decided = info?.decided_at ? new Date(info.decided_at).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""
 
   return (
-    <div className="min-h-dvh bg-[#0c0c0e] px-4 py-8 text-white">
+    <div className="min-h-dvh bg-[#0c0c0e] px-4 pb-8 pt-[max(32px,calc(env(safe-area-inset-top)+16px))] text-white">
       <div className="mx-auto w-full max-w-[820px]">
         <div className="mb-6 text-center">
           <div className="text-[13px] uppercase tracking-[0.16em] text-[#3FD0C9]">{info?.signed ? "Devis signé" : info?.statut === "val" ? "Devis accepté" : info?.statut === "ref" ? "Devis refusé" : "Devis à signer"}</div>

@@ -64,6 +64,8 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleLightContent</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Akno utilise le micro pour vous permettre de parler à votre réceptionniste IA et de dicter vos demandes.</string>
 	<key>NSCameraUsageDescription</key>

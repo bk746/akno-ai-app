@@ -14,7 +14,8 @@ import { webOrigin } from "../../lib/native"
 import { Copy, MessageSquare } from "lucide-react"
 
 /* update46 · Factures : brouillon → émise (numéro légal) → envoyée → payée, avoirs, relances d'impayés validées par l'artisan.
-   update63 · éditeur de facture au style iOS (sections Client, Chantier, Prestations, Conditions), même logique et mêmes champs. */
+   update63 · éditeur de facture au style iOS (sections Client, Chantier, Prestations, Conditions), même logique et mêmes champs.
+   update76 · ouverture directe d'une facture (Récentes, À encaisser, devis, fiche client) : plus de feuille liste intermédiaire. */
 type Rel = { id: string; facture_id: string; niveau: number; statut: string; sujet: string | null; corps: string | null; prepared_at: string }
 const ST: Record<string, [string, string]> = { brouillon: ["Brouillon", GREY], emise: ["Émise", AMBER], envoyee: ["Envoyée", AMBER], payee: ["Payée", GREEN], annulee: ["Annulée", GREY] }
 const NIV = ["", "Rappel courtois", "Relance", "Relance ferme", "Mise en demeure"]
@@ -31,6 +32,8 @@ export async function createFactureFromDevis(devisId: string, type: "facture" | 
 export default function FacturesSheet({ close, openId, startNew, clients = [] }: { close: () => void; openId?: string; startNew?: boolean; clients?: Contact[] }) {
   const [rows, setRows] = useState<Facture[] | null>(null), [rels, setRels] = useState<Rel[]>([])
   const [tab, setTab] = useState<"todo" | "all" | "paid">("all"), [open, setOpen] = useState<string | null>(openId || null), [err, setErr] = useState("")
+  // true seulement si on est entré par la liste (« Toutes ») : le X du détail y ramène. Sinon le X ferme tout (retour à l'accueil).
+  const fromList = useRef(!openId && !startNew)
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -57,11 +60,19 @@ export default function FacturesSheet({ close, openId, startNew, clients = [] }:
   // update62 · bouton « + » → « Nouvelle facture » : ouvre directement un brouillon (même parcours que le bouton du bas)
   const started = useRef(false)
   useEffect(() => { if (startNew && rows !== null && !err && !started.current) { started.current = true; void newBlank() } }, [startNew, rows, err]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (open && rows) { const f = rows.find(x => x.id === open); if (f) return <FactureDetail clients={clients} f={f} rels={rels.filter(r => r.facture_id === f.id)} close={() => { setOpen(null); void load() }} reload={load} openOther={id => { void load().then(() => setOpen(id)) }} /> }
+  const closeDetail = () => { if (!fromList.current) { close(); return } setOpen(null); void load() }
+  if (open && rows) {
+    const f = rows.find(x => x.id === open)
+    if (f) return <FactureDetail clients={clients} f={f} rels={rels.filter(r => r.facture_id === f.id)} close={closeDetail} reload={load} openOther={id => { void load().then(() => setOpen(id)) }} />
+  }
+  // Entrée directe (une facture ou « Nouvelle ») : jamais la liste « Toutes / À traiter / Payées » en dessous.
+  if (!fromList.current) {
+    return <Sheet title="Facture" sub={err || "Chargement…"} c="#FFFFFF" onClose={close}><div className={tx.cap}>{err || "Chargement…"}</div></Sheet>
+  }
   const unpaid = (rows || []).filter(x => (x.statut === "emise" || x.statut === "envoyee") && x.type !== "avoir")
   const list = (rows || []).filter(x => tab === "all" ? true : tab === "paid" ? x.statut === "payee" : late(x) || rels.some(r => r.facture_id === x.id) || x.statut === "brouillon")
-  return <Sheet title="Factures" sub={rows ? `${unpaid.length} à encaisser · ${e2(unpaid.reduce((a, x) => a + due(x), 0))}` : "Chargement…"} c="#FFFFFF" onClose={close} footer={<Btn primary className="w-full" onClick={newBlank}><Plus size={18} />Nouvelle facture</Btn>}>
-    {rels.length > 0 && <Card className="mb-4 p-4"><div className="flex items-center gap-2 text-[15px] font-medium"><BellRing size={17} className="text-[#FFB340]" />{rels.length} relance{rels.length > 1 ? "s" : ""} d'impayé à valider</div><div className={`mt-1 ${tx.cap}`}>Akno prépare le texte, vous relisez et envoyez. Rien ne part sans vous.</div></Card>}
+  return <Sheet title="Factures" sub={rows ? `${unpaid.length} à encaisser · ${e2(unpaid.reduce((a, x) => a + due(x), 0))}` : "Chargement…"} c="#FFFFFF" onClose={close} footer={<Btn primary className="w-full" data-factures-new onClick={newBlank}><Plus size={18} />Nouvelle facture</Btn>}>
+    <div data-factures-list hidden />{rels.length > 0 && <Card className="mb-4 p-4"><div className="flex items-center gap-2 text-[15px] font-medium"><BellRing size={17} className="text-[#FFB340]" />{rels.length} relance{rels.length > 1 ? "s" : ""} d'impayé à valider</div><div className={`mt-1 ${tx.cap}`}>Akno prépare le texte, vous relisez et envoyez. Rien ne part sans vous.</div></Card>}
     <div className="mb-3 flex gap-2">{([["all", "Toutes"], ["todo", "À traiter"], ["paid", "Payées"]] as const).map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`h-9 rounded-full px-4 text-[14px] font-medium ${tab === k ? "bg-white text-black" : "bg-white/[.07] text-white/70"}`}>{l}</button>)}</div>
     <List empty="Aucune facture. Créez-en une depuis un devis accepté ou avec « Nouvelle facture »." I={Receipt}>
       {list.map((x, i) => { const [l, c] = late(x) ? ["En retard", RED] : ST[x.statut] || ST.brouillon; return <Row key={x.id} first={!i} lead={<Ic I={x.type === "avoir" ? FileText : Receipt} />} t={`${label(x)} ${x.numero || "(brouillon)"}`} s={x.client_nom || "Client à renseigner"} r={e2(x.type === "avoir" ? -Number(x.total_ttc) : due(x))} rs={<Chip c={c}>{rels.some(r => r.facture_id === x.id) ? "Relance à valider" : l}</Chip>} onClick={() => setOpen(x.id)} label={`Ouvrir ${x.numero || "brouillon"}`} /> })}
@@ -163,6 +174,7 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
           : f.statut === "payee" ? <Btn className="min-w-0 flex-1" disabled={!!busy} onClick={send}><Send size={17} />Renvoyer</Btn>
           : !f.envoyee_le ? <Btn primary className="min-w-0 flex-1" disabled={!!busy} onClick={send} data-next-action><Send size={17} />{busy === "send" ? "Envoi…" : "Envoyer au client"}</Btn>
           : <Btn primary c={GREEN} className="min-w-0 flex-1" disabled={!!busy} onClick={() => paid(true)} data-next-action>{busy === "paid" ? "…" : "Marquer comme payée"}</Btn>}</div>}</div>}>
+    <div data-facture-detail hidden />
     {(() => { // update71 · une seule « prochaine étape », en clair
       if (f.type === "avoir" || f.statut === "annulee") return null
       if (draft) return <NextCard c="#2F7BFF" title="Vérifiez puis validez la facture" text="Une fois validée, elle reçoit son numéro définitif et ne se modifie plus (en cas d'erreur, on fait un avoir)." />

@@ -9,6 +9,7 @@ import AcceptDevis from "./components/AcceptDevis"
 import { initMonitoring } from "./lib/monitoring"
 import { initMobile } from "./lib/mobile"
 import { initNative } from "./lib/native"
+import { applyStatusBar } from "./lib/statusBar"
 
 const Legal = lazy(() => import("./components/Legal"))
 const DossierPublic = lazy(() => import("./components/DossierPublic"))
@@ -18,6 +19,7 @@ const Lazy = ({ children }: { children: React.ReactNode }) => <Suspense fallback
 initMonitoring()
 initMobile()
 initNative() // update70 · app iOS / Android (Capacitor)
+void applyStatusBar(location.pathname.startsWith("/payer") || location.pathname.startsWith("/dossier") ? "dark" : "light")
 
 const PAGES = ["reception", "agenda", "relance", "devis", "parametres", "factures", "chantiers", "equipe", "clients"] // update62 : onglets Factures et Chantiers
 
