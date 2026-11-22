@@ -188,6 +188,8 @@ async function run(browser, W, HT) {
 
   // 7. Suivi + export comptable (CSV, FEC)
   await page.goto(`${H.BASE}/parametres`); await page.waitForSelector("[data-bar-pill]"); await page.waitForTimeout(1500)
+  await page.getByRole("button", { name: "Plus de réglages" }).click()
+  await page.waitForSelector("[data-more-settings-body]", { timeout: 8000 })
   check(`${W} · Réglages : acompte réglable et relances d'impayés`, /Acompte à la signature/.test(await page.locator("[data-page]").innerText()) && /Relances d'impayés/.test(await page.locator("[data-page]").innerText()))
   await page.locator("[data-page]").getByText("Suivi et export comptable").click(); await page.waitForSelector("[data-pilotage]"); await page.waitForTimeout(800)
   const tiles = await page.locator("[data-pilotage]").innerText()

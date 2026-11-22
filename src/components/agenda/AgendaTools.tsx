@@ -27,8 +27,8 @@ export default function AgendaTools({ evs, day }: { evs: AgendaEv[]; day: string
   }
   return <div className="mt-4 space-y-3 rounded-[20px] bg-[#141416] p-4" data-agenda-tools>
     <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0"><div className="text-[15px] font-medium">Occupation du jour</div><div className="text-[12.5px] text-white/45">{occupLabel(occ)} · prévue contre réelle dans l'export paie</div></div>
-      <div className="shrink-0 whitespace-nowrap text-[22px] font-semibold tabular-nums">{occ} %</div>
+      <div><div className="text-[15px] font-medium">Occupation du jour</div><div className="text-[12.5px] text-white/45">{occupLabel(occ)} · prévue contre réelle dans l'export paie</div></div>
+      <div className="whitespace-nowrap text-[22px] font-semibold tabular-nums">{occ}%</div>
     </div>
     <div className="flex flex-wrap gap-2">
       <button type="button" onClick={() => downloadIcs(evs.filter(e => !e.virtual), "akno-agenda.ics")} className="h-10 rounded-full bg-white/[.08] px-3.5 text-[13.5px] font-medium">Exporter ICS</button>

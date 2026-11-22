@@ -38,7 +38,7 @@ const stack: number[] = []
    clavier (.sheet-kb / --kb). Avant, la feuille du dessous (ex. « Nouveau devis ») remontait et rétrécissait elle aussi quand
    le clavier s'ouvrait dans la feuille du dessus : fond noir en haut, feuille qui « disparaît » puis revient. */
 const stackSubs = new Set<() => void>()
-const stackChanged = () => stackSubs.forEach(f => f())
+const stackChanged = () => { stackSubs.forEach(f => f()); document.documentElement.classList.toggle("sheet-open", stack.length > 0) }
 const TEXT_FIELD = "input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]),textarea,select,[contenteditable=true]"
 const isTextField = (el: Element | null) => !!el && el instanceof HTMLElement && el.matches(TEXT_FIELD)
 /** ferme le clavier : retire le focus d'un champ de saisie actif (iOS garde parfois le clavier sans champ visible) */

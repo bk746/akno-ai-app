@@ -230,7 +230,7 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
       <div className="mt-2 flex justify-center">{filterPill}</div>
     </header>
 
-    <AnimatePresence>{!sheet && <motion.div key="bottom" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} transition={{ type: "spring", stiffness: 380, damping: 36 }} className="pointer-events-none absolute inset-x-0 z-20 flex flex-col" style={{ bottom: NAV }}>
+    <AnimatePresence>{!sheet && <motion.div key="bottom" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} transition={{ type: "spring", stiffness: 380, damping: 36 }} className="kb-hide data-ch-peek pointer-events-none absolute inset-x-0 z-20 flex flex-col" style={{ bottom: NAV }}>
       <div className="flex items-end justify-between px-4 pb-2.5">{attribution}{ctrls}</div>
       <AnimatePresence mode="popLayout" initial={false}>
         {draft ? <div key="dr" className="px-4">{draftCard}</div>

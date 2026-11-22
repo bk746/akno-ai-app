@@ -40,6 +40,13 @@ async function openAndClose(page, label) {
   await poll
   check(`${label} : pas de feuille liste (filtres / Nouvelle facture)`, !saw.list && await page.locator("[data-factures-list]").count() === 0)
   check(`${label} : la fiche s'ouvre`, await page.locator("[data-facture-detail]").count() === 1)
+  const navWhile = await page.evaluate(() => {
+    const bar = document.querySelector("[data-bar-pill], [data-mobile-nav]")
+    if (!bar) return { hidden: true }
+    const cs = getComputedStyle(bar)
+    return { hidden: cs.visibility === "hidden" || +cs.opacity < .05 || cs.pointerEvents === "none" }
+  })
+  check(`${label} : la navbar est masquée pendant que la feuille est ouverte`, !!navWhile.hidden, JSON.stringify(navWhile))
   await page.getByRole("button", { name: "Fermer" }).click()
   await page.waitForTimeout(800)
   const nDlg = await page.getByRole("dialog").count()

@@ -272,8 +272,17 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .ig .ig-row + .ig-row::before, .ig > * + * > .ig-row:first-child::before, .ig > * + .ig-row::before, .ig > :not(:first-child) > div > .ig-row:first-child::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: 1px; transform: scaleY(.5); transform-origin: top; background: rgba(255, 255, 255, .16); pointer-events: none; }
 /* barre du bas des éditeurs : s'efface quand le clavier est ouvert (pas de saut de mise en page) */
 .kb-hide { transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .18s ease; }
-.kb-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; }
+.kb-open .kb-hide, .sheet-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .kb-hide { transition: none; } }
+/* update80 · repli CSS si l'orientation n'a pas pu être verrouillée (Safari) */
+html.akno-portrait-only::after {
+  content: "Tourne l'appareil en mode portrait";
+  position: fixed; inset: 0; z-index: 2147483647;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px; background: #000; color: #fff;
+  font: 500 17px/1.35 -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align: center; pointer-events: all;
+}
 
 /* update64 · Carte des chantiers (Leaflet) */
 .ch-map { position: absolute; inset: 0; z-index: 0; isolation: isolate; background: #0b0d0c; touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }

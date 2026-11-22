@@ -130,7 +130,7 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate, onInte
         </motion.button>)}
       </motion.div>
     </motion.div>}</AnimatePresence>
-    <nav aria-label="Navigation principale" data-mobile-nav className={`pointer-events-none fixed inset-x-4 flex justify-center ${open ? "z-[36]" : "z-30"}`} style={{ bottom: BAR_BOTTOM }}>
+    <nav aria-label="Navigation principale" data-mobile-nav className={`kb-hide pointer-events-none fixed inset-x-4 flex justify-center ${open ? "z-[36]" : "z-30"}`} style={{ bottom: BAR_BOTTOM }}>
       <div className="pointer-events-auto flex w-full max-w-[520px] items-center rounded-full border border-white/[.10] bg-[#161618]/70 p-[5px] shadow-[0_24px_48px_-12px_rgba(0,0,0,.85),0_8px_16px_-8px_rgba(0,0,0,.6),inset_0_1px_0_rgba(255,255,255,.04)] backdrop-blur-[24px] backdrop-saturate-[1.8]" style={{ height: BAR_H }} data-bar-pill>
         {employee ? <TabBtn t="ag" on={active === "ag"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} /> : <>
         <TabBtn t="rec" on={active === "rec"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} /><TabBtn t="ag" on={active === "ag"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} />

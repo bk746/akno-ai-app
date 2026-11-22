@@ -62,7 +62,8 @@ export default function FacturesSheet({ close, openId, startNew, clients = [] }:
   }
   // update62 · bouton « + » → « Nouvelle facture » : ouvre directement un brouillon (même parcours que le bouton du bas)
   const started = useRef(false)
-  useEffect(() => { if (startNew && rows !== null && !err && !started.current) { started.current = true; void newBlank() } }, [startNew, rows, err]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (openId) setOpen(openId) }, [openId])
+  useEffect(() => { if (startNew && !openId && rows !== null && !err && !started.current) { started.current = true; void newBlank() } }, [startNew, openId, rows, err]) // eslint-disable-line react-hooks/exhaustive-deps
   const swipeFacture = (x: Facture) => {
     const act = factureSwipeAction(x)
     if (act === "blocked") {
@@ -98,7 +99,7 @@ export default function FacturesSheet({ close, openId, startNew, clients = [] }:
   }
     const closeDetail = () => { if (!fromList.current) { close(); return } setOpen(null); void load() }
   if (open && rows) {
-    const f = rows.find(x => x.id === open)
+    const f = rows.find(x => x.id === open || x.id === openId || (x.numero && (x.numero === open || x.numero === openId)))
     if (f) return <FactureDetail clients={clients} f={f} rels={rels.filter(r => r.facture_id === f.id)} close={closeDetail} reload={load} openOther={id => { void load().then(() => setOpen(id)) }} />
   }
   // Entrée directe (une facture ou « Nouvelle ») : jamais la liste « Toutes / À traiter / Payées » en dessous.
@@ -120,7 +121,8 @@ const FRow = ({ l, v, strong }: { l: string; v: string; strong?: boolean }) => <
 
 function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Facture; rels: Rel[]; close: () => void; reload: () => Promise<void>; openOther: (id: string) => void; clients: Contact[] }) {
   const { toast, desk } = useC()
-  const draft = !f.numero
+  const issued = f.statut === "emise" || f.statut === "envoyee" || f.statut === "payee" || f.statut === "annulee"
+  const draft = f.statut === "brouillon" || (!f.numero && !issued)
   const [d, setD] = useState<Facture>(f), [busy, setBusy] = useState(""), [err, setErr] = useState(""), [mode, setMode] = useState("Virement")
   const [rel, setRel] = useState<Rel | null>(rels[0] || null)
   const [pickC, setPickC] = useState(false), [coordOpen, setCoordOpen] = useState(() => !(f.client_nom?.trim() && (f.client_email || f.client_telephone || f.client_adresse)))
