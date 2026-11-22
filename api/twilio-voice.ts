@@ -37,6 +37,11 @@ async function incoming(p: Record<string, string>) {
   if (!artisanId) return sayHangup("Bonjour, ce numéro n'est pas encore activé. Merci de rappeler plus tard. Au revoir.")
   const ent = await loadEntitlements(adminClient(), artisanId)
   if (!can(ent, "reception")) return sayHangup("Bonjour, l'assistante n'est pas disponible pour le moment. Merci de rappeler plus tard ou de laisser un message à l'entreprise par un autre moyen. Au revoir.")
+  // update74 · même règle as ReceptionConfig.enabled (absent = l'IA répond). En cas d'erreur lecture, on laisse l'appel passer.
+  const { data: rec, error: recErr } = await adminClient().from("artisans").select("reception_config").eq("id", artisanId).maybeSingle()
+  const raw = rec?.reception_config
+  const iaOn = !raw || typeof raw !== "object" || Array.isArray(raw) || (raw as { enabled?: unknown }).enabled !== false
+  if (!recErr && rec && !iaOn) return sayHangup("Bonjour, l'assistante n'est pas disponible pour le moment. Merci de rappeler plus tard ou de laisser un message à l'entreprise par un autre moyen. Au revoir.")
   if (ent.quotas.voice_minutes > 0 && await usage(artisanId, "voice_seconds", monthKey()) >= ent.quotas.voice_minutes * 60) {
     return sayHangup("Bonjour, l'assistante a atteint sa limite d'appels ce mois-ci. Merci de rappeler l'entreprise un peu plus tard. Au revoir.")
   }

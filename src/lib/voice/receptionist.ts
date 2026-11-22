@@ -51,10 +51,17 @@ export const voiceInfo = (id?: string) => VOICES.find(v => v.id === (id || "").t
 export type Service = { nom: string; prix?: string; duree?: string }
 export type Faq = { q: string; r: string }
 export type Pron = { mot: string; dit: string }
+export type PickupMode = "direct" | "fallback"
+export const DEFAULT_PICKUP: PickupMode = "fallback"
+
 export type ReceptionConfig = {
   voice: string
   /** débit de parole (audio.output.speed, plage doc xAI 0,7–1,5 ; Akno limite à 0,85–1,2) */
   speed: number
+  /** false = l'IA ne décroche pas sur la ligne Akno (message d'indisponibilité). Absent = true. */
+  enabled: boolean
+  /** direct = à la place de l'artisan ; fallback = seulement si personne ne décroche. Absent = fallback. */
+  pickup: PickupMode
   tutoiement: boolean
   presentation: string
   services: Service[]
@@ -72,7 +79,7 @@ export const LIMITS = { presentation: 600, services: 20, nom: 80, prix: 40, dure
 export const SPEED_MIN = 0.85, SPEED_MAX = 1.2
 
 export const emptyConfig = (): ReceptionConfig => ({
-  voice: DEFAULT_VOICE, speed: 1, tutoiement: false, presentation: "", services: [], zone: "", disponibilites: "",
+  voice: DEFAULT_VOICE, speed: 1, enabled: true, pickup: DEFAULT_PICKUP, tutoiement: false, presentation: "", services: [], zone: "", disponibilites: "",
   urgences: "", interdits: "", faq: [], consignes: "", prononciations: [],
 })
 
@@ -89,6 +96,8 @@ export function normalizeConfig(raw: unknown): ReceptionConfig {
   return {
     voice: isVoiceId(o.voice) ? String(o.voice).toLowerCase() : base.voice,
     speed: Number.isFinite(sp) && sp > 0 ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, sp)) * 100) / 100 : 1,
+    enabled: o.enabled !== false,
+    pickup: o.pickup === "direct" ? "direct" : DEFAULT_PICKUP,
     tutoiement: o.tutoiement === true,
     presentation: clean(o.presentation, LIMITS.presentation),
     services: arr(o.services).map(s => s && typeof s === "object" ? s as Record<string, unknown> : {}).map(s => ({ nom: line(s.nom, LIMITS.nom), prix: line(s.prix, LIMITS.prix), duree: line(s.duree, LIMITS.duree) })).filter(s => s.nom).slice(0, LIMITS.services),
@@ -109,6 +118,9 @@ export function serializeConfig(c: ReceptionConfig) {
   const n = normalizeConfig(c)
   return { v: 1, ...n, services: n.services.map(s => ({ nom: s.nom, ...(s.prix ? { prix: s.prix } : {}), ...(s.duree ? { duree: s.duree } : {}) })) }
 }
+
+/** L'IA décroche-t-elle sur la ligne Akno ? Absent ou invalide = oui (comportement historique). */
+export const isReceptionEnabled = (raw: unknown) => normalizeConfig(raw).enabled
 
 /** Métier saisi à l'inscription (« Plombier ») → activité prononçable (« plomberie »). */
 const ACTIVITE: Record<string, string> = {

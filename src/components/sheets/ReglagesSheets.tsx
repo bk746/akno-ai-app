@@ -37,7 +37,7 @@ export function ReceptionSheet({ close }: { close: () => void }) {
 }
 
 /* update56 · Guide de renvoi d'appel CONDITIONNEL vers le numéro Akno (l'IA ne décroche que si l'artisan ne répond pas). */
-function RenvoiGuide({ num }: { num: string }) {
+export function RenvoiGuide({ num }: { num: string }) {
   const d = num.replace(/[^\d+]/g, "").replace(/^\+33/, "0")
   const codes: [string, string][] = [
     ["Si vous ne décrochez pas", `**61*${d}**20#`],
