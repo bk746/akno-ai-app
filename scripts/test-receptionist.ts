@@ -67,6 +67,8 @@ T("sans enabled/pickup : IA active, mode si je ne décroche pas", normalizeConfi
 T("enabled: false conservé", normalizeConfig({ enabled: false }).enabled === false)
 T("pickup direct conservé, valeur invalide → fallback", normalizeConfig({ pickup: "direct" }).pickup === "direct" && normalizeConfig({ pickup: "xyz" }).pickup === "fallback")
 T("serialize inclut enabled et pickup", (() => { const z = serializeConfig(normalizeConfig({})); return z.enabled === true && z.pickup === "fallback" })())
+T("operator par défaut orange, forwardApplied vide", normalizeConfig({}).operator === "orange" && normalizeConfig({}).forwardApplied === "")
+T("operator/forwardApplied conservés", normalizeConfig({ operator: "bouygues", forwardApplied: "off" }).operator === "bouygues" && normalizeConfig({ operator: "bouygues", forwardApplied: "off" }).forwardApplied === "off")
 T("textes tronqués et sans caractères de contrôle", bad.presentation.length <= 600 && !/\u0000/.test(bad.presentation))
 T("normalizeConfig(null) / undefined", normalizeConfig(null).voice === "celeste" && formatConfigForPrompt(normalizeConfig(undefined)) === "")
 T("replaceMap vide → undefined", replaceMap(normalizeConfig({})) === undefined)

@@ -1,7 +1,7 @@
 /* update56 · Tests de la ligne téléphonique IA : npm run test:twilio (aucun appel réseau, aucune écriture en base) */
 import { createHmac } from "node:crypto"
 import { verifyTwilioSignature } from "../api/_lib/sms"
-import { bridgeArtisan, bridgeStreamUrl, connectStreamTwiml, sayHangup, signBridgeToken, verifyBridgeToken } from "../api/_lib/twilioVoice"
+import { bridgeArtisan, bridgeStreamUrl, connectStreamTwiml, dialNumberTwiml, sayHangup, signBridgeToken, verifyBridgeToken } from "../api/_lib/twilioVoice"
 import { signToken as bridgeSign, verifyToken as bridgeVerify } from "../voice-bridge/src/token"
 import { POST } from "../api/twilio-voice"
 
@@ -38,6 +38,8 @@ const params = { CallSid: "CA0123456789abcdef", From: "+33612345678", To: "+3397
   T("VOICE_BRIDGE_URL https → wss…/twilio", bridgeStreamUrl("https://akno-voice-bridge.fly.dev/") === "wss://akno-voice-bridge.fly.dev/twilio")
   T("VOICE_BRIDGE_URL déjà wss…/twilio inchangée", bridgeStreamUrl("wss://x.fly.dev/twilio") === "wss://x.fly.dev/twilio")
   T("VOICE_BRIDGE_URL vide → désactivé", bridgeStreamUrl("") === "")
+  const dial = dialNumberTwiml("+33600000000", { callerId: "+33973057824", action: "https://akno.example/api/twilio-voice?event=dial-off", timeout: 25 })
+  T("Dial vers le portable (IA coupée), sans relais IA", /<Dial timeout="25" answerOnBridge="true" callerId="\+33973057824" action="https:\/\/akno\.example\/api\/twilio-voice\?event=dial-off"><Number>\+33600000000<\/Number><\/Dial>/.test(dial) && !dial.includes("Stream") && !dial.includes("Connect"))
 
   // 3) Jeton webhook → relais (même algorithme des deux côtés)
   const exp = Math.floor(Date.now() / 1000) + 120

@@ -62,6 +62,10 @@ export type ReceptionConfig = {
   enabled: boolean
   /** direct = à la place de l'artisan ; fallback = seulement si personne ne décroche. Absent = fallback. */
   pickup: PickupMode
+  /** Opérateur du portable (codes de renvoi). Absent = orange. */
+  operator: "orange" | "sfr" | "bouygues" | "free"
+  /** Dernier renvoi confirmé par l'artisan sur son portable. Vide = pas encore confirmé. */
+  forwardApplied: "off" | "direct" | "fallback" | ""
   tutoiement: boolean
   presentation: string
   services: Service[]
@@ -79,7 +83,7 @@ export const LIMITS = { presentation: 600, services: 20, nom: 80, prix: 40, dure
 export const SPEED_MIN = 0.85, SPEED_MAX = 1.2
 
 export const emptyConfig = (): ReceptionConfig => ({
-  voice: DEFAULT_VOICE, speed: 1, enabled: true, pickup: DEFAULT_PICKUP, tutoiement: false, presentation: "", services: [], zone: "", disponibilites: "",
+  voice: DEFAULT_VOICE, speed: 1, enabled: true, pickup: DEFAULT_PICKUP, operator: "orange", forwardApplied: "", tutoiement: false, presentation: "", services: [], zone: "", disponibilites: "",
   urgences: "", interdits: "", faq: [], consignes: "", prononciations: [],
 })
 
@@ -98,6 +102,8 @@ export function normalizeConfig(raw: unknown): ReceptionConfig {
     speed: Number.isFinite(sp) && sp > 0 ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, sp)) * 100) / 100 : 1,
     enabled: o.enabled !== false,
     pickup: o.pickup === "direct" ? "direct" : DEFAULT_PICKUP,
+    operator: o.operator === "sfr" || o.operator === "bouygues" || o.operator === "free" ? o.operator : "orange",
+    forwardApplied: o.forwardApplied === "off" || o.forwardApplied === "direct" || o.forwardApplied === "fallback" ? o.forwardApplied : "",
     tutoiement: o.tutoiement === true,
     presentation: clean(o.presentation, LIMITS.presentation),
     services: arr(o.services).map(s => s && typeof s === "object" ? s as Record<string, unknown> : {}).map(s => ({ nom: line(s.nom, LIMITS.nom), prix: line(s.prix, LIMITS.prix), duree: line(s.duree, LIMITS.duree) })).filter(s => s.nom).slice(0, LIMITS.services),

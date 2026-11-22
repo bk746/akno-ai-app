@@ -3,11 +3,13 @@ import { verifyTwilioSignature, toE164 } from "./_lib/sms.js"
 import { can, loadEntitlements } from "./_lib/plans.js"
 import { monthKey, usage } from "./_lib/limits.js"
 import { reportError } from "./_lib/monitoring.js"
-import { bridgeStreamUrl, connectStreamTwiml, sayHangup, signBridgeToken } from "./_lib/twilioVoice.js"
+import { bridgeStreamUrl, connectStreamTwiml, dialNumberTwiml, sayHangup, signBridgeToken } from "./_lib/twilioVoice.js"
+import { forwardLoopRisk } from "../src/lib/voice/forward.js"
 
 /* update56 · Vrais appels : la réceptionniste IA (xAI Grok Voice) décroche sur le numéro Akno.
-   L'artisan active sur son portable un renvoi CONDITIONNEL (non-réponse / occupé / injoignable)
-   vers son numéro Akno : son téléphone sonne normalement, l'IA ne prend que les appels manqués.
+   L'artisan garde son portable. Selon le réglage, un renvoi GSM envoie les appels (tout de suite,
+   ou après ~20 s) vers le numéro Akno, où l'IA décroche. Si l'IA est coupée, on tente un Dial
+   vers le portable seulement s'il n'y a pas de risque de boucle.
    - POST /api/twilio-voice               → appel entrant (voice_url du numéro Twilio) : TwiML <Connect><Stream>
    - POST /api/twilio-voice?event=status  → fin d'appel (status_callback) : durée + numéro dans « calls »
    Un seul fichier pour rester sous la limite de 12 fonctions du plan Vercel Hobby.
@@ -32,16 +34,25 @@ export async function artisanForNumber(to: string): Promise<string | null> {
   return old?.artisan_id ? String(old.artisan_id) : null
 }
 
-async function incoming(p: Record<string, string>) {
+const UNAVAILABLE = "Bonjour, l'assistante n'est pas disponible pour le moment. Merci de rappeler plus tard ou de laisser un message à l'entreprise par un autre moyen. Au revoir."
+
+async function incoming(p: Record<string, string>, base: string) {
   const artisanId = await artisanForNumber(p.To || "")
   if (!artisanId) return sayHangup("Bonjour, ce numéro n'est pas encore activé. Merci de rappeler plus tard. Au revoir.")
   const ent = await loadEntitlements(adminClient(), artisanId)
-  if (!can(ent, "reception")) return sayHangup("Bonjour, l'assistante n'est pas disponible pour le moment. Merci de rappeler plus tard ou de laisser un message à l'entreprise par un autre moyen. Au revoir.")
-  // update74 · même règle as ReceptionConfig.enabled (absent = l'IA répond). En cas d'erreur lecture, on laisse l'appel passer.
-  const { data: rec, error: recErr } = await adminClient().from("artisans").select("reception_config").eq("id", artisanId).maybeSingle()
+  if (!can(ent, "reception")) return sayHangup(UNAVAILABLE)
+  // update74/75 · enabled absent = l'IA répond. Si l'IA est coupée : Dial le portable seulement s'il n'y a pas de boucle.
+  const { data: rec, error: recErr } = await adminClient().from("artisans").select("reception_config, telephone, entreprise_telephone").eq("id", artisanId).maybeSingle()
   const raw = rec?.reception_config
-  const iaOn = !raw || typeof raw !== "object" || Array.isArray(raw) || (raw as { enabled?: unknown }).enabled !== false
-  if (!recErr && rec && !iaOn) return sayHangup("Bonjour, l'assistante n'est pas disponible pour le moment. Merci de rappeler plus tard ou de laisser un message à l'entreprise par un autre moyen. Au revoir.")
+  const cfg = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+  const iaOn = recErr || !rec ? true : cfg.enabled !== false
+  if (!iaOn) {
+    const mobile = toE164(String(rec?.telephone || rec?.entreprise_telephone || ""))
+    const applied = cfg.forwardApplied === "off" || cfg.forwardApplied === "direct" || cfg.forwardApplied === "fallback" ? cfg.forwardApplied : ""
+    const loop = !mobile || mobile === (toE164(p.To || "") || p.To) || forwardLoopRisk({ artisanMobile: mobile, forwardedFrom: p.ForwardedFrom, from: p.From, forwardApplied: applied })
+    if (!loop) return dialNumberTwiml(mobile, { callerId: p.To || "", action: `${base}/api/twilio-voice?event=dial-off`, timeout: 25 })
+    return sayHangup(UNAVAILABLE)
+  }
   if (ent.quotas.voice_minutes > 0 && await usage(artisanId, "voice_seconds", monthKey()) >= ent.quotas.voice_minutes * 60) {
     return sayHangup("Bonjour, l'assistante a atteint sa limite d'appels ce mois-ci. Merci de rappeler l'entreprise un peu plus tard. Au revoir.")
   }
@@ -81,9 +92,15 @@ export async function POST(request: Request) {
   const params = Object.fromEntries(new URLSearchParams(raw))
   const signed = await verifyTwilioSignature(publicUrl(request), params, request.headers.get("x-twilio-signature") || "")
   if (!signed) return new Response("Signature invalide", { status: 403 })
+  const base = appUrl() || `${url.protocol}//${url.host}`
   try {
     if (event === "status") { await status(params); return new Response("", { status: 204 }) }
-    return twiml(await incoming(params))
+    // update75 · retour du Dial vers le portable (IA coupée) : pas de relais IA, pour éviter une boucle.
+    if (event === "dial-off") {
+      if (params.DialCallStatus === "completed") return twiml("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><Hangup/></Response>")
+      return twiml(sayHangup(UNAVAILABLE))
+    }
+    return twiml(await incoming(params, base))
   } catch (e) {
     await reportError(e, { route: "twilio-voice", event })
     return event === "status" ? new Response("", { status: 500 }) : twiml(sayHangup("Une erreur est survenue. Merci de rappeler dans quelques minutes. Au revoir."))

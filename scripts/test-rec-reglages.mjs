@@ -11,7 +11,7 @@ const check = (l, c, d = "") => { c ? ok++ : ko++; console.log(`${c ? "✔" : "�
 await H.start()
 const browser = await webkit.launch()
 try {
-  const { page, writes } = await H.newPage(browser, { width: 393, height: 852 })
+  const { page, writes } = await H.newPage(browser, { width: 393, height: 852, integrations: { twilio_number: "+33973057824" } })
   await page.goto(`${H.BASE}/reception`)
   await page.waitForSelector("[data-tab]", { timeout: 20000 })
   await page.waitForTimeout(1200)
@@ -30,12 +30,19 @@ try {
   check("le interrupteur « L'IA répond » est allumé par défaut", await ia.getAttribute("aria-checked") === "true")
   check("le mode « Si je ne décroche pas » est proposé", await dlg.locator("[data-pickup=fallback]").count() === 1)
   check("le mode « À ma place » est proposé", await dlg.locator("[data-pickup=direct]").count() === 1)
+  const codeFb = await dlg.locator("[data-forward-code=fallback]").textContent()
+  const telFb = await dlg.locator("[data-forward-tel=fallback]").getAttribute("href")
+  check("mode par défaut : code Orange **61*0973057824*11# (si je ne décroche pas)", (codeFb || "").trim() === "**61*0973057824*11#", JSON.stringify(codeFb))
+  check("le lien tel: encode # en %23", telFb === "tel:**61*0973057824*11%23", String(telFb))
+  check("le bouton Copier est proposé (repli iOS)", await dlg.getByRole("button", { name: /Copier/ }).count() >= 1)
 
   await dlg.locator("[data-pickup=direct]").click()
   await page.waitForTimeout(800)
   const saved2 = writes.filter(w => w.table === "artisans" && w.method === "PATCH" && w.body?.reception_config)
   const last2 = saved2[saved2.length - 1]
   check("choisir « À ma place » enregistre pickup = direct", !!last2 && last2.body.reception_config.pickup === "direct", JSON.stringify(last2?.body?.reception_config))
+  const codeDir = await dlg.locator("[data-forward-code=direct]").textContent()
+  check("à ma place : code Orange **21*0973057824*11#", (codeDir || "").trim() === "**21*0973057824*11#", JSON.stringify(codeDir))
 
   await dlg.getByRole("button", { name: "Voix Celeste" }).click().catch(async () => {
     // le libellé accessible est « Voix Celeste » via aria-label de la Row
@@ -57,6 +64,14 @@ try {
   const last = saved[saved.length - 1]
   check("couper l'IA enregistre en base (reception_config.enabled = false)", !!last && last.body.reception_config.enabled === false, JSON.stringify(last?.body?.reception_config || writes.slice(before)))
   check("l'interrupteur passe à off", await ia.getAttribute("aria-checked") === "false")
+  const codeOff = await dlg.locator("[data-forward-code=off]").textContent()
+  check("IA coupée : code d'annulation ##002#", (codeOff || "").trim() === "##002#", JSON.stringify(codeOff))
+  check("la confirmation « Renvoi activé ? » s'affiche", await dlg.locator("[data-forward-confirm]").count() === 1)
+  await dlg.getByRole("button", { name: "Oui" }).click()
+  await page.waitForTimeout(800)
+  const saved4 = writes.filter(w => w.table === "artisans" && w.method === "PATCH" && w.body?.reception_config)
+  const last4 = saved4[saved4.length - 1]
+  check("Oui enregistre forwardApplied = off", !!last4 && last4.body.reception_config.forwardApplied === "off", JSON.stringify(last4?.body?.reception_config))
 
   const vv0 = await page.evaluate(() => window.visualViewport ? { h: window.visualViewport.height, kb: document.documentElement.style.getPropertyValue("--kb") } : { h: innerHeight, kb: "" })
   const focused = await page.evaluate(() => {

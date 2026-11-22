@@ -32,7 +32,7 @@ export function harness({ cwd = process.cwd(), port = 5199 } = {}) {
   const stop = () => { try { vite?.kill() } catch { /* ignore */ } }
   /* update71 : tables = données simulées par table (filtres eq. appliqués), width/height = écran, api = réponses /api simulées,
      profile = champs ajoutés au profil artisan. Les écritures (POST/PATCH) sont journalisées dans `writes` et appliquées en mémoire. */
-  async function newPage(browser, { calls = demoCalls(), devis = demoDevis(), tables = {}, width = 390, height = 844, api, profile = {}, statusDelay = 0, video = "", scale } = {}) {
+  async function newPage(browser, { calls = demoCalls(), devis = demoDevis(), tables = {}, width = 390, height = 844, api, profile = {}, integrations = {}, statusDelay = 0, video = "", scale } = {}) {
     const writes = [], db = { calls, devis, ...tables }, prof = { ...PROFILE, ...profile }
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale || (video ? 2 : 3), isMobile: true, hasTouch: true, locale: "fr-FR", timezoneId: "Europe/Paris",
       userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
@@ -75,7 +75,7 @@ export function harness({ cwd = process.cwd(), port = 5199 } = {}) {
     await ctx.route(u => u.origin === BASE && /^\/api\/[a-z-]+$/.test(u.pathname), async route => {
       const req = route.request(), body = req.postDataJSON?.() || {}
       const json = b => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(b) })
-      if (req.url().includes("/api/account") && body.action === "status") { if (statusDelay) await new Promise(r => setTimeout(r, statusDelay)); return json(STATUS) }
+      if (req.url().includes("/api/account") && body.action === "status") { if (statusDelay) await new Promise(r => setTimeout(r, statusDelay)); return json({ ...STATUS, integrations: { ...STATUS.integrations, ...integrations } }) }
       writes.push({ api: new URL(req.url()).pathname, body })
       const custom = api ? await api(new URL(req.url()).pathname, body, db) : undefined
       if (custom) return route.fulfill({ status: custom.status || 200, contentType: "application/json", body: JSON.stringify(custom.body ?? custom) })

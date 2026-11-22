@@ -12,6 +12,12 @@ export function sayHangup(text: string) {
   return xml(`${say(text)}<Hangup/>`)
 }
 
+/** Fait sonner un numéro (portable de l'artisan) puis revient sur action. Jamais de relais IA. */
+export function dialNumberTwiml(to: string, opts: { callerId: string; action: string; timeout?: number }) {
+  const t = Math.min(30, Math.max(5, Number(opts.timeout) || 25))
+  return xml(`<Dial timeout="${t}" answerOnBridge="true" callerId="${escapeHtml(opts.callerId)}" action="${escapeHtml(opts.action)}"><Number>${escapeHtml(to)}</Number></Dial>`)
+}
+
 async function hmacHex(secret: string, data: string) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data))
