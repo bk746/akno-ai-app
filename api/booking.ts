@@ -1,6 +1,7 @@
 import { nativeCors } from "./_lib/http.js"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { adminClient } from "./_lib/mail.js"
+import { sendAptSms, confirmSmsText, companyOf as companyOfSms, artisanSmsOn } from "./_lib/agendaSms.js"
 import { bridgeArtisan } from "./_lib/twilioVoice.js"
 
 type Json = Record<string, unknown>
@@ -22,6 +23,8 @@ type BookInput = {
   adresse?: string
   ville?: string
   notes?: string
+  kind?: string
+  source?: string
 }
 
 function parisParts(d: Date) {
@@ -419,6 +422,7 @@ async function internalBook(db: SupabaseClient, userId: string, input: BookInput
     return { ok: false, reason: "taken", error: "Ce créneau n'est plus disponible.", alternatives: alts.slots.slice(0, 4) }
   }
   const name = (input.client || "Client").trim()
+  const saved = await persistAppointment(db, userId, input, start, end, (input as BookInput & { source?: string }).source || "akno")
   return {
     ok: true,
     confirmation: `Rendez-vous confirmé ${formatParisLabel(start.toISOString())} pour ${name}.`,
@@ -426,22 +430,91 @@ async function internalBook(db: SupabaseClient, userId: string, input: BookInput
     end: end.toISOString(),
     label: formatParisLabel(start.toISOString()),
     provider: "akno",
+    appointment_id: saved.id,
   }
 }
 
+
+async function persistAppointment(db: SupabaseClient, artisanId: string, input: BookInput & { kind?: string }, start: Date, end: Date, source: string) {
+  const name = (input.client || "Client").trim()
+  const row: Record<string, unknown> = {
+    artisan_id: artisanId,
+    title: (input.objet || "Rendez-vous").trim() || "Rendez-vous",
+    client: name,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    telephone_client: input.telephone || null,
+    email_client: input.email || null,
+    adresse: input.adresse || null,
+    ville: input.ville || null,
+    notes: input.notes || null,
+    kind: input.kind || "rdv",
+    status: "prevu",
+    booking_source: source,
+  }
+  let { data, error } = await db.from("appointments").insert(row).select("id").maybeSingle()
+  if (error && /column|kind|booking_source|status/i.test(error.message || "")) {
+    const core = { artisan_id: artisanId, title: row.title, client: name, start: row.start, end: row.end, telephone_client: row.telephone_client, email_client: row.email_client, adresse: row.adresse, ville: row.ville, notes: row.notes }
+    ;({ data, error } = await db.from("appointments").insert(core).select("id").maybeSingle())
+  }
+  if (error || !data) return { id: null as string | null, error: error?.message }
+  // confirmation SMS (no-op propre sans clés)
+  try {
+    const { artisan } = await artisanSmsOn(db, artisanId)
+    const company = companyOfSms(artisan)
+    const tel = artisan?.entreprise_telephone || artisan?.telephone || ""
+    if (input.telephone) {
+      const sms = await sendAptSms(db, artisanId, input.telephone, confirmSmsText(company, start.toISOString(), { adresse: input.adresse, ville: input.ville }, tel), "confirm_rdv")
+      if (sms.ok && data.id) await db.from("appointments").update({ sms_confirm_at: new Date().toISOString() }).eq("id", data.id)
+    }
+  } catch { /* SMS facultatif */ }
+  return { id: data.id as string, error: undefined }
+}
+
+async function publicArtisan(token: string) {
+  const raw = (token || "").trim()
+  if (!raw || raw.length < 8) return { error: { status: 400, body: { error: "Lien de réservation invalide." } } }
+  const admin = adminClient()
+  const { data, error } = await admin.from("artisans").select("id, entreprise_nom, nom_entreprise, booking_on, booking_token, agenda_sms").eq("booking_token", raw).maybeSingle()
+  if (error && /booking_token|column/i.test(error.message || "")) return { error: { status: 409, body: { error: "Le lien de réservation n'est pas encore actif (migration update78)." } } }
+  if (!data) return { error: { status: 404, body: { error: "Lien de réservation introuvable." } } }
+  if (data.booking_on === false) return { error: { status: 403, body: { error: "Les réservations en ligne sont désactivées pour le moment." } } }
+  const company = String(data.entreprise_nom || data.nom_entreprise || "l'artisan").trim()
+  return { admin, artisanId: String(data.id), company }
+}
+
+async function handlePublicBooking(input: BookInput & SlotsInput & { action?: string; token?: string }) {
+  const found = await publicArtisan(String(input.token || ""))
+  if ("error" in found && found.error) return found.error
+  const { admin, artisanId, company } = found as { admin: SupabaseClient; artisanId: string; company: string }
+  if (input.action === "public_slots") {
+    const slots = await internalSlots(admin, artisanId, input)
+    return { status: 200, body: { ...slots, company } }
+  }
+  const result = await internalBook(admin, artisanId, { ...input, source: "public" } as BookInput)
+  if (!result.ok) return { status: 409, body: result }
+  return { status: 200, body: { ...result, company } }
+}
+
 export async function handleBooking(authorization: string | undefined, body: unknown, bridgeId?: string | null): Promise<{ status: number; body: Json }> {
+  const input = (body && typeof body === "object" ? body : {}) as Json & SlotsInput & BookInput & { action?: string; token?: string }
+  // update78 · lien public /reserver/:token — pas de session
+  if (input.action === "public_slots" || input.action === "public_book") {
+    try { return await handlePublicBooking({ ...input, action: input.action === "public_book" ? "public_book" : "public_slots" }) } catch {
+      return { status: 503, body: { error: "Réservation indisponible pour le moment." } }
+    }
+  }
   // update56 : le relais téléphonique (voice-bridge) agit pour l'artisan appelé, authentifié par BRIDGE_SECRET.
   const auth = bridgeId ? { user: { id: bridgeId }, db: adminClient() } : await verifyUser(authorization)
   if ("error" in auth && auth.error) return auth.error
   const { user, db } = auth as { user: { id: string }; db: SupabaseClient }
 
-  const input = (body && typeof body === "object" ? body : {}) as Json & SlotsInput & BookInput & { action?: string }
   try {
     const cfg = await resolveCalConfig(user.id)
     if (!cfg) {
       if (input.action === "slots") return { status: 200, body: await internalSlots(db, user.id, input) }
       if (input.action === "book") {
-        const result = await internalBook(db, user.id, input)
+        const result = await internalBook(db, user.id, { ...input, source: "reception" } as BookInput)
         return { status: result.ok ? 200 : 409, body: result }
       }
       return { status: 400, body: { error: "Action inconnue." } }
@@ -453,6 +526,11 @@ export async function handleBooking(authorization: string | undefined, body: unk
     }
     if (input.action === "book") {
       const result = await providerBook(cfg, input)
+      if (result.ok && "start" in result && result.start) {
+        try {
+          await persistAppointment(db, user.id, { ...input, source: "calcom" } as BookInput, new Date(String(result.start)), new Date(String(result.end || result.start)), "calcom")
+        } catch { /* l'agenda Cal.com reste la source, le miroir Akno est facultatif */ }
+      }
       return { status: result.ok ? 200 : "reason" in result && result.reason === "error" ? 502 : 409, body: result }
     }
     return { status: 400, body: { error: "Action inconnue." } }

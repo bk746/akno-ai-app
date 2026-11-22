@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { adminClient, appUrl, env } from "./mail.js"
 import { consume, monthKey } from "./limits.js"
 
-export type SmsKind = "rappel_rdv" | "relance_devis" | "relance_facture" | "avis" | "lead" | "test" | "invite_equipe" | "envoi_devis" | "envoi_facture"
+export type SmsKind = "rappel_rdv" | "confirm_rdv" | "on_arrive" | "relance_devis" | "relance_facture" | "avis" | "lead" | "test" | "invite_equipe" | "envoi_devis" | "envoi_facture"
 export type SmsResult = { ok: true; id?: string } | { ok: false; skipped?: boolean; error: string }
 
 /** SMS réels via Twilio, actifs seulement si les variables Twilio sont renseignées. */

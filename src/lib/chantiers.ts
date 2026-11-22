@@ -96,11 +96,11 @@ export async function saveEmploye(id: string | null, v: EmpInput): Promise<{ ok:
   emit({ employes: (state.employes.some(x => x.id === e.id) ? state.employes.map(x => x.id === e.id ? e : x) : [...state.employes, e]).sort((a, b) => a.first_name.localeCompare(b.first_name, "fr")) })
   return { ok: true, id: e.id }
 }
-/** update65 · Envoie (ou renvoie) l'invitation SMS d'accès à l'app — action « equipe_invite » de /api/account (infra SMS existante). */
+/** update65 · Envoie (ou renvoie) l'invitation e-mail d'accès à l'app — action « equipe_invite » de /api/account (Resend, SMS en appoint). */
 export async function inviteEmploye(id: string): Promise<{ ok: boolean; error?: string }> {
   const r = await api("/api/account", { action: "equipe_invite", employe_id: id })
   if (r.ok) { const at = typeof r.invited_at === "string" ? r.invited_at : new Date().toISOString(); emit({ employes: state.employes.map(x => x.id === id ? { ...x, invite_status: "pending", invited_at: at } : x) }); return { ok: true } }
-  return { ok: false, error: r.status === 503 ? "Invitation enregistrée, mais les SMS ne sont pas encore activés sur votre compte." : r.error || "Invitation non envoyée." }
+  return { ok: false, error: r.status === 503 ? "Invitation enregistrée, mais l'envoi d'e-mail n'est pas encore configuré (RESEND_API_KEY)." : r.error || "Invitation non envoyée." }
 }
 /** update65 · Change le niveau d'accès (null = retirer l'accès). */
 export async function setAccess(id: string, role: AccessRole | null) {

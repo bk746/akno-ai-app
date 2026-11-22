@@ -5,6 +5,8 @@ import "@fontsource-variable/geist"
 import "@fontsource-variable/geist-mono"
 import "./index.css"
 import AknoApp from "./components/AknoApp"
+import ReserverPublic from "./components/ReserverPublic"
+import RejoindrePublic from "./components/RejoindrePublic"
 import AcceptDevis from "./components/AcceptDevis"
 import { initMonitoring } from "./lib/monitoring"
 import { initMobile } from "./lib/mobile"
@@ -19,7 +21,7 @@ const Lazy = ({ children }: { children: React.ReactNode }) => <Suspense fallback
 initMonitoring()
 initMobile()
 initNative() // update70 · app iOS / Android (Capacitor)
-void applyStatusBar(location.pathname.startsWith("/payer") || location.pathname.startsWith("/dossier") ? "dark" : "light")
+void applyStatusBar(location.pathname.startsWith("/payer") || location.pathname.startsWith("/dossier") || location.pathname.startsWith("/reserver") || location.pathname.startsWith("/rejoindre") ? "dark" : "light")
 
 const PAGES = ["reception", "agenda", "relance", "devis", "parametres", "factures", "chantiers", "equipe", "clients"] // update62 : onglets Factures et Chantiers
 
@@ -28,6 +30,8 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/accept/:token" element={<AcceptDevis />} />
+        <Route path="/reserver/:token" element={<ReserverPublic />} />
+        <Route path="/rejoindre/:token" element={<RejoindrePublic />} />
         <Route path="/dossier/:token" element={<Lazy><DossierPublic /></Lazy>} />
         <Route path="/payer/:token" element={<Lazy><PayerPublic /></Lazy>} />
         {LEGAL.map(d => <Route key={d} path={`/${d}`} element={<Lazy><Legal doc={d} /></Lazy>} />)}

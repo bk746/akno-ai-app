@@ -3,7 +3,8 @@ import { supabase } from "./supabase"
 import { setCO } from "./devisDoc"
 import { mergeTarifs, tarifsEqual, type Tarifs } from "./tarifs"
 export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; rappelAt?: string; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; recording?: string; createdAt?: string; wantDevis?: boolean }
-export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean; callId?: string; phone?: string; notes?: string }
+export type EvKind = "chantier" | "rdv" | "visite" | "sav" | "urgence" | "absence"
+export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean; callId?: string; phone?: string; notes?: string; kind?: EvKind; absenceKind?: "conges" | "maladie" | "formation"; employeId?: string; clientId?: string; devisId?: string; factureId?: string; chantierId?: string; status?: "prevu" | "en_route" | "arrive" | "termine" | "annule"; lat?: number; lng?: number; rrule?: string; parentId?: string; email?: string; notesTerrain?: string; arrivedAt?: string; departedAt?: string; travelMin?: number; photos?: string[]; signature?: string; virtual?: boolean }
 export type RelStatus = "prog" | "pause" | "env" | "rep"
 export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string; at?: string; devisId?: string; appointmentId?: string; scheduledFor?: string; sentAt?: string }
 export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref" | "sans" | "perdu"
@@ -100,8 +101,64 @@ const toCall = (r: Row): Call => {
   const rappelAt = typeof r.rappel_creneau === "string" && r.rappel_creneau.trim() ? r.rappel_creneau.trim() : undefined
   return { id: String(r.id), name, topic: r.motif || r.type_demande || "Appel", tag: r.motif || undefined, time: hm(d), day: today ? undefined : yest ? "Hier" : d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }), urgent: /urg|haut|high/.test(u), callback, rappelAt, note, short: note ? `${name} · ${note}` : undefined, besoin: r.besoin_detail || undefined, urgence: r.urgence || undefined, addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, suite: r.notes || undefined, dur: sec ? `${Math.floor(sec / 60)}:${pad(sec % 60)}` : undefined, transcript: tr?.length ? tr : undefined, phone: r.telephone_client || undefined, recording: r.recording_url || undefined, createdAt: r.created_at || undefined, wantDevis: String(r.type_demande || "").toLowerCase() === "devis" }
 }
-const toEv = (r: Row): Ev => { const a = new Date(r.start), b = r.end ? new Date(r.end) : new Date(a.getTime() + 3600e3); return { id: r.id, date: isoDay(a), start: a.getHours() + a.getMinutes() / 60, dur: Math.max(.25, (b.getTime() - a.getTime()) / 3600e3), name: r.client || "Client", topic: r.title || "", addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1, ai: r.call_id != null, callId: r.call_id != null ? String(r.call_id) : undefined, phone: r.telephone_client || undefined, notes: r.notes || undefined } }
-const evRow = (e: Ev) => { const a = new Date(`${e.date}T00:00:00`); a.setMinutes(Math.round(e.start * 60)); const b = new Date(a.getTime() + e.dur * 3600e3); return { title: e.topic, client: e.name, start: a.toISOString(), end: b.toISOString(), adresse: e.addr ?? null } }
+
+const parisStamp = (iso: string | Date) => {
+  const d = typeof iso === "string" ? new Date(iso) : iso
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(d)
+  const g = (t: string) => parts.find(p => p.type === t)?.value || "00"
+  const hour = g("hour") === "24" ? 0 : Number(g("hour"))
+  return { date: `${g("year")}-${g("month")}-${g("day")}`, start: hour + Number(g("minute")) / 60 }
+}
+const parisIso = (ymd: string, hours: number) => {
+  const y = Number(ymd.slice(0, 4)), m = Number(ymd.slice(5, 7)), d = Number(ymd.slice(8, 10))
+  const hh = Math.floor(hours), mm = Math.round((hours - hh) * 60)
+  const utc = Date.UTC(y, m - 1, d, hh, mm)
+  // corrige le décalage Paris (UTC+1/+2) en s'appuyant sur Intl
+  const guess = new Date(utc)
+  const shown = parisStamp(guess)
+  const want = hours
+  const delta = (shown.start + (shown.date !== ymd ? (shown.date > ymd ? 24 : -24) : 0)) - want
+  return new Date(utc - delta * 3600e3).toISOString()
+}
+const toEv = (r: Row): Ev => {
+  const a = r.start ? parisStamp(String(r.start)) : { date: isoDay(new Date()), start: 9 }
+  const dur = r.end && r.start ? Math.max(.25, (new Date(String(r.end)).getTime() - new Date(String(r.start)).getTime()) / 3600e3) : 1
+  const kind = (["chantier", "rdv", "visite", "sav", "urgence", "absence"].includes(String(r.kind || "")) ? r.kind : "rdv") as Ev["kind"]
+  return {
+    id: r.id, date: a.date, start: a.start, dur, name: r.client || "Client", topic: r.title || "",
+    addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, created: 1,
+    ai: r.call_id != null, callId: r.call_id != null ? String(r.call_id) : undefined,
+    phone: r.telephone_client || undefined, email: r.email_client || undefined, notes: r.notes || undefined,
+    kind, absenceKind: r.absence_kind || undefined, employeId: r.employe_id || undefined,
+    clientId: r.client_id || undefined, devisId: r.devis_id || undefined, factureId: r.facture_id || undefined,
+    chantierId: r.chantier_id || undefined, status: r.status || "prevu", lat: r.lat ?? undefined, lng: r.lng ?? undefined,
+    rrule: r.rrule || undefined, parentId: r.parent_id || undefined, notesTerrain: r.notes_terrain || undefined,
+    arrivedAt: r.arrived_at || undefined, departedAt: r.departed_at || undefined, travelMin: r.travel_minutes ?? undefined,
+    photos: Array.isArray(r.photos) ? r.photos : undefined, signature: r.signature_png || undefined,
+  }
+}
+const evRowCore = (e: Ev) => {
+  const start = parisIso(e.date, e.start), end = parisIso(e.date, e.start + e.dur)
+  return { title: e.topic, client: e.name, start, end, adresse: e.addr ?? null, telephone_client: e.phone ?? null, email_client: e.email ?? null, notes: e.notes ?? null }
+}
+const evRow = (e: Ev) => ({
+  ...evRowCore(e),
+  kind: e.kind || "rdv", absence_kind: e.absenceKind ?? null, employe_id: e.employeId ?? null,
+  client_id: e.clientId ?? null, devis_id: e.devisId ?? null, facture_id: e.factureId ?? null,
+  chantier_id: e.chantierId ?? null, status: e.status || "prevu", lat: e.lat ?? null, lng: e.lng ?? null,
+  rrule: e.rrule ?? null, parent_id: e.parentId ?? null,
+  notes_terrain: e.notesTerrain ?? null, arrived_at: e.arrivedAt ?? null, departed_at: e.departedAt ?? null,
+  travel_minutes: e.travelMin ?? null, photos: e.photos || [], signature_png: e.signature ?? null,
+})
+const evWrite = (e: Ev, artisanId: string, insert: boolean) => {
+  const run = (row: Record<string, unknown>) => insert
+    ? supabase.from("appointments").insert({ ...row, artisan_id: artisanId })
+    : supabase.from("appointments").update(row).eq("id", e.id)
+  return run(evRow(e)).then(async r => {
+    if (r.error && /column|kind|employe_id|rrule|does not exist/i.test(r.error.message || "")) return run(evRowCore(e))
+    return r
+  })
+}
 export const mapStatut = (st: string): DevStatus => {
   // update52 : anciennes valeurs de la contrainte devis_statut_check (envoye / accepte / refuse)
   if (st === "envoyé" || st === "envoye") return "env"
@@ -164,14 +221,23 @@ export function useStore() {
     uidRef.current = user.id
     // update44 : filtre artisan_id explicite en plus de la RLS (défense en profondeur, multi-clients)
     const since = new Date(Date.now() - 400 * 864e5).toISOString()
+    // update78 : un employé ne doit JAMAIS se voir créer une fiche artisan (il resterait patron).
+    let employeId: string | null = null
+    try {
+      const emp = await supabase.from("employes").select("id, artisan_id").eq("user_id", user.id).maybeSingle()
+      if (emp.data?.id) employeId = emp.data.id
+    } catch { /* colonne user_id absente tant que la migration update78 n'est pas appliquée */ }
+    const evQ = employeId
+      ? supabase.from("appointments").select("*").eq("employe_id", employeId).gte("start", since).order("start").limit(2000)
+      : supabase.from("appointments").select("*").eq("artisan_id", user.id).gte("start", since).order("start").limit(2000)
     const [c, a, d, p, rl] = await Promise.all([
-      supabase.from("calls").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(200),
-      supabase.from("appointments").select("*").eq("artisan_id", user.id).gte("start", since).order("start").limit(2000),
-      supabase.from("devis").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(1000),
+      employeId ? Promise.resolve({ data: [] as Row[] }) : supabase.from("calls").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(200),
+      evQ,
+      employeId ? Promise.resolve({ data: [] as Row[] }) : supabase.from("devis").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(1000),
       supabase.from("artisans").select("*").eq("id", user.id).maybeSingle(),
-      supabase.from("relances").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(1000)])
+      employeId ? Promise.resolve({ data: [] as Row[] }) : supabase.from("relances").select("*").eq("artisan_id", user.id).order("created_at", { ascending: false }).limit(1000)])
     if (p.data) setCO(p.data)
-    if (!p.data && !p.error) await supabase.from("artisans").insert({ id: user.id, email: user.email })
+    if (!employeId && !p.data && !p.error) await supabase.from("artisans").insert({ id: user.id, email: user.email })
     const dv = d.data || []
     const nextCalls = (c.data || []).map(toCall)
     const nextEvents = (a.data || []).map(toEv)
@@ -233,7 +299,7 @@ export function useStore() {
       else if (o && (o.callback !== c.callback || o.suite !== c.suite)) jobs.push(supabase.from("calls").update({ statut: c.callback ? "a_rappeler" : "rappele", rappel_souhaite: c.callback, ...(o.suite !== c.suite ? { notes: c.suite ?? null } : {}) }).eq("id", Number(c.id)))
     }
     if (p.events !== n.events) {
-      for (const e of n.events) { const o = p.events.find(x => x.id === e.id); if (!o) jobs.push(supabase.from("appointments").insert({ ...evRow(e), artisan_id: me })); else if (o !== e && isUuid(e.id)) jobs.push(supabase.from("appointments").update(evRow(e)).eq("id", e.id)) }
+      for (const e of n.events) { if (e.virtual) continue; const o = p.events.find(x => x.id === e.id); if (!o) jobs.push(evWrite(e, me, true)); else if (o !== e && isUuid(e.id)) jobs.push(evWrite(e, me, false)) }
       for (const o of p.events) if (isUuid(o.id) && !n.events.some(x => x.id === o.id)) jobs.push(supabase.from("appointments").delete().eq("id", o.id))
     }
     if (p.devis !== n.devis) {

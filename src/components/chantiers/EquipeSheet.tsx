@@ -1,6 +1,6 @@
 /* update64 · Équipe — update65 : formulaire « Nouveau membre / Modifier » (maquette equipe-ajout.png), partagé par
    la page Équipe et par le formulaire chantier (« Gérer l'équipe »). Prénom, nom, métier en puces, téléphone (FR validé),
-   e-mail, date d'entrée, photo (bucket privé equipe), accès à l'app + invitation SMS. */
+   e-mail, date d'entrée, photo (bucket privé equipe), accès à l'app + invitation par e-mail (Resend). */
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -63,9 +63,9 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
     const e: Record<string, string> = {}, ph = d.phone.trim() ? frPhone(d.phone) : ""
     if (!d.first_name.trim()) e.first_name = "Indiquez le prénom."
     if (d.phone.trim() && !ph) e.phone = "Numéro français à 10 chiffres (ex. 06 41 22 87 15)."
-    if (st.ext && d.access && !ph) e.phone = e.phone || "Un numéro de mobile est nécessaire pour l'invitation SMS."
-    else if (st.ext && d.access && !isMobile(ph)) e.phone = "L'invitation part par SMS : indiquez un mobile (06 ou 07)."
-    if (st.ext && d.email.trim() && !validEmail(d.email)) e.email = "Adresse e-mail invalide."
+    if (st.ext && d.access && !d.email.trim()) e.email = "Indiquez un e-mail pour envoyer l'invitation."
+    else if (st.ext && d.email.trim() && !validEmail(d.email)) e.email = "Adresse e-mail invalide."
+    if (st.ext && d.access && ph && !isMobile(ph) && d.phone.trim()) e.phone = "Le SMS d'appoint nécessite un mobile (06 ou 07) — l'invitation part surtout par e-mail."
     if (d.metier === "Autre" && !d.autre.trim()) e.autre = "Précisez le métier."
     setErrs(e)
     if (Object.keys(e).length) { navigator.vibrate?.(8); return }
@@ -79,7 +79,7 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
     if (!r.ok) { setBusy(""); toast(r.error); return }
     if (newlyInvited) {
       const inv = await inviteEmploye(r.id)
-      toast(inv.ok ? `Invitation envoyée à ${d.first_name.trim()} par SMS` : inv.error || "Invitation non envoyée.")
+      toast(inv.ok ? `Invitation envoyée à ${d.first_name.trim()} par e-mail` : inv.error || "Invitation non envoyée.")
     } else toast(edit ? "Modifications enregistrées" : `${d.first_name.trim()} ajouté à l'équipe`)
     setBusy(""); onSaved?.(r.id); onClose()
   }
@@ -119,11 +119,11 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
         </motion.div>}</AnimatePresence>
         <Group className="mt-5">
           <Field label="Téléphone" htmlFor="mf-tel" err={errs.phone}><input id="mf-tel" className={inp} type="tel" inputMode="tel" autoComplete="off" enterKeyHint="next" placeholder="06 12 34 56 78" maxLength={20} value={d.phone} onChange={e => set({ phone: e.target.value })} onBlur={() => { const p = frPhone(d.phone); if (p) set({ phone: p }) }} /></Field>
-          {st.ext && <Field label="Email" htmlFor="mf-mail" err={errs.email}><input id="mf-mail" className={inp} type="email" inputMode="email" autoComplete="off" autoCapitalize="none" enterKeyHint="done" placeholder="Optionnel" maxLength={254} value={d.email} onChange={e => set({ email: e.target.value })} /></Field>}
+          {st.ext && <Field label="Email" htmlFor="mf-mail" err={errs.email}><input id="mf-mail" className={inp} type="email" inputMode="email" autoComplete="off" autoCapitalize="none" enterKeyHint="done" placeholder="Obligatoire pour l'accès" maxLength={254} value={d.email} onChange={e => set({ email: e.target.value })} /></Field>}
           {st.ext && edit && <Field label="Date d'entrée" htmlFor="mf-hired"><input id="mf-hired" className={inp + " akno-dt"} type="date" max="2100-12-31" value={d.hired_on} onChange={e => set({ hired_on: e.target.value })} /></Field>}
         </Group>
         {st.ext ? <div className="mt-5 rounded-[16px] bg-white/[.07] px-4 py-3.5">
-          <div className="flex items-center gap-3"><div className="min-w-0 flex-1"><div className="text-[16.5px] font-medium">Accès à l'app</div><div className="mt-0.5 text-[13.5px] text-white/50">{initial?.invite_status === "accepted" ? "Compte activé" : initial?.access_role && initial.invited_at ? "Invitation déjà envoyée" : "Envoyer une invitation par SMS"}</div></div><GreenSwitch on={d.access} onChange={v => set({ access: v, phone: d.phone })} label="Accès à l'app" /></div>
+          <div className="flex items-center gap-3"><div className="min-w-0 flex-1"><div className="text-[16.5px] font-medium">Accès à l'app</div><div className="mt-0.5 text-[13.5px] text-white/50">{initial?.invite_status === "accepted" ? "Compte activé" : initial?.access_role && initial.invited_at ? "Invitation déjà envoyée" : "Envoyer une invitation par e-mail"}</div></div><GreenSwitch on={d.access} onChange={v => set({ access: v, phone: d.phone })} label="Accès à l'app" /></div>
           <AnimatePresence initial={false}>{d.access && <motion.div key="seg" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ height: SPRING, opacity: { duration: .15 } }} className="overflow-hidden"><div className="pt-3.5"><RoleSeg value={d.role} onChange={r => set({ role: r })} /></div></motion.div>}</AnimatePresence>
         </div> : <p className="mt-5 px-1 text-[12.5px] leading-[18px] text-white/35">E-mail, date d'entrée et accès à l'app arrivent avec la migration 20261121_12 (voir LISEZMOI update65).</p>}
         {edit && <button type="button" onClick={() => setConfirmDel(true)} className="mt-8 flex h-12 w-full items-center justify-center gap-2 rounded-[16px] bg-white/[.07] text-[16px] font-medium text-[#FF6B6B] active:bg-white/[.1]"><Trash2 size={17} />Retirer de l'équipe</button>}

@@ -67,12 +67,69 @@ export async function ensureChantier(sb: SupabaseClient, devis: Json): Promise<s
   return error || !data ? null : String(data.id)
 }
 
+/** update78 · un devis signé crée aussi l'événement chantier dans l'agenda (journée 8 h–17 h, prochain jour ouvré). */
+export async function ensureChantierAgenda(sb: SupabaseClient, devis: Json, chantierId: string | null) {
+  const devisId = String(devis.id || "")
+  if (!devisId) return
+  const q = sb.from("appointments").select("id").eq("artisan_id", devis.artisan_id as string)
+  const { data: prev } = chantierId
+    ? await q.or(`chantier_id.eq.${chantierId},devis_id.eq.${devisId}`).limit(1)
+    : await q.eq("devis_id", devisId).limit(1)
+  if (prev?.length) {
+    if (chantierId) await sb.from("appointments").update({ chantier_id: chantierId }).eq("id", prev[0].id)
+    return
+  }
+  const now = new Date()
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hourCycle: "h23" })
+  const parts = Object.fromEntries(fmt.formatToParts(now).filter(x => x.type !== "literal").map(x => [x.type, x.value]))
+  let y = Number(parts.year), m = Number(parts.month), d = Number(parts.day)
+  const addDays = (n: number) => {
+    const dt = new Date(Date.UTC(y, m - 1, d + n))
+    y = dt.getUTCFullYear(); m = dt.getUTCMonth() + 1; d = dt.getUTCDate()
+  }
+  const dow = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[parts.weekday as string] ?? 1
+  if (dow === 6) addDays(2)
+  else if (dow === 0) addDays(1)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  const ymd = `${y}-${pad(m)}-${pad(d)}`
+  // 8 h / 17 h Europe/Paris → ISO via décalage local approximé puis corrigé
+  const toUtc = (h: number) => {
+    const guess = Date.UTC(y, m - 1, d, h, 0, 0)
+    const shown = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Paris", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date(guess))
+    const hour = Number(shown.find(p => p.type === "hour")?.value || h)
+    return new Date(guess + (h - hour) * 3600e3).toISOString()
+  }
+  const client = String(devis.client_nom || "Client").trim() || "Client"
+  const row: Record<string, unknown> = {
+    artisan_id: devis.artisan_id,
+    title: String(devis.objet || `Chantier ${client}`).slice(0, 160) || "Chantier",
+    client,
+    start: toUtc(8),
+    end: toUtc(17),
+    adresse: devis.client_adresse || null,
+    telephone_client: devis.client_telephone || null,
+    email_client: devis.client_email || null,
+    kind: "chantier",
+    status: "prevu",
+    devis_id: devisId,
+    chantier_id: chantierId,
+    client_id: devis.client_id || null,
+    notes: `Créé à la signature du devis n° ${devis.numero}.`,
+    booking_source: "devis_signe",
+  }
+  const { error } = await sb.from("appointments").insert(row)
+  if (error && /column|kind|devis_id|chantier_id/i.test(error.message || "")) {
+    await sb.from("appointments").insert({ artisan_id: row.artisan_id, title: row.title, client, start: row.start, end: row.end, adresse: row.adresse, telephone_client: row.telephone_client, notes: row.notes })
+  }
+}
+
 export async function afterSign(sb: SupabaseClient, devis: Json): Promise<{ acompte: string | null; chantier: string | null }> {
   let artisan: Json | null = null
   try { const { data } = await sb.from("artisans").select("*").eq("id", devis.artisan_id as string).maybeSingle(); artisan = data as Json | null } catch { /* facultatif */ }
   let acompte: string | null = null, chantier: string | null = null
   try { acompte = await ensureAcompte(sb, devis, artisan) } catch { /* facultatif */ }
   try { chantier = await ensureChantier(sb, devis) } catch { /* facultatif */ }
+  try { await ensureChantierAgenda(sb, devis, chantier) } catch { /* facultatif : l'agenda ne doit pas bloquer la signature */ }
   return { acompte, chantier }
 }
 

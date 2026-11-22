@@ -22,6 +22,7 @@ import { billingHidden } from "../../lib/native"
 import { NativeNoAccess } from "../billing/NativeAccess"
 import { MButton, MChoice, MInput, MScreen, MSub, MTitle } from "./Mobile"
 import { LockSetup } from "../Lock"
+import { useAppRole, useRoleReady } from "../../lib/role"
 
 type Step = "vous" | "offre" | "entreprise" | "code" | "app"
 const METIERS = ["Électricien", "Plombier", "Chauffagiste", "Serrurier", "Peintre", "Menuisier", "Maçon", "Couvreur", "Carreleur", "Plaquiste", "Climaticien", "Multiservice", "Autre"]
@@ -45,6 +46,8 @@ export default function Flow({ ses, children }: { ses: Session; children: ReactN
   const [offerOpen, setOfferOpen] = useState(!!ret)
   const [lockDone, setLockDone] = useState(() => hasLock(uid) || asked(uid))
   const entered = useRef(false)
+  const role = useAppRole()
+  const roleReady = useRoleReady()
 
   const e = acc.a?.entitlements, p = prof.p
   const needsPlan = !!e && e.billingEnabled && !e.access && e.status !== "past_due"
@@ -52,6 +55,9 @@ export default function Flow({ ses, children }: { ses: Session; children: ReactN
   useEffect(() => { if (needsPlan) setOfferOpen(true) }, [needsPlan])
 
   if (entered.current) return <>{children}</>
+  // update78 · un employé n'a pas de fiche artisan : on ne le fait pas passer par l'onboarding patron
+  if (roleReady && role?.kind === "employe") { entered.current = true; return <>{children}</> }
+  if (!roleReady) return <Loading />
   if (acc.state === "error" || prof.state === "error") return <Problem msg={acc.state === "error" ? acc.error : "Votre fiche n'a pas pu être chargée."} retry={() => { void acc.retry(); void prof.reload() }} />
   if (acc.state !== "ok" || prof.state === "loading") return <Loading />
 

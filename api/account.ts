@@ -7,7 +7,8 @@ import { ensureDefaultPaymentMethod, syncSubscription } from "./_lib/stripeSync.
 import { upgradeSubscription } from "./_lib/upgrade.js"
 import { sendSmsMetered, smsConfigured } from "./_lib/sms.js"
 import { reportError } from "./_lib/monitoring.js"
-import { handleEquipeInvite } from "./_lib/equipe.js"
+import { handleEquipeInvite, handleEquipeInvite78, previewEquipeInvite, acceptEquipeInvite } from "./_lib/equipe.js"
+import { sendAptSms, onArriveSmsText, companyOf as companyOfApt, artisanSmsOn } from "./_lib/agendaSms.js"
 import { deleteAccount } from "./_lib/deleteAccount.js"
 import { connectOnboard, connectRefresh } from "./_lib/chain.js"
 import { bundlePerArtisan, FALLBACK_MSG, provisionArtisanNumber, submitRegulatory, twilioNumbers } from "./_lib/phoneProvision.js"
@@ -318,12 +319,23 @@ async function voicePreview(sb: import("@supabase/supabase-js").SupabaseClient, 
 }
 
 export async function handleAccount(authorization?: string, body?: unknown, headers?: Headers): Promise<ApiResult> {
+  const input = parseBody(body)
+  const action0 = String(input.action || "status")
+  // update78 · acceptation d'invitation employé : pas de session (le jeton suffit)
+  if (action0 === "equipe_preview" || action0 === "equipe_accept") {
+    try {
+      const admin = adminClient()
+      if (action0 === "equipe_preview") return await previewEquipeInvite(admin, String(input.token || ""))
+      return await acceptEquipeInvite(admin, input)
+    } catch {
+      return { status: 503, body: { error: "Invitation indisponible pour le moment." } }
+    }
+  }
   const session = await authed(authorization)
   if (isResult(session)) return session
-  const input = parseBody(body)
   const { supabase, userId } = session
   try {
-    const action = String(input.action || "status")
+    const action = action0
     if (action === "status") return await status(supabase, userId)
     if (!await rateLimit(userId, "account", 20)) return { status: 429, body: { error: "Trop de requêtes. Patientez une minute." } }
     if (action === "checkout") return await checkout(supabase, userId, session.email, input, headers)
@@ -355,9 +367,55 @@ export async function handleAccount(authorization?: string, body?: unknown, head
       try { admin = adminClient() } catch { return { status: 503, body: { error: "Suppression indisponible pour le moment. Écrivez au support." } } }
       return await deleteAccount(admin, userId, input)
     }
-    if (action === "equipe_invite") { // update65 · invitation SMS d'un membre de l'équipe
+    if (action === "booking_link") { // update78 · lien public + options SMS agenda
+      const { data, error } = await supabase.from("artisans").select("booking_token, booking_on, agenda_sms, entreprise_nom, nom_entreprise").eq("id", userId).maybeSingle()
+      if (error && /booking_token|column/i.test(error.message || "")) return { status: 409, body: { error: "Appliquez d'abord la migration update78 (lien de réservation)." } }
+      let token = data?.booking_token as string | null
+      if (!token) {
+        const { data: up, error: uerr } = await supabase.from("artisans").update({ booking_token: crypto.randomUUID() }).eq("id", userId).select("booking_token").maybeSingle()
+        if (uerr) return { status: 409, body: { error: "Appliquez d'abord la migration update78 (lien de réservation)." } }
+        token = up?.booking_token || null
+      }
+      if (input.booking_on === true || input.booking_on === false || input.agenda_sms === true || input.agenda_sms === false) {
+        const patch: Record<string, unknown> = {}
+        if (input.booking_on === true || input.booking_on === false) patch.booking_on = input.booking_on
+        if (input.agenda_sms === true || input.agenda_sms === false) patch.agenda_sms = input.agenda_sms
+        await supabase.from("artisans").update(patch).eq("id", userId)
+      }
+      const { data: fresh } = await supabase.from("artisans").select("booking_token, booking_on, agenda_sms").eq("id", userId).maybeSingle()
+      const base = (appUrl() || origin(headers)).replace(/\/$/, "")
+      return { status: 200, body: { ok: true, token: fresh?.booking_token || token, booking_on: fresh?.booking_on !== false, agenda_sms: fresh?.agenda_sms !== false, url: `${base}/reserver/${fresh?.booking_token || token}` } }
+    }
+    if (action === "agenda_on_arrive") { // update78 · SMS « on arrive » immédiat (le cron quotidien est trop tard)
+      const id = String(input.appointment_id || "")
+      if (!id) return { status: 400, body: { error: "Intervention introuvable." } }
+      const { data: apt } = await supabase.from("appointments").select("id, artisan_id, employe_id, telephone_client, travel_minutes, status, sms_on_the_way_at").eq("id", id).maybeSingle()
+      if (!apt) return { status: 404, body: { error: "Intervention introuvable." } }
+      // patron ou employé assigné
+      if (apt.artisan_id !== userId) {
+        const { data: me } = await supabase.from("employes").select("id").eq("user_id", userId).maybeSingle()
+        if (!me || me.id !== apt.employe_id) return { status: 403, body: { error: "Cette intervention ne vous est pas assignée." } }
+      }
+      const patch: Record<string, unknown> = { status: "en_route" }
+      let smsOk = false
+      if (apt.telephone_client && !apt.sms_on_the_way_at) {
+        const { artisan } = await artisanSmsOn(adminClient(), apt.artisan_id)
+        const r = await sendAptSms(adminClient(), apt.artisan_id, apt.telephone_client, onArriveSmsText(companyOfApt(artisan), apt.travel_minutes), "on_arrive")
+        if (r.ok) { patch.sms_on_the_way_at = new Date().toISOString(); smsOk = true }
+      }
+      const { error } = await supabase.from("appointments").update(patch).eq("id", id)
+      if (error && /column|status/i.test(error.message || "")) return { status: 409, body: { error: "Appliquez d'abord la migration update78." } }
+      return { status: 200, body: { ok: true, sms: smsOk, status: "en_route" } }
+    }
+    if (action === "equipe_invite") { // update78 · invitation e-mail (Resend) ; SMS en plus si un mobile est renseigné
       const ent = await loadEntitlements(supabase, userId)
-      return await handleEquipeInvite(supabase, userId, input, { send: x => sendSmsMetered(x, ent.quotas.sms), consume, day: dayKey(), url: appUrl() })
+      const deps = { send: (x: Parameters<typeof sendSmsMetered>[0]) => sendSmsMetered(x, ent.quotas.sms), consume, day: dayKey(), url: appUrl() || "", appUrl: appUrl() || origin(headers) }
+      const r78 = await handleEquipeInvite78(supabase, userId, input, deps)
+      // pas d'e-mail sur la fiche : on retombe sur l'invitation SMS (update65)
+      if (r78.status === 400 && /e-mail/i.test(String((r78.body as { error?: string }).error || ""))) {
+        return await handleEquipeInvite(supabase, userId, input, deps)
+      }
+      return r78
     }
     if (action === "provision_number") { // update76 · achat autonome du numéro Twilio (compte Akno)
       const ent = await loadEntitlements(supabase, userId)

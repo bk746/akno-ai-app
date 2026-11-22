@@ -7,6 +7,7 @@ import {
 } from "./_lib/mail.js"
 import { can, loadEntitlements, type Entitlements, type Feature } from "./_lib/plans.js"
 import { sendSms, smsConfigured } from "./_lib/sms.js"
+import { sendAptSms, confirmSmsText, eveSmsText, onArriveSmsText, artisanSmsOn, companyOf as companyOfApt } from "./_lib/agendaSms.js"
 import { consume, monthKey } from "./_lib/limits.js"
 import { notifyArtisan } from "./_lib/push.js"
 import { reportError } from "./_lib/monitoring.js"
@@ -272,29 +273,59 @@ async function processReviews(sb: SupabaseClient, ctx: Ctx, now: Date) {
 
 /* ---------- update47 : rappel SMS la veille du rendez-vous ---------- */
 async function processAppointmentReminders(sb: SupabaseClient, ctx: Ctx, now: Date) {
-  if (!smsConfigured()) return { sent: 0 }
-  const tomorrow = addDaysYmd(parisYmd(now), 1)
+  // Sans clés Twilio : no-op propre (0 envoyé), le cron reste vert.
+  if (!smsConfigured()) return { sent: 0, confirm: 0, arrive: 0 }
+  const today = parisYmd(now)
+  const tomorrow = addDaysYmd(today, 1)
+  let sent = 0, confirm = 0, arrive = 0
+
+  // 1) Confirmation : RDV futurs pas encore confirmés par SMS
+  const { data: toConfirm } = await sb.from("appointments")
+    .select("id, artisan_id, telephone_client, start, adresse, ville, sms_confirm_at, status, kind")
+    .is("sms_confirm_at", null)
+    .gt("start", now.toISOString())
+    .limit(150)
+  for (const apt of toConfirm || []) {
+    if (!apt.telephone_client) continue
+    if (apt.status === "annule" || apt.kind === "absence") continue
+    const { artisan } = await artisanSmsOn(sb, apt.artisan_id)
+    const company = companyOfApt(artisan)
+    const tel = artisan?.entreprise_telephone || artisan?.telephone || ""
+    const ok = await sendAptSms(sb, apt.artisan_id, apt.telephone_client, confirmSmsText(company, apt.start, apt, tel), "confirm_rdv")
+    if (ok.ok) { await sb.from("appointments").update({ sms_confirm_at: now.toISOString() }).eq("id", apt.id); confirm++ }
+  }
+
+  // 2) Rappel la veille
   const { data: apts } = await sb.from("appointments")
-    .select("id, artisan_id, client, telephone_client, start, adresse, ville")
+    .select("id, artisan_id, client, telephone_client, start, adresse, ville, kind, status")
     .is("rappel_sms_le", null)
     .gte("start", parisDayStart(tomorrow).toISOString())
     .lt("start", parisDayStart(addDaysYmd(tomorrow, 1)).toISOString())
     .limit(150)
-  let sent = 0
   for (const apt of apts || []) {
     if (!apt.telephone_client) continue
-    const artisan = await ctx.artisan(apt.artisan_id)
-    const company = companyOf(artisan)
-    const hour = new Date(apt.start).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" })
+    if (apt.status === "annule" || apt.kind === "absence") continue
+    const { artisan } = await artisanSmsOn(sb, apt.artisan_id)
+    const company = companyOfApt(artisan)
     const tel = artisan?.entreprise_telephone || artisan?.telephone || ""
-    const ok = await trySms(sb, ctx, apt.artisan_id, apt.telephone_client,
-      `${company} : rappel de votre rendez-vous demain à ${hour}${apt.adresse ? ` (${apt.adresse}${apt.ville ? `, ${apt.ville}` : ""})` : ""}.${tel ? ` Un empêchement ? Appelez le ${tel}.` : ""}`, "rappel_rdv")
-    if (ok) {
-      await sb.from("appointments").update({ rappel_sms_le: now.toISOString() }).eq("id", apt.id)
-      sent++
-    }
+    const ok = await sendAptSms(sb, apt.artisan_id, apt.telephone_client, eveSmsText(company, apt.start, apt, tel), "rappel_rdv")
+    if (ok.ok) { await sb.from("appointments").update({ rappel_sms_le: now.toISOString() }).eq("id", apt.id); sent++ }
   }
-  return { sent }
+
+  // 3) Filet « on arrive » si le pointage en_route n'a pas pu partir tout de suite
+  const { data: going } = await sb.from("appointments")
+    .select("id, artisan_id, telephone_client, start, travel_minutes, status, sms_on_the_way_at")
+    .eq("status", "en_route")
+    .is("sms_on_the_way_at", null)
+    .limit(80)
+  for (const apt of going || []) {
+    if (!apt.telephone_client) continue
+    const { artisan } = await artisanSmsOn(sb, apt.artisan_id)
+    const company = companyOfApt(artisan)
+    const ok = await sendAptSms(sb, apt.artisan_id, apt.telephone_client, onArriveSmsText(company, apt.travel_minutes), "on_arrive")
+    if (ok.ok) { await sb.from("appointments").update({ sms_on_the_way_at: now.toISOString() }).eq("id", apt.id); arrive++ }
+  }
+  return { sent, confirm, arrive }
 }
 
 /* ---------- update46 : relances d'impayés PRÉPARÉES, validées par l'artisan ---------- */

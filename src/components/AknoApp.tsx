@@ -70,6 +70,12 @@ import { PUSH, SNAP, TAB, idle, lazyPage } from "../lib/motion"
 import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
 import ModalSheet from "./sheet/ModalSheet"
 import { SwipeRow, askConfirm, ConfirmHost } from "./form/SwipeRow"
+import EventSheet from "./agenda/EventSheet"
+import TeamView from "./agenda/TeamView"
+import AgendaTools from "./agenda/AgendaTools"
+import { attachTravel, expandForGrid, expandRecurring, kindColor } from "../lib/agenda"
+import { useAppRole } from "../lib/role"
+
 import { devisDeleteReason, factureSwipeAction } from "../lib/docDelete"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
@@ -107,14 +113,15 @@ const findC = (n: string) => CL.find(c => c.key === ckey(n))
 const tel = (n: string) => { const p = PHONES.get(n); if (p) return p; const f = findC(n); if (f) return f.phone.replace(/ /g, ""); return "" } // update44 : plus de faux numéro inventé quand le client n'a pas de téléphone connu
 
 function Side() {
-  const { page, go, s } = useC(), rr = useRights()
+  const { page, go, s } = useC(), rr = useRights(), role = useAppRole()
+  const isEmploye = role?.kind === "employe"
   const nDev = s.devis.filter(toValidate).length, nFac = unpaidCount(useFacturesLite())
   const It = ({ id, l, c }: any) => { const on = id === page; return <motion.button whileTap={{ scale: .97 }} onClick={() => go(id)} aria-current={on ? "page" : undefined} className={`relative flex h-11 w-full items-center gap-3 rounded-full px-4 text-[15px] font-medium transition-colors ${on ? "text-white" : "text-white/45 hover:text-white/80"}`}>{on && <motion.span layoutId="side-pill" transition={spring} className="absolute inset-0 rounded-full bg-white/10" />}<span className="relative flex w-full items-center gap-3">{id === "set" ? <Me size={20} on={on} /> : <NI d={NAV_I[id as P]} size={20} />}{l}<span className="ml-auto flex items-center gap-2">{id === "rec" && !rr.reception && <LockIco size={13} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" />}{id === "dev" && nDev > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: A.dev.c }}>{nDev}</span>}{id === "fac" && nFac > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1.5 text-[11px] font-bold text-black">{nFac}</span>}{on && <span className="h-[5px] w-[5px] rounded-full" style={{ background: ink(c) }} />}</span></span></motion.button> }
   return <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/[.07] px-4 py-6">
     <div className="flex h-12 items-center px-3"><img src="/logo.png" alt="Akno" className="h-9" /></div>
-    <nav aria-label="Navigation principale" className="mt-8 space-y-1">{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}<It id="fac" l="Factures" c="#fff" /><It id="ch" l="Chantiers" c="#fff" /><It id="eq" l="Équipe" c="#fff" /><It id="cl" l="Clients" c="#fff" /></nav>
-    <div className={`mt-8 px-3 ${tx.cap}`}>Agents</div>
-    <div className="mt-3 space-y-3 px-3">{agents.map(a => <button key={a} onClick={() => go(a)} className="flex w-full items-center gap-3 text-[13px] text-white/70"><Blob c={A[a].c} s={16} />{A[a].n}<span className="ml-auto">{a === "rec" && !rr.reception ? <LockIco size={12} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" /> : <Dot c={s.settings.agents[a] ? GREEN : GREY} />}</span></button>)}</div>
+    <nav aria-label="Navigation principale" className="mt-8 space-y-1">{isEmploye ? <It id="ag" l="Agenda" c={A.ag.c} /> : <>{agents.map(a => <It key={a} id={a} l={A[a].tab} c={A[a].c} />)}<It id="fac" l="Factures" c="#fff" /><It id="ch" l="Chantiers" c="#fff" /><It id="eq" l="Équipe" c="#fff" /><It id="cl" l="Clients" c="#fff" /></>}</nav>
+    {!isEmploye && <><div className={`mt-8 px-3 ${tx.cap}`}>Agents</div>
+    <div className="mt-3 space-y-3 px-3">{agents.map(a => <button key={a} onClick={() => go(a)} className="flex w-full items-center gap-3 text-[13px] text-white/70"><Blob c={A[a].c} s={16} />{A[a].n}<span className="ml-auto">{a === "rec" && !rr.reception ? <LockIco size={12} strokeWidth={2} className="text-white/35" aria-label="Option non incluse" /> : <Dot c={s.settings.agents[a] ? GREEN : GREY} />}</span></button>)}</div></>}
     <div className="mt-auto"><It id="set" l="Paramètres" c="#fff" /><div className="mt-3 flex items-center gap-3 border-t border-white/[.07] px-3 pt-4"><Av n={meName(s)} /><div><div className="text-[13px] font-medium">{meName(s)}</div><div className="text-[12px] text-white/50">{s.settings.company || ""}</div></div></div></div>
   </aside>
 }
@@ -410,7 +417,7 @@ function RecFull() {
 
 /* ---------------- Agenda ---------------- */
 const fmtD = (iso: string) => { const d = dd(iso); return `${DAYS[(d.getDay() + 6) % 7]} ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}` }
-type CV = "j" | "s" | "m" | "a"
+type CV = "j" | "s" | "m" | "a" | "e"
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 const monOf = (x: string) => addDays(x, -((dd(x).getDay() + 6) % 7))
 const addM = (x: string, n: number) => { const d = dd(x); return iso(new Date(d.getFullYear(), d.getMonth() + n, 1, 12)) }
@@ -433,8 +440,8 @@ function TimeGrid({ days, evs, onEv, onSlot }: { days: string[]; evs: Ev[]; onEv
           {days.map(d => { const list = evs.filter(e => e.date === d)
             return <div key={d} className={`relative flex-1 border-l border-white/[.06] ${wk(d) ? "bg-white/[.015]" : ""}`} onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onSlot(d, Math.floor(H0 + (e.clientY - r.top) / HH * 2) / 2) }}>
               {hours.map(h => <div key={h} className="border-t border-white/[.05] first:border-t-0" style={{ height: HH }} />)}
-              {list.map(e => { const past = e.date < TODAY || (e.date === TODAY && e.start + e.dur <= NOW); return <button key={e.id} onClick={x => { x.stopPropagation(); onEv(e) }} aria-label={`${e.name} · ${e.topic} · ${hh(e.start)}`} className={`absolute left-1 right-1 overflow-hidden rounded-[10px] px-2 py-1.5 text-left transition hover:brightness-125 ${past ? "opacity-50" : ""} ${wk(d) ? "opacity-60" : ""}`} style={{ top: (e.start - H0) * HH + 1, height: Math.max(22, e.dur * HH - 3), background: `${c}24`, boxShadow: `inset 3px 0 0 ${c}` }}>
-                <div className="truncate text-[12.5px] font-semibold leading-tight" style={{ color: "#FFB4B4" }}>{e.name}</div>{e.dur * HH > 34 && <div className="truncate text-[11.5px] leading-tight text-white/55">{e.topic} · {hh(e.start)}</div>}</button> })}
+              {list.map(e => { const past = e.date < TODAY || (e.date === TODAY && e.start + e.dur <= NOW); const col = kindColor(e.kind); return <button key={e.id} data-kind={e.kind || "rdv"} onClick={x => { x.stopPropagation(); onEv(e) }} aria-label={`${e.name} · ${e.topic} · ${hh(e.start)}`} className={`absolute left-1 right-1 overflow-hidden rounded-[10px] px-2 py-1.5 text-left transition hover:brightness-125 ${past ? "opacity-50" : ""} ${wk(d) ? "opacity-60" : ""}`} style={{ top: (e.start - H0) * HH + 1, height: Math.max(22, e.dur * HH - 3), background: `${col}24`, boxShadow: `inset 3px 0 0 ${col}` }}>
+                <div className="truncate text-[12.5px] font-semibold leading-tight" style={{ color: col }}>{e.name}</div>{e.dur * HH > 34 && <div className="truncate text-[11.5px] leading-tight text-white/55">{e.topic} · {hh(e.start)}</div>}</button> })}
               {d === TODAY && NOW >= H0 && NOW <= H1 && <div className="pointer-events-none absolute -left-px right-0 z-10" style={{ top: (NOW - H0) * HH }}><span className="absolute -left-[5px] -top-[4.5px] h-[9px] w-[9px] rounded-full bg-[#FF453A]" /><div className="h-[1.5px] bg-[#FF453A]" /></div>}
             </div> })}
         </div></div></div></div></div>
@@ -457,22 +464,25 @@ function YearGrid({ cur, evs, onMonth }: { cur: string; evs: Ev[]; onMonth: (d: 
       <div className="grid grid-cols-7 gap-y-[3px] text-center text-[10.5px] tabular-nums">{g.map(d => { const inM = dd(d).getMonth() === m, td = d === TODAY; return <span key={d} className={`relative mx-auto flex h-[18px] w-[18px] items-center justify-center rounded-full ${inM ? "text-white/75" : "text-transparent"}`} style={td && inM ? { background: c, color: "#fff", fontWeight: 600 } : {}}>{dd(d).getDate()}{inM && has.has(d) && !td && <span className="absolute -bottom-[2px] h-[3px] w-[3px] rounded-full" style={{ background: c }} />}</span> })}</div></button> })}</div>
 }
 function AgCal() {
-  const { s, modal, q, desk } = useC(), c = A.ag.c
+  const { s, set, modal, toast, q, desk } = useC(), c = A.ag.c
   const [v, setV] = useState<CV>(desk ? "s" : "j"), [cur, setCur] = useState(TODAY)
-  const evs = s.events.filter(e => match(q, e.name, e.topic))
-  const move = (n: number) => setCur(x => v === "j" ? addDays(x, n) : v === "s" ? addDays(x, 7 * n) : v === "m" ? addM(x, n) : iso(new Date(dd(x).getFullYear() + n, 0, 1, 12)))
+  const rangeFrom = v === "a" ? `${dd(cur).getFullYear()}-01-01` : v === "m" ? `${cur.slice(0, 7)}-01` : addDays(monOf(cur), 0)
+  const rangeTo = v === "a" ? `${dd(cur).getFullYear()}-12-31` : v === "m" ? addDays(addM(cur, 1), -1) : addDays(monOf(cur), 6)
+  const evs = attachTravel(expandForGrid(expandRecurring(s.events.filter(e => match(q, e.name, e.topic)), rangeFrom, rangeTo)))
+  const move = (n: number) => setCur(x => v === "j" || v === "e" ? addDays(x, n) : v === "s" ? addDays(x, 7 * n) : v === "m" ? addM(x, n) : iso(new Date(dd(x).getFullYear() + n, 0, 1, 12)))
   const d = dd(cur), wkD = Array.from({ length: 7 }, (_, i) => addDays(monOf(cur), i))
   const title = v === "a" ? String(d.getFullYear()) : `${cap(MONTHS[d.getMonth()])} ${d.getFullYear()}`
-  const subT = v === "j" ? `${LONG[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS[d.getMonth()]}${cur === TODAY ? " · aujourd'hui" : ""}` : v === "s" ? (() => { const a = dd(wkD[0]), b = dd(wkD[6]); return `Semaine du ${a.getDate()}${a.getMonth() !== b.getMonth() ? " " + MONTHS[a.getMonth()] : ""} au ${b.getDate()} ${MONTHS[b.getMonth()]}` })() : v === "m" ? `${evs.filter(e => dd(e.date).getMonth() === d.getMonth() && dd(e.date).getFullYear() === d.getFullYear()).length} rendez-vous ce mois` : `${evs.filter(e => dd(e.date).getFullYear() === d.getFullYear()).length} rendez-vous cette année`
-  const isNow = v === "j" ? cur === TODAY : v === "s" ? wkD.includes(TODAY) : v === "m" ? cur.slice(0, 7) === TODAY.slice(0, 7) : cur.slice(0, 4) === TODAY.slice(0, 4)
+  const subT = v === "j" || v === "e" ? `${LONG[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS[d.getMonth()]}${cur === TODAY ? " · aujourd'hui" : ""}${v === "e" ? " · vue équipe" : ""}` : v === "s" ? (() => { const a = dd(wkD[0]), b = dd(wkD[6]); return `Semaine du ${a.getDate()}${a.getMonth() !== b.getMonth() ? " " + MONTHS[a.getMonth()] : ""} au ${b.getDate()} ${MONTHS[b.getMonth()]}` })() : v === "m" ? `${evs.filter(e => dd(e.date).getMonth() === d.getMonth() && dd(e.date).getFullYear() === d.getFullYear()).length} rendez-vous ce mois` : `${evs.filter(e => dd(e.date).getFullYear() === d.getFullYear()).length} rendez-vous cette année`
+  const isNow = v === "j" || v === "e" ? cur === TODAY : v === "s" ? wkD.includes(TODAY) : v === "m" ? cur.slice(0, 7) === TODAY.slice(0, 7) : cur.slice(0, 4) === TODAY.slice(0, 4)
   const onEv = (e: Ev) => modal({ kind: "ev", data: e }), onSlot = (dt: string, h: number) => modal({ kind: "rdv", data: { date: dt, start: h } })
   const dayList = evs.filter(e => e.date === cur).sort((a, b) => a.start - b.start)
   const hot = (e: Ev) => e.date === TODAY && e.start <= NOW && NOW < e.start + e.dur
   const ERow = (e: Ev, i: number) => <Row key={e.id} first={i === 0} label={e.name} onClick={() => modal({ kind: "ev", data: e })} lead={<span className="flex h-10 w-12 shrink-0 flex-col items-center justify-center rounded-[12px]" style={hot(e) ? { background: c + "29", color: c } : { background: "rgba(255,255,255,.07)" }}><span className="text-[13px] font-semibold leading-none">{hh(e.start)}</span><span className="mt-1 text-[10px] leading-none opacity-60">{durF(e.dur)}</span></span>} t={<span className="flex items-center gap-2"><span className="truncate">{e.name}</span>{hot(e) && <Chip c={c}>En cours</Chip>}</span>} s={e.topic} r={<TBtn I={Phone} label={`Appeler ${e.name}`} href={`tel:${tel(e.name)}`} />} />
-  const seg = <div role="tablist" aria-label="Vue du calendrier" className="flex h-9 rounded-full bg-white/[.07] p-[3px]">{([["j", "Jour"], ["s", "Semaine"], ["m", "Mois"], ["a", "Année"]] as [CV, string][]).map(([k, l]) => <button key={k} role="tab" aria-selected={v === k} onClick={() => setV(k)} className={`relative flex-1 rounded-full px-3 text-[13px] font-medium transition-colors ${v === k ? "text-black" : "text-white/60 hover:text-white"}`}>{v === k && <motion.span layoutId="cal-seg" transition={spring} className="absolute inset-0 rounded-full bg-white" />}<span className="relative">{l}</span></button>)}</div>
+  const seg = <div role="tablist" aria-label="Vue du calendrier" className="flex h-9 rounded-full bg-white/[.07] p-[3px]">{([["j", "Jour"], ["s", "Semaine"], ["m", "Mois"], ["e", "Équipe"], ["a", "Année"]] as [CV, string][]).map(([k, l]) => <button key={k} role="tab" aria-selected={v === k} onClick={() => setV(k)} className={`relative flex-1 rounded-full px-3 text-[13px] font-medium transition-colors ${v === k ? "text-black" : "text-white/60 hover:text-white"}`}>{v === k && <motion.span layoutId="cal-seg" transition={spring} className="absolute inset-0 rounded-full bg-white" />}<span className="relative">{l}</span></button>)}</div>
   const nav = <div className="flex items-center gap-1.5"><button onClick={() => setCur(TODAY)} disabled={isNow} className="h-9 rounded-full bg-white/[.07] px-3.5 text-[13px] font-medium text-white transition hover:bg-white/[.12] disabled:opacity-40">Aujourd'hui</button><button aria-label="Précédent" onClick={() => move(-1)} className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:bg-white/[.07] hover:text-white"><ChevronLeft size={20} strokeWidth={SW} /></button><button aria-label="Suivant" onClick={() => move(1)} className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:bg-white/[.07] hover:text-white"><ChevronRight size={20} strokeWidth={SW} /></button></div>
   const view = v === "a" ? <YearGrid cur={cur} evs={evs} onMonth={f => { setCur(f); setV("m") }} />
     : v === "m" ? <MonthGrid cur={cur} evs={evs} onDay={x => { setCur(x); setV("j") }} />
+    : v === "e" ? <TeamView date={cur} evs={evs} onEv={onEv} onAssign={(ev, employeId) => { const id = String(ev.id).split("~")[0]; set(x => ({ ...x, events: x.events.map(y => y.id === id ? { ...y, employeId: employeId || undefined } : y) })); toast("Assignation mise à jour") }} onSlot={(emp, h) => modal({ kind: "rdv", data: { date: cur, start: h, employeId: emp } })} />
     : v === "s" ? <TimeGrid days={wkD} evs={evs} onEv={onEv} onSlot={onSlot} />
     : <TimeGrid days={[cur]} evs={evs} onEv={onEv} onSlot={onSlot} />
   const strip = v === "j" && <div className="mb-4 grid grid-cols-7 gap-1">{wkD.map(x => { const on = x === cur, td = x === TODAY, n = evs.filter(e => e.date === x).length, we = (dd(x).getDay() + 6) % 7 >= 5
@@ -501,9 +511,9 @@ function Ag() {
     { I: Plus, l: "Nouveau", on: () => modal({ kind: "rdv", data: { date: day } }) }, { I: ChevronLeft, l: "Précédente", on: () => goWk(wk - 1) },
     { I: ChevronRight, l: "Suivante", on: () => goWk(wk + 1) }, { I: RotateCcw, l: "Aujourd'hui", on: () => goWk(0), dis: wk === 0 && day === TODAY }]}>
     <Col><Section t={day === TODAY ? "Aujourd'hui" : dlabel(day)} aside={`${list.length} RDV`}>{list.length ? <List>{list.map(ERow)}</List> : <List><Row first label="Ajouter un rendez-vous" onClick={() => modal({ kind: "rdv", data: { date: day } })} lead={<Ic I={Plus} />} t="Journée libre" s="Touchez pour ajouter un rendez-vous" r={<Chev />} /></List>}</Section>
-      {!desk && <AgCal />}<Section t="À retenir"><List>{next && <Row first label="Prochain rendez-vous" onClick={() => modal({ kind: "ev", data: next })} lead={<Ic I={Clock} />} t="Prochain" s={`${next.name} · ${next.topic}`} r={hh(next.start)} rs={fmtD(next.date)} />}{last && <Row label="Dernier RDV pris" onClick={() => modal({ kind: "ev", data: last })} lead={<Ic I={Sparkles} />} t="Dernier pris" s={`${last.name} · ${last.topic}`} r={hh(last.start)} rs={<Chip c={GREEN}>Confirmé</Chip>} />}</List></Section></Col>
+      {!desk && <><AgCal /><AgendaTools evs={s.events} day={day} /></>}<Section t="À retenir"><List>{next && <Row first label="Prochain rendez-vous" onClick={() => modal({ kind: "ev", data: next })} lead={<Ic I={Clock} />} t="Prochain" s={`${next.name} · ${next.topic}`} r={hh(next.start)} rs={fmtD(next.date)} />}{last && <Row label="Dernier RDV pris" onClick={() => modal({ kind: "ev", data: last })} lead={<Ic I={Sparkles} />} t="Dernier pris" s={`${last.name} · ${last.topic}`} r={hh(last.start)} rs={<Chip c={GREEN}>Confirmé</Chip>} />}</List></Section></Col>
     <Col><Section t="Semaine" aside={range}><Chart c={c} label="Rendez-vous par jour" value={`${wkE.length} RDV`} v={per} l={days.map(d => DAYS[(dd(d).getDay() + 6) % 7].slice(0, 3))} sel={days.indexOf(day)} onPick={(i: number) => setDay(days[i])} /></Section></Col>
-    {desk && <div className="col-span-2"><AgCal /></div>}
+    {desk && <div className="col-span-2"><AgCal /><AgendaTools evs={s.events} day={day} /></div>}
   </Shell>
 }
 
@@ -793,7 +803,7 @@ function SetP() {
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={Package} l="Mes prestations" v={presta.ready ? String(presta.items.length) : "…"} onClick={() => modal({ kind: "prestations" })} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={ImageIcon} l="Logo" v={prof?.logo_path ? "Ajouté" : "À ajouter"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
       <Section t="Paiements"><List><S first I={Percent} l="Acompte à la signature" v={`${acPctS} %`} onClick={cycA} /><S I={Repeat2} l="Relances d'impayés" v={prof?.relances_auto === false ? "À valider" : prof?.relances_auto === true ? "Automatiques" : "À valider"} onClick={cycI} />{connectUi() && <S I={CreditCard} l="Paiement en ligne" v="Carte, SEPA" onClick={() => modal({ kind: "connect" })} />}<S I={Receipt} l="Suivi et export comptable" v="CSV, FEC" onClick={() => modal({ kind: "pilotage" })} /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
-      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /></List></Section>
+      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /><S I={Globe} l="Lien de réservation public" v="À copier depuis l'Agenda" onClick={() => go("ag")} /></List></Section>
       <Section t="Avis clients"><List>{cliLock ? <Row first label="Demandes d'avis Google" onClick={() => openUpgrade("clients")} lead={<Ic I={Sparkles} />} t="Demandes d'avis Google" s="Automatiques après chaque chantier" r={<LockTag />} /> : <S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} />}</List></Section>
       <Section t="Informations légales"><List>{[["CGV", "/cgv"], ["Mentions légales", "/mentions-legales"], ["Confidentialité", "/confidentialite"], ["Sous-traitance des données (DPA)", "/dpa"]].map(([l, h], i) => <S key={h} first={!i} I={FileText} l={l} v="" onClick={() => isNative ? location.assign(h) : window.open(h, "_blank", "noopener")} />)}</List></Section></Col>
   </Shell>
@@ -1145,9 +1155,9 @@ function ReviewUrlSheet({ close }: { close: () => void }) {
   </Sheet>
 }
 function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
-  const { s, set, toast, go, modal, setChat, desk } = useC(), d = m.data || {}, rr = useRights()
+  const { s, set, toast, go, modal, setChat, desk } = useC(), d = m.data || {}, rr = useRights(), { employes } = useChantiers()
   const clients = [...new Set([...s.calls.map(x => x.name), ...s.devis.map(x => x.client), ...s.rels.map(x => x.client)])]
-  const [f, setF] = useState<any>(() => ({ name: d.name || d.client || "", topic: d.topic || d.objet || "", addr: d.addr || "", date: d.date || TODAY, start: hh(d.start ?? 9).padStart(5, "0"), dur: String(s.settings.duree), amount: d.amount ?? "", note: "", urgent: false, callback: true, type: "Relance devis", canal: "Appel", when: "Demain 9:00" }))
+  const [f, setF] = useState<any>(() => ({ name: d.name || d.client || "", topic: d.topic || d.objet || "", addr: d.addr || "", date: d.date || TODAY, start: hh(d.start ?? 9).padStart(5, "0"), dur: String(s.settings.duree), amount: d.amount ?? "", note: "", urgent: false, callback: true, type: "Relance devis", canal: "Appel", when: "Demain 9:00", kind: d.kind || "rdv", employeId: d.employeId || "", rrule: d.rrule || "", absenceKind: d.absenceKind || "conges" }))
   const v = (k: string) => ({ value: f[k], onChange: (e: any) => setF({ ...f, [k]: e.target.value }) })
   const toH = (t: string) => { const [a, b] = t.split(":").map(Number); return a + (b || 0) / 60 }
   const foot = (label: string, ok: boolean, run: () => void, c?: string, hint = "Indiquez le nom du client pour continuer") => <div className={`sticky bottom-0 z-10 mt-6 bg-[#121214] pt-3 ${desk ? "-mx-6 px-6" : "-mx-5 px-5"}`}><datalist id="akno-clients">{clients.map(x => <option key={x} value={x} />)}</datalist><div className="flex gap-2"><Btn className="flex-1" onClick={close}>Annuler</Btn><Btn primary c={c} className="flex-[1.4]" disabled={!ok} onClick={() => { run(); close() }}>{label}</Btn></div><p aria-live="polite" className={`h-5 pt-2 text-center text-[12px] text-white/50 transition-opacity ${ok ? "opacity-0" : "opacity-100"}`}>{ok ? "" : hint}</p></div>
@@ -1159,9 +1169,19 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "callView") { const x = s.calls.find(y => y.id === d.id) || d as Call
     return <Sheet title={x.name} sub={`${x.time} · ${x.topic}`} c={A.rec.c} onClose={close}><CallPlayer call={x} onMic={() => { close(); setChat(true) }} /><div className="text-[15px] leading-relaxed text-white/70">{x.note}</div>{x.addr && <div className="mt-3"><Sub>{x.addr}</Sub></div>}<div className="mt-3"><Sub dot={x.callback ? (x.urgent ? "#FF5F57" : "#FFB340") : "#30D158"}>{x.callback ? (x.urgent ? "À rappeler · urgent" : "À rappeler") : "Traité"}</Sub>{x.callback && x.rappelAt && <div className={`mt-2 ${tx.cap}`}>Moment souhaité · {x.rappelAt}</div>}</div>
       <div className="mt-6 grid gap-2">{x.callback && <Btn primary onClick={() => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast("Marqué comme rappelé"); close() }}><Check size={15} />Marquer rappelé</Btn>}<div className="grid grid-cols-2 gap-2"><Btn onClick={() => modal({ kind: "devis", data: { client: x.name, objet: x.besoin || x.topic } })}><Receipt size={15} strokeWidth={1.5} />Créer un devis</Btn><Btn onClick={() => modal({ kind: "rdv", data: { name: x.name, topic: x.tag || x.topic, addr: x.addr } })}><CalendarDays size={15} strokeWidth={1.5} />Prendre RDV</Btn></div></div></Sheet> }
-  if (m.kind === "rdv") return <Sheet title="Nouveau rendez-vous" c={A.ag.c} onClose={close}><div className="space-y-3" data-rdv-form><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><F l="Date"><input type="date" className={dt} {...v("date")} /></F><div className="grid grid-cols-2 gap-2"><F l="Heure"><input type="time" step={900} className={dt} {...v("start")} /></F><F l="Durée"><select className={dt + " sel"} {...v("dur")}>{DUR_OPTS.map(([val, lab]) => <option key={val} value={val}>{lab}</option>)}{DUR_OPTS.some(([val]) => val === String(f.dur)) ? null : <option value={f.dur}>{f.dur} h</option>}</select></F></div><F l="Adresse"><input className={inp} {...v("addr")} /></F></div>
-    {foot("Créer le RDV", !!f.name.trim() && !!f.date, () => { set(x => ({ ...x, events: [...x.events, { id: uid(), date: f.date, start: toH(f.start), dur: Number(f.dur), name: f.name.trim(), topic: f.topic || "Intervention", addr: f.addr, created: Date.now() }] })); const wd = dd(f.date).getDay(); toast(wd === 0 || wd === 6 ? "RDV créé (week-end : visible sur mobile)" : "RDV créé"); go("ag") }, A.ag.c)}</Sheet>
-  if (m.kind === "ev") { const e = s.events.find(y => y.id === d.id) || d as Ev; return <ClientSheet name={e.name} callId={linkedCall(s, e)?.id} eventId={e.id} close={close} /> }
+  if (m.kind === "rdv") return <Sheet title="Nouveau rendez-vous" c={A.ag.c} onClose={close}><div className="space-y-3" data-rdv-form><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><F l="Date"><input type="date" className={dt} {...v("date")} /></F><div className="grid grid-cols-2 gap-2"><F l="Heure"><input type="time" step={900} className={dt} {...v("start")} /></F><F l="Durée"><select className={dt + " sel"} {...v("dur")}>{DUR_OPTS.map(([val, lab]) => <option key={val} value={val}>{lab}</option>)}{DUR_OPTS.some(([val]) => val === String(f.dur)) ? null : <option value={f.dur}>{f.dur} h</option>}</select></F></div><F l="Adresse"><input className={inp} {...v("addr")} /></F>
+      <F l="Type"><select className={dt + " sel"} {...v("kind")} data-rdv-kind><option value="rdv">RDV</option><option value="visite">Visite technique</option><option value="chantier">Chantier</option><option value="sav">SAV</option><option value="urgence">Urgence</option><option value="absence">Absence</option></select></F>
+      {f.kind === "absence" && <F l="Motif"><select className={dt + " sel"} {...v("absenceKind")}><option value="conges">Congés</option><option value="maladie">Maladie</option><option value="formation">Formation</option></select></F>}
+      <F l="Assigné à"><select className={dt + " sel"} {...v("employeId")} data-rdv-employe><option value="">Non assigné</option>{employes.map(e => <option key={e.id} value={e.id}>{e.first_name}{e.last_name ? ` ${e.last_name}` : ""}</option>)}</select></F>
+      <F l="Récurrence"><select className={dt + " sel"} {...v("rrule")} data-rdv-rrule><option value="">Aucune</option><option value="FREQ=WEEKLY">Toutes les semaines</option><option value="FREQ=MONTHLY">Tous les mois</option><option value="FREQ=YEARLY">Tous les ans</option></select></F>
+    </div>
+    {foot("Créer le RDV", !!f.name.trim() && !!f.date, () => { set(x => ({ ...x, events: [...x.events, { id: uid(), date: f.date, start: toH(f.start), dur: Number(f.dur), name: f.name.trim(), topic: f.topic || "Intervention", addr: f.addr, created: Date.now(), kind: f.kind || "rdv", employeId: f.employeId || undefined, rrule: f.rrule || undefined, absenceKind: f.kind === "absence" ? f.absenceKind : undefined }] })); const wd = dd(f.date).getDay(); toast(wd === 0 || wd === 6 ? "RDV créé (week-end : visible sur mobile)" : "RDV créé"); go("ag") }, A.ag.c)}</Sheet>
+  if (m.kind === "ev") { const raw = s.events.find(y => y.id === d.id || y.id === String(d.id || "").split("~")[0]) || d as Ev; const e = raw
+    return <EventSheet e={e} all={s.events} onClose={close} onChange={p => set(x => ({ ...x, events: x.events.map(y => y.id === e.id ? { ...y, ...p } : y) }))}
+      onOpenClient={() => modal({ kind: "client", data: { name: e.name, event: e.id } })}
+      onOpenDevis={e.devisId ? () => modal({ kind: "devisPrev", data: s.devis.find(z => z.id === e.devisId) || { id: e.devisId } }) : undefined}
+      onOpenFacture={e.factureId ? () => modal({ kind: "factures", data: { id: e.factureId } }) : undefined}
+      onOpenChantier={e.chantierId ? () => { requestOpenChantier(e.chantierId!); close(); go("ch") } : undefined} /> }
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>Appel</option><option>SMS</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div><p className="px-1 text-[13px] leading-5 text-white/50">C'est un rappel pour vous : Akno ne l'envoie pas tout seul. Les relances de devis envoyés et les demandes d'avis, elles, partent automatiquement.</p></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
@@ -1448,12 +1468,17 @@ function AknoApp() {
   useEffect(() => { if (m?.kind === "factures" || m?.kind === "client" || m?.kind === "devisPrev") hadModal.current = true; else if (!m && hadModal.current) { hadModal.current = false; void refreshFactures() } }, [m])
   const [pushNote, setPushNote] = useState<{ title: string; body: string; url: string; k: number } | null>(null)
   // update48 · page d'arrivée : sans l'option Réceptionniste IA, on arrive sur l'Agenda (et non sur /reception).
-  const rr = useRights(), landed = useRef(false)
+  const rr = useRights(), landed = useRef(false), role = useAppRole()
+  const isEmploye = role?.kind === "employe"
   useEffect(() => {
     if (landed.current || !rr.ready) return
     landed.current = true
     if (!rr.reception && page === "rec") navigate(`/${slugOf("ag")}${location.search}`, { replace: true })
   }, [rr.ready, rr.reception, page, navigate])
+  useEffect(() => {
+    if (!isEmploye) return
+    if (page === "rec" || page === "dev" || page === "fac" || page === "rel" || page === "set" && false) navigate(`/${slugOf("ag")}${location.search}`, { replace: true })
+  }, [isEmploye, page, navigate])
   useEffect(() => { document.title = `Akno · ${pageTitle(page)}` }, [page])
   useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo || toastT.err ? 6000 : 2600); return () => clearTimeout(t) }, [toastT])
   // update52 : toute écriture refusée par la base est signalée (fini les devis qui disparaissent sans explication)
@@ -1519,7 +1544,7 @@ function AknoApp() {
   const prefetch = (p: P) => { void LAZY[p]?.preload().catch(() => {}) }
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} page={page} desk loading={loading} /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} />}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
