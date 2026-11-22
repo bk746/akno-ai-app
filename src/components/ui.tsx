@@ -17,7 +17,7 @@ export const A = {
   dev: { n: "Devis", c: "#2F6BFF", tab: "Devis", I: Receipt, slug: "devis", d: "Chiffre en direct" },
 } as const
 
-export type Modal = { kind: "entreprise" | "abonnement" | "deleteAccount" | "factures" | "conformite" | "leads" | "agendaCal" | "reception" | "sms" | "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "urgencePhone" | "clientReply" | "prestations" | "devisEditor" | "studio" | "equipe"; data?: any } | null
+export type Modal = { kind: "entreprise" | "abonnement" | "deleteAccount" | "factures" | "conformite" | "leads" | "agendaCal" | "reception" | "sms" | "call" | "callView" | "rdv" | "rel" | "relList" | "client" | "contacts" | "aiPop" | "devisPrev" | "listen" | "callbacks" | "calls" | "relView" | "devis" | "devisEdit" | "devisList" | "ev" | "pw" | "reviewUrl" | "tarifs" | "urgencePhone" | "clientReply" | "prestations" | "devisEditor" | "studio" | "equipe" | "pilotage" | "connect"; data?: any; prefill?: any } | null
 export type Ctx = { s: St; set: (f: (s: St) => St) => void; desk: boolean; page: P; go: (p: P) => void; modal: (m: Modal) => void; chat: boolean; setChat: (b: boolean) => void; toast: (t: string, undo?: () => void) => void; q: string; setQ: (q: string) => void; put?: (f: (s: St) => St) => void }
 export const C = createContext<Ctx>(null as any)
 export const useC = () => useContext(C)
@@ -104,11 +104,11 @@ export const F = ({ l, children }: any) => <label className="block"><span classN
 export function Sheet({ title, sub, onClose, children, c, footer }: any) {
   const { desk } = useC()
   return <ModalSheet label={title} onClose={onClose} desk={desk} z={50} className={`bg-[#121214] ${desk ? "" : "border-t border-white/[.08]"}`} deskClass="max-w-[480px]">
-      <div className={`min-h-0 overflow-y-auto overscroll-contain ${footer ? "flex-1" : ""} ${desk ? (footer ? "px-6 pt-6" : "p-6") : "px-5 pt-3"}`} style={footer ? { paddingBottom: desk ? 104 : "calc(112px + env(safe-area-inset-bottom))" } : desk ? {} : { paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+      <div className={`min-h-0 overflow-y-auto overscroll-contain ${footer ? "flex-1" : ""} ${desk ? (footer ? "px-6 pt-6" : "p-6") : "px-5 pt-3"}`} style={footer ? { paddingBottom: desk ? 104 : "calc(112px + var(--sab))" } : desk ? {} : { paddingBottom: "max(28px, var(--sab))" }}>
       {!desk && <div aria-hidden className="mb-4 h-[5px]" />}
       <div className="mb-6 flex items-center gap-3">{c && <Circ><Blob c={c} s={20} /></Circ>}<div className="min-w-0"><div className={`truncate ${tx.title}`}>{title}</div>{sub && <div className={`truncate ${tx.cap}`}>{sub}</div>}</div><button type="button" aria-label="Fermer" onClick={onClose} className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/70 hover:text-white"><X size={IS} strokeWidth={SW} /></button></div>
       {children}</div>
-      {footer && <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 ${desk ? "px-6 pb-6" : "px-5"}`} style={{ paddingBottom: desk ? undefined : "max(20px, env(safe-area-inset-bottom))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(18,18,20,0) 0, rgba(18,18,20,.82) 26px, #121214 52px)" }}><div className="pointer-events-auto">{footer}</div></div>}
+      {footer && <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 ${desk ? "px-6 pb-6" : "px-5"}`} style={{ paddingBottom: desk ? undefined : "max(20px, var(--sab))", paddingTop: 28, background: "linear-gradient(to bottom, rgba(18,18,20,0) 0, rgba(18,18,20,.82) 26px, #121214 52px)" }}><div className="pointer-events-auto">{footer}</div></div>}
   </ModalSheet>
 }
 export const Sub = ({ children, dot }: any) => dot ? <Chip c={dot}>{children}</Chip> : <div className={tx.cap}>{children}</div>

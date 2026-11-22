@@ -29,6 +29,8 @@ export function initMobile() {
     root.style.setProperty("--kb", `${kb > 80 ? kb : 0}px`)
     root.classList.toggle("kb-open", kb > 80)
     root.style.setProperty("--vvh", `${Math.round(vv.height)}px`)
+    // update71 · hauteur réelle de la zone d'affichage (= conteneur fixed inset-0) : les feuilles ne dépassent plus le bas de l'écran
+    root.style.setProperty("--app-h", `${Math.round(window.innerHeight)}px`)
   }
   const onVV = () => { if (!raf) raf = requestAnimationFrame(sync) }
   vv.addEventListener("resize", onVV); vv.addEventListener("scroll", onVV); sync()

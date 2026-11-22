@@ -1,7 +1,8 @@
 /* update52 · Statuts de devis : l'app écrit aval / att / env / val / ref / sans_reponse.
    Tant que la migration 20261118_07 n'est pas appliquée, la base n'accepte que brouillon / envoye / accepte / refuse :
+   update71 : « perdu » (30 j sans signature, migration 20261122_14 ; avant : reste « sans_reponse »).
    on lit les deux, et on réessaie avec l'ancienne valeur si la contrainte refuse la nouvelle (code 23514). */
-const LEGACY: Record<string, string> = { env: "envoye", sans_reponse: "envoye", val: "accepte", ref: "refuse", aval: "brouillon", att: "brouillon" }
+const LEGACY: Record<string, string> = { env: "envoye", sans_reponse: "envoye", val: "accepte", ref: "refuse", aval: "brouillon", att: "brouillon", perdu: "sans_reponse" }
 export function normStatut(st: unknown): string {
   const s = String(st || "")
   if (s === "envoye" || s === "envoyé") return "env"

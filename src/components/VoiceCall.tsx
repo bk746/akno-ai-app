@@ -148,7 +148,7 @@ export default function VoiceCall({
           <p className="mt-6 max-w-[360px] text-center text-[14px] text-white/60">{error || notice}</p>
         )}
       </div>
-      <div className="relative z-20 flex shrink-0 flex-col items-center gap-3 px-6 pb-4 pointer-events-auto" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+      <div className="relative z-20 flex shrink-0 flex-col items-center gap-3 px-6 pb-4 pointer-events-auto" style={{ paddingBottom: "max(28px, var(--sab))" }}>
         <button
           type="button"
           onPointerUp={e => { e.preventDefault(); hangup() }}

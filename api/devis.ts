@@ -1,3 +1,5 @@
+import { dueOfRow, payUrl } from "./_lib/chain.js"
+import { sendSmsMetered, smsConfigured, toE164 } from "./_lib/sms.js"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { adminClient, devisAcceptUrl, devisEmailHtml, env, factureEmailHtml, looksLikeEmail, reminderDelays, replyToFor, scheduleDevisReminders, sendResend, textToHtml } from "./_lib/mail.js"
 import { notifyArtisan } from "./_lib/push.js"
@@ -7,7 +9,7 @@ import { consume, monthKey, rateLimit } from "./_lib/limits.js"
 import { reportError } from "./_lib/monitoring.js"
 import { normStatut, withStatut } from "./_lib/devisStatut.js"
 import { devisHash, logEvent } from "./_lib/signature.js"
-import { acompteLines, cleanLines, computeFacture, r2, situationLines, soldeLines, type FLine } from "./_lib/factureCalc.js"
+import { acompteLines, cleanLines, devisToFactureLines, computeFacture, r2, situationLines, soldeLines, type FLine } from "./_lib/factureCalc.js"
 
 type Json = Record<string, unknown>
 type Line = { l: string; q: number; u: string; pu: number; tv: number }
@@ -44,22 +46,8 @@ function asLines(raw: unknown): Line[] {
   return out.slice(0, 16)
 }
 
-/** update52 : lignes d'un devis pour la facture — garde les remises (prix négatif), ignore titres de section et réglages, ajoute la description. */
-function devisLines(raw: unknown): Line[] {
-  if (!Array.isArray(raw)) return []
-  const out: Line[] = []
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue
-    const o = item as Record<string, unknown>
-    if (o.k === "sec" || o.k === "meta") continue
-    const base = String(o.l ?? o.designation ?? o.libelle ?? "").trim()
-    const d = typeof o.d === "string" ? o.d.trim() : ""
-    const q = Number(o.q ?? o.qty ?? o.quantite), pu = Number(o.pu ?? o.prix ?? o.prix_ht), tv = Number(o.tv ?? o.tva ?? o.tva_taux)
-    if (!base || !Number.isFinite(q) || q <= 0 || !Number.isFinite(pu) || (pu < 0 && o.k !== "rem")) continue
-    out.push({ l: (d ? `${base}\n${d}` : base).slice(0, 1200), q: round2(q), u: String(o.u ?? o.unite ?? "u").trim().slice(0, 12) || "u", pu: round2(pu), tv: tv === 5.5 || tv === 10 || tv === 20 || tv === 0 ? tv : 20 })
-  }
-  return out.slice(0, 200)
-}
+/** update52 : lignes d'un devis pour la facture (update71 : déplacé dans _lib/factureCalc pour la chaîne devis → acompte). */
+const devisLines = (raw: unknown): Line[] => devisToFactureLines(raw) as Line[]
 
 function parseModelJson(text: string): { objet?: string; lines: Line[] } {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "")
@@ -310,11 +298,13 @@ export async function handleDevis(authorization?: string, body?: unknown): Promi
     if (action === "draft") return await handleDraft(supabase, userId, input, ent)
     if (!ent.access) return { status: 402, body: { error: upgradeError("devis", ent), code: "upgrade" } }
     if (action === "send") return await handleSend(supabase, userId, input)
+    if (action === "send_sms") return await handleSendSms(supabase, userId, input, ent)
     if (action.startsWith("facture_") || action === "avoir") {
       if (!can(ent, "factures")) return { status: 402, body: { error: upgradeError("factures", ent), code: "upgrade" } }
       if (action === "facture_from_devis") return await factureFromDevis(supabase, userId, input)
       if (action === "facture_emit") return await factureEmit(supabase, input)
       if (action === "facture_send") return await factureSend(supabase, userId, input)
+      if (action === "facture_send_sms") return await factureSendSms(supabase, userId, input, ent)
       if (action === "facture_paid") return await facturePaid(supabase, input)
       if (action === "facture_relance_send") return await factureRelanceSend(supabase, userId, input)
       if (action === "avoir") return await factureAvoir(supabase, userId, input)
@@ -450,7 +440,7 @@ async function factureSend(supabase: SupabaseClient, userId: string, body: Json)
   const mailed = await sendResend({
     to: email,
     subject: `${avoir ? "Avoir" : "Facture"} n° ${f.numero} — ${company}`,
-    html: factureEmailHtml({ client: f.client_nom || undefined, numero: String(f.numero), objet: f.objet || undefined, company, ttc: r2(Number(f.total_ttc) - Number(f.acompte_deduit || 0) - r2(Number(f.total_ttc) * (Number(f.retenue_garantie_pct) || 0) / 100)), echeance: f.date_echeance, iban: artisan?.iban || null, avoir }),
+    html: factureEmailHtml({ payUrl: avoir || !f.token ? undefined : payUrl(String(f.token)), client: f.client_nom || undefined, numero: String(f.numero), objet: f.objet || undefined, company, ttc: r2(Number(f.total_ttc) - Number(f.acompte_deduit || 0) - r2(Number(f.total_ttc) * (Number(f.retenue_garantie_pct) || 0) / 100)), echeance: f.date_echeance, iban: artisan?.iban || null, avoir }),
     replyTo: artisan?.entreprise_email || artisan?.email || undefined,
     company,
     attachments: [{ filename: `${avoir ? "Avoir" : "Facture"}-${f.numero}.pdf`, content: pdf }],
@@ -459,6 +449,53 @@ async function factureSend(supabase: SupabaseClient, userId: string, body: Json)
   const now = new Date().toISOString()
   await supabase.from("factures").update({ envoyee_le: now, client_email: email, ...(f.statut === "emise" ? { statut: "envoyee" } : {}) }).eq("id", id)
   return { status: 200, body: { ok: true, sent_at: now, email } }
+}
+
+/** update71 · Envoi du lien de signature par SMS (en plus ou à la place de l'e-mail). Un brouillon passe « Envoyé » et les relances J+3/J+7 sont programmées. */
+async function handleSendSms(supabase: SupabaseClient, userId: string, body: Json, ent: Entitlements): Promise<ApiResult> {
+  const devisId = String(body.devis_id || "").trim()
+  const { data: devis } = await supabase.from("devis").select("id, numero, client_nom, client_telephone, statut, token").eq("id", devisId).maybeSingle()
+  if (!devis) return { status: 404, body: { error: "Devis introuvable." } }
+  const st = normStatut(devis.statut)
+  if (st === "val" || st === "ref") return { status: 409, body: { error: "Ce devis a déjà reçu une réponse." } }
+  const phone = String(body.phone || devis.client_telephone || "").trim()
+  if (!toE164(phone)) return { status: 400, body: { error: "Indiquez le numéro de portable du client." } }
+  if (!smsConfigured()) return { status: 503, body: { error: "L'envoi de SMS n'est pas encore activé. Envoyez le devis par e-mail ou copiez le lien.", copy: true } }
+  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, sms_sender, relance_delais").eq("id", userId).maybeSingle()
+  const company = artisan?.entreprise_nom || artisan?.nom_entreprise || "votre artisan"
+  const link = devis.token ? devisAcceptUrl(String(devis.token)) : ""
+  if (!link) return { status: 409, body: { error: "Lien de signature indisponible." } }
+  const sms = await sendSmsMetered({ artisanId: userId, to: phone, kind: "envoi_devis", sender: artisan?.sms_sender || company,
+    body: `Bonjour${devis.client_nom ? ` ${String(devis.client_nom).split(" ")[0]}` : ""}, voici votre devis n° ${devis.numero} de ${company}. Lisez-le et signez-le en ligne : ${link}` }, ent.quotas.sms)
+  if (!sms.ok) return { status: 502, body: { error: sms.error || "Le SMS n'a pas pu partir." } }
+  const sentAt = new Date().toISOString()
+  if (st !== "env") {
+    await withStatut("env", statut => supabase.from("devis").update({ statut, envoye_le: sentAt, client_telephone: phone }).eq("id", devisId))
+    try { await scheduleDevisReminders(supabase, { artisanId: userId, devisId, client: devis.client_nom, envoyeLe: sentAt, delays: reminderDelays(artisan?.relance_delais) }) } catch { /* facultatif */ }
+    try { const { data: full } = await supabase.from("devis").select("*").eq("id", devisId).maybeSingle(); if (full) await logEvent(adminClient(), { artisan_id: userId, devis_id: devisId, event: "envoi", document_hash: await devisHash(full), at: sentAt, data: { canal: "sms" } }) } catch { /* journal facultatif */ }
+  }
+  return { status: 200, body: { ok: true, sent_at: sentAt, phone } }
+}
+
+/** update71 · Facture émise envoyée par SMS : lien vers la page de paiement (virement, et CB/SEPA si activé). */
+async function factureSendSms(supabase: SupabaseClient, userId: string, body: Json, ent: Entitlements): Promise<ApiResult> {
+  const id = String(body.facture_id || "").trim()
+  const { data: f } = await supabase.from("factures").select("*").eq("id", id).maybeSingle()
+  if (!f) return { status: 404, body: { error: "Facture introuvable." } }
+  if (!f.numero) return { status: 409, body: { error: "Émettez la facture avant de l'envoyer." } }
+  const phone = String(body.phone || f.client_telephone || "").trim()
+  if (!toE164(phone)) return { status: 400, body: { error: "Indiquez le numéro de portable du client." } }
+  if (!smsConfigured()) return { status: 503, body: { error: "L'envoi de SMS n'est pas encore activé. Envoyez la facture par e-mail.", copy: true } }
+  const link = f.token ? payUrl(String(f.token)) : ""
+  if (!link) return { status: 409, body: { error: "Lien de paiement indisponible." } }
+  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, sms_sender").eq("id", userId).maybeSingle()
+  const company = artisan?.entreprise_nom || artisan?.nom_entreprise || "votre artisan"
+  const what = f.type === "acompte" ? "la facture d'acompte" : "la facture"
+  const sms = await sendSmsMetered({ artisanId: userId, to: phone, kind: "envoi_facture", sender: artisan?.sms_sender || company, body: `Bonjour, voici ${what} n° ${f.numero} de ${company} (${String(dueOfRow(f).toFixed(2)).replace(".", ",")} €). Consultez-la et réglez-la ici : ${link}` }, ent.quotas.sms)
+  if (!sms.ok) return { status: 502, body: { error: sms.error || "Le SMS n'a pas pu partir." } }
+  const now = new Date().toISOString()
+  await supabase.from("factures").update({ envoyee_le: now, ...(f.statut === "emise" ? { statut: "envoyee" } : {}) }).eq("id", id)
+  return { status: 200, body: { ok: true, sent_at: now, phone } }
 }
 
 async function facturePaid(supabase: SupabaseClient, body: Json): Promise<ApiResult> {

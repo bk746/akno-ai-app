@@ -23,7 +23,7 @@ import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Pill,
 import { createPortal } from "react-dom"
 import ModalSheet from "../sheet/ModalSheet"
 
-export type EditorReq = { initial?: Devis; prefill?: { client?: string; objet?: string; amount?: number; phone?: string; addr?: string; email?: string } }
+export type EditorReq = { initial?: Devis; prefill?: { client?: string; objet?: string; amount?: number; phone?: string; addr?: string; email?: string; parentId?: string } }
 export type CtInfo = { name: string; phone?: string; email?: string; addr?: string }
 type Doc = { client: string; email: string; phone: string; addr: string; objet: string; items: EdLine[]; meta: DevisMeta }
 type SaveSt = "new" | "dirty" | "saving" | "saved" | "error"
@@ -80,7 +80,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
       if (!n) { n = await nextDevisNum(s.devis.map(x => x.num)); setNum(n); numRef.current = n }
       const t = computeTotals(d.items, d.meta, { tvaNA: CO.tvaNA })
       const rates = t.rates.map(x => x.r)
-      const r = await saveDevis(idRef.current, { num: n, client: d.client, email: d.email, phone: d.phone, addr: d.addr, objet: d.objet || d.items.find(x => x.k !== "sec" && x.l.trim())?.l || "Travaux", lines: ser.lines, ht: t.ht, ttc: t.ttc, tva: rates.length === 1 ? rates[0] : rates.includes(tv0) ? tv0 : rates[rates.length - 1] ?? tv0 })
+      const r = await saveDevis(idRef.current, { parentId: req.prefill?.parentId, num: n, client: d.client, email: d.email, phone: d.phone, addr: d.addr, objet: d.objet || d.items.find(x => x.k !== "sec" && x.l.trim())?.l || "Travaux", lines: ser.lines, ht: t.ht, ttc: t.ttc, tva: rates.length === 1 ? rates[0] : rates.includes(tv0) ? tv0 : rates[rates.length - 1] ?? tv0 })
       if (!r.ok) { setSt("error"); setErr(r.error); keepLocal(idRef.current || "new", d); return false }
       lastJson.current = json
       if (!idRef.current) { dropLocal("new") }

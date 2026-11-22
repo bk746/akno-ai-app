@@ -17,7 +17,7 @@ import { itineraryUrl } from "../../lib/geo"
 import { STATUS_COLOR, STATUS_LABEL, effectiveStatus, progressPct, rangeLabel, todayISO, untilLabel } from "../../lib/chantierCalc"
 import { FILTERS, KIND_LABEL, addrLines, buildDirectory, caTotal, chantiersCount, currentSite, documents, ficheKey, histDate, history as buildHistory, initials, matchFilter, matchQuery, phoneKey, statusOf, summary, type Client, type Filter, type HKind } from "../../lib/clientsCalc"
 
-const NAV = "calc(92px + max(var(--sab) - 10px, 12px))"
+const NAV = "var(--page-bottom)"
 const PUSH = { type: "spring" as const, stiffness: 420, damping: 40, mass: .9 }
 const card = "rounded-[16px] bg-white/[.07]"
 const MOL = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
@@ -119,7 +119,7 @@ export default function ClientsPage({ head }: { head?: ReactNode }) {
 
   return <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-black text-white">
     <PushStack ref={scroller} base={listView} top={client ? <Fiche c={client} today={today} sigs={cs.sigs} onBack={back} onEdit={() => setForm({ c: client })} /> : null} topKey={client ? `f-${client.key}` : undefined}
-      inner={desk ? "max-w-[640px]" : ""} padTop={desk ? 28 : "calc(var(--sat) + 2px)"} padBottom={desk ? 40 : `calc(${NAV} + 16px)`} />
+      inner={desk ? "max-w-[640px]" : ""} padTop={desk ? 28 : "calc(var(--sat) + 2px)"} padBottom={desk ? 40 : "calc(var(--page-bottom) + 16px)"} />
     <AnimatePresence>{form && <ClientForm key="cf" initial={form.c} seed={form.seed} directory={list} desk={desk} onClose={() => setForm(null)} onOpen={k => open(k)} onSaved={k => { if (!form.c) open(k) }} onDeleted={() => { setOpenKey(null); if (pushed.current) { pushed.current = false; history.back() } }} />}</AnimatePresence>
   </div>
 }

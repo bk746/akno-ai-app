@@ -258,5 +258,37 @@ INSERT INTO results SELECT 'u66_A_fiche_intacte', count(*) = 1 FROM public.clien
 INSERT INTO results SELECT 'u65_A_acces_intact', access_role = 'chef' AND invite_status = 'pending' AND email = 'julien@exemple.fr' FROM public.employes WHERE first_name = 'Julien';
 INSERT INTO results SELECT 'A_devis_intacts', count(*) = 2 FROM public.devis;
 INSERT INTO results SELECT 'minutes_comptees', count = 120 FROM public.usage_counters WHERE metric = 'voice_seconds';
+-- ===== update71 : chaîne devis → paiement =====
+RESET ROLE;
+INSERT INTO results SELECT 'u71_acompte_pct_defaut_30', bool_and(acompte_pct = 30 AND relances_auto) FROM public.artisans;
+INSERT INTO public.payment_accounts (artisan_id, stripe_account_id) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'acct_A71'), ('bbbbbbbb-0000-0000-0000-000000000002', 'acct_B71');
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-0000-0000-000000000001","role":"authenticated"}', false);
+INSERT INTO results SELECT 'u71_compte_paiement_isole', count(*) = 1 AND min(stripe_account_id) = 'acct_A71' FROM public.payment_accounts;
+DO $$ BEGIN
+  BEGIN
+    UPDATE public.payment_accounts SET charges_enabled = true;
+    INSERT INTO results SELECT 'u71_compte_paiement_lecture_seule', NOT EXISTS (SELECT 1 FROM public.payment_accounts WHERE charges_enabled);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u71_compte_paiement_lecture_seule', true);
+  END;
+  BEGIN
+    INSERT INTO public.payment_accounts (artisan_id, stripe_account_id) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'acct_X');
+    INSERT INTO results VALUES ('u71_compte_paiement_insert_refuse', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u71_compte_paiement_insert_refuse', true);
+  END;
+  BEGIN
+    UPDATE public.artisans SET acompte_pct = 150 WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+    INSERT INTO results VALUES ('u71_acompte_pct_borne', false);
+  EXCEPTION WHEN others THEN INSERT INTO results VALUES ('u71_acompte_pct_borne', true);
+  END;
+END $$;
+UPDATE public.artisans SET acompte_pct = 40, relances_auto = false WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+INSERT INTO results SELECT 'u71_reglages_modifiables', acompte_pct = 40 AND NOT relances_auto FROM public.artisans WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+INSERT INTO public.devis (artisan_id, numero, client_nom, statut) VALUES ('aaaaaaaa-0000-0000-0000-000000000001', '71001', 'Client Perdu', 'perdu');
+INSERT INTO public.devis (artisan_id, numero, client_nom, statut, parent_id) SELECT artisan_id, '71002', 'Client Perdu', 'brouillon', id FROM public.devis WHERE numero = '71001';
+UPDATE public.devis SET ouvert_le = now() WHERE numero = '71001';
+INSERT INTO results SELECT 'u71_perdu_avenant_ouvert', count(*) = 1 FROM public.devis c JOIN public.devis p ON p.id = c.parent_id WHERE p.statut = 'perdu' AND p.ouvert_le IS NOT NULL;
+DELETE FROM public.devis WHERE numero IN ('71002', '71001');
+RESET ROLE;
 SELECT test, ok FROM results ORDER BY ok, test;
 DO $$ BEGIN IF EXISTS (SELECT 1 FROM results WHERE ok IS NOT TRUE) THEN RAISE EXCEPTION 'Au moins un test RLS a échoué'; END IF; END $$;

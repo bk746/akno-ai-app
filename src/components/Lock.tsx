@@ -52,7 +52,7 @@ export function LockScreen({ uid, onUnlock }: { uid: string; onUnlock: () => voi
     setMsg("Code incorrect")
   }
   const tapToUnlock = () => { setNeedsTap(false); void face(true) }
-  return <div className="fixed inset-0 z-[100] flex flex-col bg-black text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+  return <div className="fixed inset-0 z-[100] flex flex-col bg-black text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "var(--sab)" }}>
     <AnimatePresence mode="wait">{splash
       ? <motion.div key="s" exit={{ opacity: 0 }} transition={{ duration: .25 }} className="flex flex-1 items-center justify-center"><img src="/logo.png" alt="Akno" className="h-16 w-auto" /></motion.div>
       : <motion.div key="l" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-1 flex-col items-center px-6">
@@ -90,7 +90,7 @@ export function LockSetup({ uid, email, onDone, flow }: { uid: string; email: st
     addEventListener("keydown", f); return () => removeEventListener("keydown", f)
   }, [step])
   // update50 · dans le parcours : même en-tête que les autres étapes (logo, « Plus tard »), bloc centré sur grand écran
-  return <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-black px-6 text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+  return <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-black px-6 text-white" style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "var(--sab)" }}>
     {flow ? <header className="flex h-10 shrink-0 items-center justify-between gap-3 pt-5 sm:px-4">
       <span className="flex items-center gap-2.5" aria-label="Akno"><Blob c="#E6E6E6" s={26} /><span className="text-[17px] font-semibold tracking-[-0.03em]">Akno</span></span>
       <button onClick={() => onDone(true)} className="rounded-full px-3 py-1.5 text-[14px] font-medium text-white/55 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-white/60">Plus tard</button>

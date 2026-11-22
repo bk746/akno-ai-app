@@ -38,7 +38,7 @@ const PILL = { type: "spring" as const, stiffness: 380, damping: 36, mass: .9 }
    Les tuiles ne gardent donc que les transitions de couleur ; opacité/transform restent pilotés par motion seul. */
 const TILE_NO_CSS_TR = { transitionProperty: "color, background-color, border-color" } as const
 const TILE_V = { h: { opacity: 0, y: 8, scale: .94 }, s: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, stiffness: 520, damping: 34 } } }
-const BAR_BOTTOM = "max(calc(var(--sab) - 10px), 12px)"
+const BAR_BOTTOM = "var(--nav-gap)"
 /** update70 · barre affinée façon Revolut (64 px), pilule translucide floutée ; le contenu défile dessous */
 const BAR_H = 64
 /* update69 · menu « Créer » : naît du centre du « + » (12 px d'écart + demi-barre de 36 px sous le menu) */

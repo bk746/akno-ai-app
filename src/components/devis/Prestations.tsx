@@ -144,7 +144,7 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
         </button> })}
         {lib.ready && !list.length && <div className="px-4 py-10 text-center text-[13.5px] text-white/45">{lib.items.length ? "Aucune prestation ne correspond." : "Votre bibliothèque est vide."}<div className="mt-3"><button type="button" onClick={onNew} className="text-[13.5px] font-medium" style={{ color: TEAL_T }}>Créer une prestation{q ? ` « ${q} »` : ""}</button></div></div>}
       </div>
-      <div className="flex shrink-0 items-center justify-between border-t border-white/[.07] px-4 py-2.5 text-[12px] text-white/40" style={desk ? {} : { paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+      <div className="flex shrink-0 items-center justify-between border-t border-white/[.07] px-4 py-2.5 text-[12px] text-white/40" style={desk ? {} : { paddingBottom: "max(12px, var(--sab))" }}>
         {desk ? <span>↑ ↓ pour choisir · Entrée pour ajouter · la palette reste ouverte</span> : <span>Touchez pour ajouter</span>}
         <button type="button" onClick={onNew} className="flex items-center gap-1 font-medium text-white/70 hover:text-white"><Plus size={14} />Nouvelle</button>
       </div>

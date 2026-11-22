@@ -77,7 +77,7 @@ export default function SetupGate({ page, loading, mobile, children, active = tr
     </div>
     {hidden && k && <PageSkeleton mobile={mobile} />}
     <AnimatePresence>{locked && k && <motion.div key="setup-ov" className="absolute inset-0 z-20 flex items-center justify-center px-5"
-      style={mobile ? { paddingTop: "calc(var(--sat) + 16px)", paddingBottom: "calc(96px + max(var(--sab) - 10px, 12px))" } : { paddingBottom: 24 }}
+      style={mobile ? { paddingTop: "calc(var(--sat) + 16px)", paddingBottom: "calc(var(--page-bottom) + 4px)" } : { paddingBottom: 24 }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: .45, ease: EASE } }} transition={{ duration: .35, ease: EASE }}>
       <div aria-hidden className="absolute inset-0" style={{ background: `radial-gradient(60% 50% at 50% 46%, ${c}${c === "#E6E6E6" ? "12" : "1F"} 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.55) 100%)` }} />
       <motion.div className="relative flex w-full justify-center" animate={{ opacity: wiz ? 0 : 1, scale: wiz ? .98 : 1 }} transition={{ duration: .25, ease: EASE }}><Intro k={k} onStart={() => setWiz(true)} /></motion.div>
@@ -300,7 +300,7 @@ function Wizard({ k, onClose, onDone }: { k: K; onClose: () => void; onDone: () 
           </motion.div>
         </AnimatePresence>
       </div>
-      <div className={`border-t border-white/[.06] bg-[#121214] ${desk ? "px-7 py-5" : "px-5 pt-4"}`} style={desk ? undefined : { paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+      <div className={`border-t border-white/[.06] bg-[#121214] ${desk ? "px-7 py-5" : "px-5 pt-4"}`} style={desk ? undefined : { paddingBottom: "max(16px, var(--sab))" }}>
         <AnimatePresence initial={false}>{alert && <motion.p key={alert} role="alert" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden pb-3 text-[13px] text-[#FF6B61]">{alert}</motion.p>}</AnimatePresence>
         <div className="flex gap-3">
           {i > 0 && <button type="button" onClick={back} disabled={busy} aria-label="Étape précédente" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/[.08] text-white transition-colors hover:bg-white/[.12] disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-white/60"><ChevronLeft size={20} strokeWidth={1.9} /></button>}

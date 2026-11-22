@@ -4,7 +4,7 @@
 import { supabase } from "./supabase"
 import { dbErrorFr, mapStatut, type Devis, type DevisLine } from "./store"
 
-export type DevisInput = { num: number; client: string; email: string; phone: string; addr: string; objet: string; lines: DevisLine[]; ht: number; ttc: number; tva: number }
+export type DevisInput = { parentId?: string; num: number; client: string; email: string; phone: string; addr: string; objet: string; lines: DevisLine[]; ht: number; ttc: number; tva: number }
 type Row = Record<string, unknown>
 
 const toRow = (d: DevisInput) => ({
@@ -40,8 +40,10 @@ export async function saveDevis(id: string | null, input: DevisInput): Promise<S
     const row = toRow(input)
     const q = id
       ? supabase.from("devis").update(row).eq("id", id).select("*").maybeSingle()
-      : supabase.from("devis").insert({ ...row, artisan_id: user.id, statut: "brouillon" }).select("*").maybeSingle()
-    const { data, error } = await q
+      : supabase.from("devis").insert({ ...row, artisan_id: user.id, statut: "brouillon", ...(input.parentId ? { parent_id: input.parentId } : {}) }).select("*").maybeSingle()
+    let { data, error } = await q
+    // update71 : avenant sans la migration 20261122_14 (colonne parent_id absente) → création sans le lien
+    if (error && !id && input.parentId && /parent_id/.test(String(error.message || ""))) ({ data, error } = await supabase.from("devis").insert({ ...row, artisan_id: user.id, statut: "brouillon" }).select("*").maybeSingle())
     if (error) { console.error("saveDevis", error); return { ok: false, error: dbErrorFr(error, "l'enregistrement du devis") } }
     if (!data) return { ok: false, error: id ? "Ce devis n'existe plus (supprimé depuis un autre appareil ?)." : "Le devis n'a pas pu être créé. Réessayez." }
     return { ok: true, devis: rowToDevis(data as Row) }

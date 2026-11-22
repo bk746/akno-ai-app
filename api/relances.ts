@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   addDaysYmd, adminClient, appUrl, devisAcceptUrl, env, formatEuro, frDate, impayeTemplate, monthlyReportHtml,
   parisDayStart, parisYmd, reminderEmailHtml, replyToFor, reviewEmailHtml, reviewUrlOf,
-  samePhone, sendResend, simpleHtml, stopDevisReminders,
+  samePhone, sendResend, simpleHtml, stopDevisReminders, textToHtml,
 } from "./_lib/mail.js"
 import { can, loadEntitlements, type Entitlements, type Feature } from "./_lib/plans.js"
 import { sendSms, smsConfigured } from "./_lib/sms.js"
@@ -35,6 +35,7 @@ type ArtisanRow = {
   nom_entreprise?: string | null; entreprise_telephone?: string | null; telephone?: string | null; avis_url?: string | null
   sms_enabled?: boolean | null; sms_sender?: string | null; rapport_mensuel?: boolean | null; iban?: string | null
   conservation_enregistrements_jours?: number | null
+  relances_auto?: boolean | null // update71 (migration 20261122_14) : relances d'impayés J+1/J+7/J+15 envoyées automatiquement
 }
 
 /** Cache par exécution : profil et droits de chaque artisan. */
@@ -44,7 +45,7 @@ function makeCtx(sb: SupabaseClient) {
   return {
     async artisan(id: string) {
       if (!artisans.has(id)) {
-        const { data } = await sb.from("artisans").select("id, prenom, email, entreprise_email, entreprise_nom, nom_entreprise, entreprise_telephone, telephone, avis_url, sms_enabled, sms_sender, rapport_mensuel, iban, conservation_enregistrements_jours").eq("id", id).maybeSingle()
+        const { data } = await sb.from("artisans").select("*").eq("id", id).maybeSingle()
         artisans.set(id, (data || null) as ArtisanRow | null)
       }
       return artisans.get(id) || null
@@ -73,7 +74,7 @@ async function trySms(sb: SupabaseClient, ctx: Ctx, artisanId: string, to: strin
   return r.ok
 }
 
-const CLOSED = new Set(["val", "ref", "sans_reponse", "sans", "sans réponse", "brouillon"])
+const CLOSED = new Set(["val", "ref", "perdu", "sans_reponse", "sans", "sans réponse", "brouillon"])
 
 async function shouldStop(sb: SupabaseClient, d: DevisRow): Promise<string | null> {
   if (d.relances_off) return "off"
@@ -296,18 +297,20 @@ async function processAppointmentReminders(sb: SupabaseClient, ctx: Ctx, now: Da
 }
 
 /* ---------- update46 : relances d'impayés PRÉPARÉES, validées par l'artisan ---------- */
-const IMPAYE_STEPS = [{ niveau: 1, days: 1 }, { niveau: 2, days: 8 }, { niveau: 3, days: 15 }, { niveau: 4, days: 30 }]
+/* update71 : J+1, J+7, J+15 après l'échéance (envoyées seules si l'artisan a laissé « Relances automatiques » activé), puis
+   mise en demeure à J+30 TOUJOURS à valider par l'artisan. Avant la migration 20261122_14 : tout reste à valider (comportement update46). */
+export const IMPAYE_STEPS = [{ niveau: 1, days: 1 }, { niveau: 2, days: 7 }, { niveau: 3, days: 15 }, { niveau: 4, days: 30 }]
 
-async function prepareFactureRelances(sb: SupabaseClient, ctx: Ctx, now: Date) {
+export async function prepareFactureRelances(sb: SupabaseClient, ctx: Ctx, now: Date) {
   const today = parisYmd(now)
   const { data: due } = await sb.from("factures")
-    .select("id, artisan_id, numero, client_nom, client_pro, total_ttc, acompte_deduit, date_echeance, type")
+    .select("id, artisan_id, numero, client_nom, client_pro, client_email, client_telephone, total_ttc, acompte_deduit, date_echeance, type, token")
     .in("statut", ["emise", "envoyee"])
     .eq("relances_off", false)
     .neq("type", "avoir")
     .lt("date_echeance", today)
     .limit(200)
-  let prepared = 0
+  let prepared = 0, sent = 0
   for (const f of due || []) {
     if (!f.numero || !f.date_echeance) continue
     if (!await ctx.can(f.artisan_id, "relances_impayes")) continue
@@ -320,7 +323,17 @@ async function prepareFactureRelances(sb: SupabaseClient, ctx: Ctx, now: Date) {
     const artisan = await ctx.artisan(f.artisan_id)
     const company = companyOf(artisan)
     const ttc = Number(f.total_ttc || 0) - Number(f.acompte_deduit || 0)
-    const tpl = impayeTemplate({ niveau: next.niveau, client: f.client_nom || undefined, numero: f.numero, company, ttc, echeance: f.date_echeance, pro: !!f.client_pro, iban: artisan?.iban })
+    const link = f.token && appUrl() ? `${appUrl()}/payer/${f.token}` : undefined
+    const tpl = impayeTemplate({ niveau: next.niveau, client: f.client_nom || undefined, numero: f.numero, company, ttc, echeance: f.date_echeance, pro: !!f.client_pro, iban: artisan?.iban, payUrl: link })
+    // update71 : envoi automatique des 3 premières relances (jamais la mise en demeure)
+    if (artisan?.relances_auto === true && next.niveau < 4 && f.client_email) {
+      const mailed = await sendResend({ to: f.client_email, subject: tpl.sujet, html: textToHtml(tpl.corps), replyTo: artisan.entreprise_email || artisan.email || undefined, company })
+      const sms = await trySms(sb, ctx, f.artisan_id, f.client_telephone, `${company} : rappel, la facture n° ${f.numero} (${formatEuro(ttc)}) reste à régler.${link ? ` ${link}` : ""}`, "relance_facture")
+      if (mailed.ok || sms) {
+        const { error } = await sb.from("facture_relances").insert({ artisan_id: f.artisan_id, facture_id: f.id, niveau: next.niveau, statut: "envoyee", canal: mailed.ok && sms ? "E-mail + SMS" : mailed.ok ? "E-mail" : "SMS", sujet: tpl.sujet, corps: tpl.corps, sent_at: now.toISOString() })
+        if (!error) { sent++; continue }
+      }
+    }
     const { error } = await sb.from("facture_relances").insert({ artisan_id: f.artisan_id, facture_id: f.id, niveau: next.niveau, statut: "a_valider", sujet: tpl.sujet, corps: tpl.corps })
     if (error) continue
     prepared++
@@ -331,7 +344,20 @@ async function prepareFactureRelances(sb: SupabaseClient, ctx: Ctx, now: Date) {
       tag: `impaye-${f.id}`,
     })
   }
-  return { prepared }
+  return { prepared, sent }
+}
+
+/** update71 · Devis envoyé resté sans signature 30 jours après l'envoi → « perdu » (sorti du « reste à signer »). */
+export const LOST_AFTER_DAYS = 30
+export async function markLostDevis(sb: SupabaseClient, now: Date) {
+  const limit = new Date(now.getTime() - LOST_AFTER_DAYS * 86400e3).toISOString()
+  const { data } = await sb.from("devis").select("id").in("statut", ["env", "envoye", "sans_reponse"]).lt("envoye_le", limit).limit(300)
+  let lost = 0
+  for (const d of data || []) {
+    const { error } = await withStatut("perdu", st => sb.from("devis").update({ statut: st }).eq("id", d.id).in("statut", ["env", "envoye", "sans_reponse"]))
+    if (!error) { lost++; await stopDevisReminders(sb, d.id) }
+  }
+  return { lost }
 }
 
 /* ---------- update46 : alertes d'expiration du dossier de conformité ---------- */
@@ -463,13 +489,14 @@ export async function handleRelancesCron(authorization?: string, opts?: { forceR
   const reviews = await step("avis", () => processReviews(sb, ctx, now))
   const rdv = await step("rappel_rdv", () => processAppointmentReminders(sb, ctx, now))
   const impayes = await step("impayes", () => prepareFactureRelances(sb, ctx, now))
+  const perdus = await step("perdus", () => markLostDevis(sb, now))
   const conformite = await step("conformite", () => conformiteAlerts(sb, ctx, now))
   const rapports = await step("rapport", () => monthlyReports(sb, ctx, now, !!opts?.forceReport))
   const purge = await step("purge", () => purgeRecordings(sb, now))
   await step("rate_limits", async () => { await sb.rpc("purge_rate_limits"); return true })
   return {
     status: 200,
-    body: { ok: true, sweep_stopped: stopped, reminders, reviews, rdv, impayes, conformite, rapports, purge },
+    body: { ok: true, sweep_stopped: stopped, reminders, reviews, rdv, impayes, perdus, conformite, rapports, purge },
   }
 }
 

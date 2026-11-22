@@ -9,6 +9,7 @@ import { sendSmsMetered, smsConfigured } from "./_lib/sms.js"
 import { reportError } from "./_lib/monitoring.js"
 import { handleEquipeInvite } from "./_lib/equipe.js"
 import { deleteAccount } from "./_lib/deleteAccount.js"
+import { connectOnboard, connectRefresh } from "./_lib/chain.js"
 
 /* update45 · compte artisan : abonnement Stripe, réglages sensibles (clé Cal.com), recherche SIRET,
    acceptation des CGV, état d'usage. Une seule fonction Vercel pour rester sous la limite du plan. */
@@ -321,6 +322,9 @@ export async function handleAccount(authorization?: string, body?: unknown, head
     if (action === "checkout_sync") return await checkoutSync(supabase, userId, input)
     if (action === "upgrade") return await upgrade(supabase, userId, input)
     if (action === "portal") return await portal(userId, headers)
+    // update71 · Stripe Connect (paiement des factures sur le compte de l'artisan) — inactif tant que STRIPE_CONNECT_ENABLED≠1
+    if (action === "connect_status") { try { return { status: 200, body: { ok: true, ...(await connectRefresh(adminClient(), userId)) } } } catch { return { status: 200, body: { ok: true, enabled: false, connected: false, charges: false } } } }
+    if (action === "connect_onboard") return await connectOnboard(adminClient(), userId, session.email, `${appUrl() || `https://${header(headers, "host")}`}/reglages?connect=1`)
     if (action === "save_calcom") return await saveCalcom(userId, input)
     if (action === "siret_lookup") return await siretLookup(input)
     if (action === "voice_preview") return await voicePreview(supabase, userId, input)

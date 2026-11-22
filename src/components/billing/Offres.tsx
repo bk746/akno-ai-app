@@ -154,7 +154,7 @@ export default function Offres({ mode, onClose, onDone, returnSession, flow }: {
 
       {/* Mobile : barre d'action fixe (récap court + bouton) */}
       <AnimatePresence>{step === "choose" && <motion.div initial={{ y: 90, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 90, opacity: 0 }} transition={{ duration: .4, ease: EASE, delay: .25 }}
-        className="fixed inset-x-0 bottom-0 z-10 border-t border-white/[.08] bg-black/85 px-5 pb-[max(14px,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl lg:hidden">
+        className="fixed inset-x-0 bottom-0 z-10 border-t border-white/[.08] bg-black/85 px-5 pb-[max(14px,var(--sab))] pt-3 backdrop-blur-xl lg:hidden">
         <div className="mx-auto max-w-[560px]">
           <div className="mb-2.5 flex items-baseline justify-between gap-3 text-[13px]">
             <span className="font-medium text-white">{trial ? <><span className="text-[#30D158]">0 € aujourd'hui</span> · {trialDays} jours offerts</> : "À payer aujourd'hui"}</span>

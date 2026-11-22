@@ -6,10 +6,10 @@ export type Call = { id: string; name: string; topic: string; time: string; note
 export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean; callId?: string; phone?: string; notes?: string }
 export type RelStatus = "prog" | "pause" | "env" | "rep"
 export type Rel = { id: string; client: string; type: string; canal: string; status: RelStatus; date: string; at?: string; devisId?: string; appointmentId?: string; scheduledFor?: string; sentAt?: string }
-export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref" | "sans"
+export type DevStatus = "aval" | "brouillon" | "att" | "env" | "val" | "ref" | "sans" | "perdu"
 /** update52 : champs facultatifs de l'éditeur pro (voir src/lib/devisCalc.ts) — rétrocompatible avec { l, q, pu, u, tv }. */
 export type DevisLine = { l: string; q: number; pu: number; u?: string; tv?: number; k?: string; d?: string; pid?: string; ca?: number; m?: import("./devisCalc").DevisMeta }
-export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string; token?: string; remindersOff?: boolean; reply?: string; repliedAt?: string; reminderCount?: number; phone?: string; addr?: string }
+export type Devis = { id: string; num: number; client: string; objet: string; status: DevStatus; amount: number; created: number; ai?: boolean; from?: string; lines?: DevisLine[]; at?: string; email?: string; callId?: string; sentAt?: string; token?: string; remindersOff?: boolean; reply?: string; repliedAt?: string; reminderCount?: number; phone?: string; addr?: string; openedAt?: string; parentId?: string; signedAt?: string }
 export type Msg = { id: string; from: "me" | "ai"; text: string; devisId?: string; action?: string; card?: { num: number; client: string; objet: string; amount: number }; items?: import("./assistant").RItem[]; acts?: import("./assistant").RAct[]; chips?: string[]; done?: string[] }
 /** update44 : plus de lien d'avis par défaut (il appartenait à une autre entreprise). Chaque artisan saisit le sien. */
 export const DEFAULT_REVIEW_URL = ""
@@ -82,7 +82,7 @@ export const seed = (): St => ({
 })
 const KEY = "akno-local-v9" // seulement les réglages locaux (agents, TVA…) ; tout le reste vient de Supabase
 const OLD_KEYS = ["akno-demo-v7", "akno-local-v8"]
-const DEV_ST: DevStatus[] = ["aval", "brouillon", "att", "env", "val", "ref", "sans"]
+const DEV_ST: DevStatus[] = ["aval", "brouillon", "att", "env", "val", "ref", "sans", "perdu"]
 const isUuid = (x: string) => /^[0-9a-f-]{36}$/i.test(x)
 const pad = (n: number) => String(n).padStart(2, "0")
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -110,9 +110,9 @@ export const mapStatut = (st: string): DevStatus => {
   if (st === "sans_reponse" || st === "sans réponse" || st === "sans") return "sans"
   return DEV_ST.includes(st as DevStatus) ? st as DevStatus : "brouillon"
 }
-const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: mapStatut(String(r.statut || "")), amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at, email: r.client_email || undefined, callId: r.call_id != null ? String(r.call_id) : undefined, ai: r.call_id != null, sentAt: r.envoye_le || undefined, token: r.token || undefined, remindersOff: !!r.relances_off, reply: r.reponse_client || undefined, repliedAt: r.repondu_le || undefined, reminderCount: Number(r.relances || 0), phone: r.client_telephone || undefined, addr: r.client_adresse || undefined })
+const toDev = (r: Row, i: number, n: number): Devis => ({ id: r.id, num: parseInt(String(r.numero || "").replace(/\D/g, "")) || 0, client: r.client_nom || "", objet: r.objet || "", status: mapStatut(String(r.statut || "")), amount: Number(r.total_ttc ?? r.total_ht ?? 0), created: n - i, lines: Array.isArray(r.lignes) ? r.lignes : undefined, at: r.created_at, email: r.client_email || undefined, callId: r.call_id != null ? String(r.call_id) : undefined, ai: r.call_id != null, sentAt: r.envoye_le || undefined, token: r.token || undefined, remindersOff: !!r.relances_off, reply: r.reponse_client || undefined, repliedAt: r.repondu_le || undefined, reminderCount: Number(r.relances || 0), phone: r.client_telephone || undefined, addr: r.client_adresse || undefined, openedAt: r.ouvert_le || undefined, parentId: r.parent_id || undefined, signedAt: r.signe_le || undefined })
 /** update52 : repli si la base n'a pas encore la migration 20261118_07 (contrainte de statut d'origine). */
-export const legacyStatut = (st: DevStatus) => st === "env" || st === "sans" ? "envoye" : st === "val" ? "accepte" : st === "ref" ? "refuse" : "brouillon"
+export const legacyStatut = (st: DevStatus) => st === "env" || st === "sans" || st === "perdu" ? "envoye" : st === "val" ? "accepte" : st === "ref" ? "refuse" : "brouillon"
 /** Message d'erreur Supabase → français, pour l'artisan. */
 export function dbErrorFr(e: { code?: string; message?: string } | null | undefined, what = "l'enregistrement") {
   const code = String(e?.code || ""), msg = String(e?.message || "")
@@ -141,6 +141,7 @@ const devRow = (d: Devis, tva: number) => {
     ...(d.addr != null ? { client_adresse: d.addr || null } : {}),
     ...(d.status === "env" ? { envoye_le: d.sentAt || new Date().toISOString() } : {}),
     ...(typeof d.remindersOff === "boolean" ? { relances_off: d.remindersOff } : {}),
+    ...(d.parentId ? { parent_id: d.parentId } : {}), // update71 : avenant / devis complémentaire (migration 20261122_14)
   }
 }
 
@@ -193,9 +194,9 @@ export function useStore() {
   useEffect(() => {
     load()
     // Temps réel filtré sur l'artisan connecté + filet de sécurité toutes les 15 s (au lieu de 2 s : 7× moins de requêtes)
-    let ch: ReturnType<typeof supabase.channel> | undefined
+    let ch: ReturnType<typeof supabase.channel> | undefined, gone = false
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return
+      if (!user || gone) return // update71 : démontage avant la réponse → pas de second canal du même nom (erreur « after subscribe() »)
       const f = `artisan_id=eq.${user.id}`
       ch = supabase.channel(`akno-live-${user.id}`)
       for (const table of ["calls", "appointments", "devis", "relances"]) ch = ch.on("postgres_changes", { event: "*", schema: "public", table, filter: f }, () => load())
@@ -212,6 +213,7 @@ export function useStore() {
     const onFocus = () => load()
     addEventListener("focus", onFocus)
     return () => {
+      gone = true
       removeEventListener("focus", onFocus)
       if (ch) supabase.removeChannel(ch)
       stop()
@@ -241,6 +243,8 @@ export function useStore() {
         const run = (r: typeof row | (Omit<typeof row, "statut"> & { statut: string })) => insert ? supabase.from("devis").insert({ ...r, artisan_id: me }) : supabase.from("devis").update(r).eq("id", d.id)
         let res = await run(row)
         if (res.error?.code === "23514") res = await run({ ...row, statut: legacyStatut(d.status) })
+        // update71 : colonne parent_id absente (migration 20261122_14 non appliquée) → on enregistre sans le lien d'avenant
+        if (res.error && "parent_id" in row && /parent_id/.test(String(res.error.message || ""))) { const { parent_id: _p, ...rest } = row as typeof row & { parent_id?: string }; res = await run(rest as typeof row) }
         if (res.error) fail(dbErrorFr(res.error, `l'enregistrement du devis ${d.num || ""}`.trim()), res.error)
         return res
       }

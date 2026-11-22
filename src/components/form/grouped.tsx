@@ -98,7 +98,7 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
   const opts: { c: Contact; isNew: boolean }[] = [...list.map(c => ({ c, isNew: false })), ...(q.trim() && !exact ? [{ c: { name: q.trim() }, isNew: true }] : [])]
   const pick = (i: number) => { const o = opts[i]; if (o) onPick(o.c, o.isNew) }
   return <AnimatePresence>{open && <ModalSheet key="cs" label="Choisir un client" onClose={onClose} desk={desk} z={60} escape={false} onEntered={() => inRef.current?.focus({ preventScroll: true })}
-      className={`bg-[#1C1C1E] ${desk ? "" : "h-[86dvh] pt-2"}`} deskClass="max-h-[72dvh] max-w-[460px] rounded-[22px]" style={desk ? undefined : { paddingBottom: "env(safe-area-inset-bottom)" }}>
+      className={`bg-[#1C1C1E] ${desk ? "" : "h-[86dvh] pt-2"}`} deskClass="max-h-[72dvh] max-w-[460px] rounded-[22px]" style={desk ? undefined : { paddingBottom: "var(--sab)" }}>
       <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3"><span className="w-16" /><span className="text-[16px] font-semibold">Client</span><button type="button" onClick={onClose} className="w-16 text-right text-[16px] text-[#7EA6FF]">Annuler</button></div>
       <div className="shrink-0 px-4 pb-3"><label className="flex h-10 items-center gap-2 rounded-[11px] bg-white/[.09] px-3">
         <Search size={16} className="shrink-0 text-white/40" />

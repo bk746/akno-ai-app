@@ -84,7 +84,7 @@ function ReceptionLockedWeb({ desk, calls, onCalls }: { desk: boolean; calls: nu
           {calls > 0 && <button type="button" onClick={onCalls} className="mt-4 w-full text-center text-[13px] text-white/50 underline decoration-white/20 underline-offset-2 hover:text-white/80">Vos {calls} appel{calls > 1 ? "s" : ""} déjà enregistré{calls > 1 ? "s" : ""} restent dans les fiches clients</button>}
         </motion.div>
       </div>
-      <div aria-hidden style={{ height: desk ? 48 : "calc(110px + max(var(--sab) - 10px, 12px))" }} />
+      <div aria-hidden style={{ height: desk ? 48 : "calc(var(--page-bottom) + 18px)" }} />
     </div>
   </div>
 }
@@ -119,7 +119,7 @@ function Sheet({ kind, close }: { kind: UpgradeKind; close: () => void }) {
   const addAmt = p ? (kind === "reception" ? p.added : p.next - p.current) : 0
   const Row = ({ l, v, strong }: { l: ReactNode; v: ReactNode; strong?: boolean }) => <div className={`flex items-baseline justify-between gap-4 ${strong ? "text-[16px] font-semibold" : "text-[14.5px] text-white/70"}`}><span>{l}</span><span className="tabular-nums">{v}</span></div>
   return <ModalSheet label={TITLE[kind]} onClose={close} desk={wide} z={85} escape={false} dismissible={ph !== "busy"} backdrop="bg-black/70"
-      className={`border border-white/[.08] bg-[#0E0E10] px-6 pt-6 ${wide ? "pb-6" : "pb-[max(24px,env(safe-area-inset-bottom))]"}`} deskClass="max-w-[460px] rounded-[28px]">
+      className={`border border-white/[.08] bg-[#0E0E10] px-6 pt-6 ${wide ? "pb-6" : "pb-[max(24px,var(--sab))]"}`} deskClass="max-w-[460px] rounded-[28px]">
       <div className="min-h-0 overflow-y-auto overscroll-contain">
       {ph !== "busy" && <button type="button" aria-label="Fermer" onClick={close} className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/[.06] text-white/60 hover:text-white"><X size={16} /></button>}
       <AnimatePresence mode="wait" initial={false}>

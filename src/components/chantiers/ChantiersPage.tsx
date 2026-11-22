@@ -16,7 +16,7 @@ import type { Contact } from "../form/grouped"
 type Filter = "all" | ChStatus
 const FILTERS: [Filter, string][] = [["all", "Tous"], ["in_progress", "En cours"], ["upcoming", "À venir"], ["done", "Terminés"]]
 const RANK: Record<ChStatus, number> = { in_progress: 0, upcoming: 1, done: 2 }
-const NAV = "calc(92px + max(var(--sab) - 10px, 12px))"
+const NAV = "var(--page-bottom)"
 const ls = { get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* privé */ } } }
 const glass = "bg-[#1C1C1E]/75 backdrop-blur-xl backdrop-saturate-150 border border-white/[.08] shadow-[0_8px_24px_-8px_rgba(0,0,0,.6)]"
 const sortCh = (a: Chantier, b: Chantier) => { const sa = effectiveStatus(a), sb = effectiveStatus(b); if (sa !== sb) return RANK[sa] - RANK[sb]; const da = a.start_date || "9999", db = b.start_date || "9999"; return sa === "done" ? db.localeCompare(da) : da.localeCompare(db) }

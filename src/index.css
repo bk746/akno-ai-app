@@ -195,6 +195,15 @@ label:focus-within input:focus-visible { outline: none; }
 [role="button"]:focus-visible { outline: 2px solid rgba(255,255,255,.4); outline-offset: -2px; }
 
 :root{--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)}
+/* update71 · bas d'écran CENTRALISÉ (une seule source de vérité) :
+   --nav-h / --nav-gap : barre flottante (hauteur, écart au bas = au-dessus du home indicator)
+   --page-bottom : réserve en bas de CHAQUE zone qui défile sous la barre (barre + écart + marge de lecture)
+   --sheet-bottom : bas des feuilles (pied de page, zone de saisie) au-dessus du home indicator */
+:root{--nav-h:64px;--nav-gap:max(calc(var(--sab) - 10px),12px);--page-bottom:calc(var(--nav-h) + var(--nav-gap) + 28px);--sheet-bottom:max(var(--sab),16px)}
+.pb-page{padding-bottom:var(--page-bottom)!important}
+.pb-sheet{padding-bottom:var(--sheet-bottom)!important}
+/* champ focalisé ou ancre : jamais caché sous la barre flottante */
+[data-page] .overflow-y-auto{scroll-padding-bottom:var(--page-bottom)}
 
 /* ───────── update53 · responsive mobile + fluidité ───────── */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
@@ -294,8 +303,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 /* update67 · feuilles modales (ModalSheet) : remontée au-dessus du clavier, en douceur et sans saut */
 /* update69 · hauteur des feuilles : écran visible ; en PWA installée (pas de barres Safari), plein écran « large » (100lvh)
    pour ne jamais s'arrêter avant le bas de l'écran si iOS rapporte un 100dvh trop court */
-:root { --sheet-vh: 100dvh; }
-@media (display-mode: standalone) { @supports (height: 100lvh) { :root { --sheet-vh: 100lvh; } } }
+/* update71 : la hauteur vient de la mesure réelle (--app-h, lib/mobile.ts) ; 100lvh en PWA dépassait l'écran visible (pieds de page coupés) */
+:root { --sheet-vh: var(--app-h, 100dvh); }
 .sheet-kb { transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform .32s cubic-bezier(.22, 1, .36, 1); }
 .sheet-kb > * { transition: max-height .32s cubic-bezier(.22, 1, .36, 1); }
 @media (prefers-reduced-motion: reduce) { .sheet-kb, .sheet-kb > * { transition: none; } }

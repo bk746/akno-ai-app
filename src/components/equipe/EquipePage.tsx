@@ -15,7 +15,7 @@ import { STATUS_COLOR, progressPct, rangeLabel, todayISO, untilLabel } from "../
 import { ROLE_LABEL, cityOf, entryDate, frPhone, groupTeam, initialsOf, invitedAgo, longDate, memberToday, rowSite, shortName, sinceLabel, weekPlan, weekRange, type AccessRole, type Today } from "../../lib/equipeCalc"
 import ModalSheet from "../sheet/ModalSheet"
 
-const NAV = "calc(92px + max(var(--sab) - 10px, 12px))"
+const NAV = "var(--page-bottom)"
 const PUSH = { type: "spring" as const, stiffness: 420, damping: 40, mass: .9 }
 const card = "rounded-[16px] bg-white/[.07]"
 
@@ -97,7 +97,7 @@ export default function EquipePage({ head }: { head?: ReactNode }) {
 
   return <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-black text-white">
     <PushStack ref={scroller} base={list} top={fiche || null} topKey={member ? `f-${member.id}` : undefined} inner={desk ? "max-w-[640px]" : ""}
-      padTop={desk ? 28 : "calc(var(--sat) + 2px)"} padBottom={desk ? 40 : `calc(${NAV} + 16px)`} />
+      padTop={desk ? 28 : "calc(var(--sat) + 2px)"} padBottom={desk ? 40 : "calc(var(--page-bottom) + 16px)"} />
     <AnimatePresence>{form && <MemberForm key="mf" initial={form.e} desk={desk} onClose={() => setForm(null)} onSaved={id => { if (!form.e) open(id) }} onDeleted={() => { setOpenId(null); if (pushed.current) { pushed.current = false; history.back() } }} />}</AnimatePresence>
   </div>
 }

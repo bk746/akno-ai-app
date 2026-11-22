@@ -8,6 +8,10 @@ import { NATURE, TYPE_LABEL, downloadFacture, downloadFactureXml, factureFile, f
 import { fmtPct } from "../../../api/_lib/factureCalc"
 import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Reveal, ival, type Contact } from "../form/grouped"
 import { NumField, Stepper } from "../devis/fields"
+import { LinesCard, NextCard } from "../devis/Chaine"
+import { looksPhone, payLink, sendFactureSms } from "../../lib/chaine"
+import { webOrigin } from "../../lib/native"
+import { Copy, MessageSquare } from "lucide-react"
 
 /* update46 · Factures : brouillon → émise (numéro légal) → envoyée → payée, avoirs, relances d'impayés validées par l'artisan.
    update63 · éditeur de facture au style iOS (sections Client, Chantier, Prestations, Conditions), même logique et mêmes champs. */
@@ -105,6 +109,16 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
     if (!r.ok) { setErr(r.error || "Envoi impossible."); if (r.download) void downloadFacture(d); return }
     toast(`Envoyée à ${email}`); await reload()
   })
+  const sendSms = () => run("sms", async () => {
+    const phone = (d.client_telephone || "").trim() || prompt("Téléphone portable du client ?") || ""
+    if (!phone) return
+    if (!looksPhone(phone)) { setErr("Numéro de portable invalide (ex. 06 12 34 56 78)."); return }
+    const r = await sendFactureSms(f.id, phone)
+    if (!r.ok) { setErr(r.error || "Envoi par SMS impossible."); return }
+    toast(`Lien envoyé par SMS au ${phone}`); await reload()
+  })
+  const tok = (f as Facture & { token?: string | null }).token
+  const copyPay = () => { const u = payLink(webOrigin(), tok); if (!u) return; void navigator.clipboard?.writeText(u).catch(() => {}); toast("Lien de paiement copié") }
   const paid = (v: boolean) => run("paid", async () => {
     const r = await api("/api/devis", { action: "facture_paid", facture_id: f.id, paid: v, mode })
     if (!r.ok) { setErr(r.error || "Mise à jour impossible."); return }
@@ -143,8 +157,21 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
   </div>
   return <Sheet title={`${label(f)} ${f.numero || ""}`.trim()} sub={<Chip c={stc}>{stl}</Chip>} c="#FFFFFF" onClose={close}
     footer={<div className="kb-hide">{sum}{draft
-      ? <div className="flex gap-2"><Btn className="flex-1" disabled={!!busy} onClick={() => run("save", async () => { if (await saveDraft()) { toast("Brouillon enregistré"); await reload() } })}>Enregistrer</Btn><Btn primary className="flex-1" disabled={!!busy} onClick={emit}>{busy === "emit" ? "Émission…" : "Émettre"}</Btn></div>
-      : <div className="flex gap-2"><Btn className="flex-1" disabled={!!busy} onClick={download}><Download size={17} />{busy === "pdf" ? "…" : "PDF"}</Btn>{f.statut !== "annulee" && <Btn primary className="flex-1" disabled={!!busy} onClick={send}><Send size={17} />{busy === "send" ? "Envoi…" : f.envoyee_le ? "Renvoyer" : "Envoyer"}</Btn>}</div>}</div>}>
+      ? <div className="flex gap-2"><Btn className="flex-1" disabled={!!busy} onClick={() => run("save", async () => { if (await saveDraft()) { toast("Brouillon enregistré"); await reload() } })}>Enregistrer</Btn><Btn primary className="flex-1" disabled={!!busy} onClick={emit}>{busy === "emit" ? "Validation…" : "Valider la facture"}</Btn></div>
+      : <div className="flex gap-2"><Btn className="shrink-0 !px-4" disabled={!!busy} onClick={download} aria-label="Voir le PDF"><Download size={17} />{busy === "pdf" ? "…" : "PDF"}</Btn>
+        {f.statut === "annulee" || f.type === "avoir" ? null
+          : f.statut === "payee" ? <Btn className="min-w-0 flex-1" disabled={!!busy} onClick={send}><Send size={17} />Renvoyer</Btn>
+          : !f.envoyee_le ? <Btn primary className="min-w-0 flex-1" disabled={!!busy} onClick={send} data-next-action><Send size={17} />{busy === "send" ? "Envoi…" : "Envoyer au client"}</Btn>
+          : <Btn primary c={GREEN} className="min-w-0 flex-1" disabled={!!busy} onClick={() => paid(true)} data-next-action>{busy === "paid" ? "…" : "Marquer comme payée"}</Btn>}</div>}</div>}>
+    {(() => { // update71 · une seule « prochaine étape », en clair
+      if (f.type === "avoir" || f.statut === "annulee") return null
+      if (draft) return <NextCard c="#2F7BFF" title="Vérifiez puis validez la facture" text="Une fois validée, elle reçoit son numéro définitif et ne se modifie plus (en cas d'erreur, on fait un avoir)." />
+      if (f.statut === "payee") return <NextCard c={GREEN} tone="ok" title={`Payée${f.payee_le ? ` le ${new Date(f.payee_le).toLocaleDateString("fr-FR")}` : ""}`} text="Les relances sont arrêtées. Rien d'autre à faire." />
+      if (!f.envoyee_le) return <NextCard c="#2F7BFF" title="Envoyez la facture au client" text="Il la reçoit par e-mail avec le PDF et un lien pour payer." >
+        <div className="mt-3 flex flex-wrap gap-2"><Btn className="flex-1" disabled={!!busy} onClick={sendSms}><MessageSquare size={16} />{busy === "sms" ? "Envoi…" : "Par SMS"}</Btn>{tok && <Btn className="flex-1" onClick={copyPay}><Copy size={16} />Copier le lien</Btn>}</div></NextCard>
+      return <NextCard c={late(f) ? AMBER : "#2F7BFF"} tone={late(f) ? "warn" : undefined} title={late(f) ? "Paiement en retard" : "En attente de paiement"} text={late(f) ? "Akno relance le client à J+1, J+7 et J+15. Dès que vous recevez le paiement, marquez la facture payée." : "Dès que vous recevez le paiement, marquez la facture payée. Akno relance le client si l'échéance passe."}>
+        <div className="mt-3 flex flex-wrap gap-2">{tok && <Btn className="flex-1" onClick={copyPay}><Copy size={16} />Lien de paiement</Btn>}<Btn className="flex-1" disabled={!!busy} onClick={sendSms}><MessageSquare size={16} />{busy === "sms" ? "Envoi…" : "Renvoyer par SMS"}</Btn></div></NextCard>
+    })()}
     {draft && miss.length > 0 && <div className="mb-5 rounded-[14px] bg-[#FFB340]/[.09] px-4 py-3 text-[13.5px] text-white/80">Mentions manquantes (Paramètres › Entreprise) : {miss.join(", ")}.</div>}
     {rel && <Card className="mb-4 p-4">
       <div className="flex items-center gap-2 text-[15px] font-medium"><BellRing size={17} className="text-[#FFB340]" />{NIV[rel.niveau] || "Relance"} à valider</div>
@@ -155,7 +182,7 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
     <div className="space-y-7 [&_.ig]:!bg-[#1C1C1F] [&_.ig-card]:!bg-[#1C1C1F]">
       <IGroup title="Client" id="fa-g-client">
         <ClientRow value={d.client_nom || ""} phone={d.client_telephone || ""} email={d.client_email || ""} onOpen={() => setPickC(true)} disabled={ro} />
-        <DisclosureRow open={coordOpen} onToggle={() => setCoordOpen(o => !o)} title="Coordonnées" sub={[d.client_telephone, d.client_email, d.client_adresse].filter(Boolean).join(" · ") || "E-mail, téléphone, adresse"} />
+        <DisclosureRow open={coordOpen} onToggle={() => setCoordOpen(o => !o)} title="Coordonnées" sub={d.client_adresse || (d.client_email || d.client_telephone ? "Adresse à compléter" : "E-mail, téléphone, adresse")} />
         <Reveal open={coordOpen}><div>
           <IRow label="E-mail" htmlFor="fa-email"><input id="fa-email" className={ival} type="email" inputMode="email" autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="Pour l'envoi de la facture" value={d.client_email || ""} onChange={e => set({ client_email: e.target.value })} /></IRow>
           <IRow label="Téléphone" htmlFor="fa-tel"><input id="fa-tel" className={ival} type="tel" inputMode="tel" autoComplete="tel" placeholder="06 12 34 56 78" {...v("client_telephone")} /></IRow>
@@ -175,24 +202,24 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
         <IRow label="Travaux le" htmlFor="fa-date"><input id="fa-date" className={ival + " text-left"} type="date" {...v("date_execution")} /></IRow>
         <IRow label="Nature" htmlFor="fa-nature"><select id="fa-nature" className={ival + " appearance-none"} value={d.nature || "services"} disabled={ro} onChange={e => set({ nature: e.target.value })}>{Object.entries(NATURE).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></IRow>
       </IGroup>
-      <section>
+      {ro ? <section><div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations</div><LinesCard lines={d.lignes.map(x => ({ ...x, tv: CO.tvaNA || d.autoliquidation ? 0 : x.tv }))} tvaNA={CO.tvaNA || !!d.autoliquidation} noTotals /></section> : <section>
         <div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations{d.lignes.length > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {d.lignes.length} ligne{d.lignes.length > 1 ? "s" : ""}</span>}</div>
         <div className="space-y-2.5">
           {d.lignes.map((x, i) => <div key={i} className="ig-card rounded-[18px] bg-[#141416] p-3">
-            <div className="flex items-start gap-1"><input className="h-10 min-w-0 flex-1 rounded-[10px] bg-transparent px-1.5 text-[16px] font-medium text-white outline-none caret-[#2F6BFF] placeholder:font-normal placeholder:text-white/28 focus:bg-white/[.05] disabled:text-white/80" placeholder="Désignation" value={x.l} disabled={ro} onChange={e => setLine(i, { l: e.target.value })} />{!ro && <button type="button" aria-label="Supprimer la ligne" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/35 transition-colors hover:text-[#FF9B96] active:bg-white/[.06]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={17} /></button>}</div>
-            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <div className="flex items-start gap-1"><textarea rows={1} className="min-h-10 min-w-0 flex-1 resize-none break-words rounded-[10px] bg-transparent px-1.5 py-2 text-[16px] font-medium leading-snug text-white outline-none caret-[#2F6BFF] [field-sizing:content] placeholder:font-normal placeholder:text-white/28 focus:bg-white/[.05] disabled:text-white/80" aria-label="Désignation" placeholder="Désignation" value={x.l} disabled={ro} onChange={e => setLine(i, { l: e.target.value })} />{!ro && <button type="button" aria-label="Supprimer la ligne" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/35 transition-colors hover:text-[#FF9B96] active:bg-white/[.06]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={17} /></button>}</div>
+            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-end gap-2">
               <div><div className="mb-1 px-1 text-[12px] text-white/40">Quantité</div>{ro ? <div className="flex h-11 items-center px-1 text-[16px] tabular-nums text-white/80">{String(x.q).replace(".", ",")}</div> : <Stepper big soft step={1} value={Number(x.q) || 0} onChange={q => setLine(i, { q })} ariaLabel="Quantité" />}</div>
               <div><div className="mb-1 px-1 text-[12px] text-white/40">Prix unitaire HT</div>{ro ? <div className="flex h-11 items-center justify-end px-1 text-[16px] tabular-nums text-white/80">{e2(Number(x.pu) || 0)}</div> : <NumField value={Number(x.pu) || 0} onChange={n => setLine(i, { pu: n ?? 0 })} suffix="€" ariaLabel="Prix unitaire HT" inputClass="!h-11 !border-0 !bg-white/[.06] !text-[16px]" />}</div>
             </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input className="h-10 w-[92px] rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none disabled:text-white/60" aria-label="Unité" value={x.u || "u"} disabled={ro} onChange={e => setLine(i, { u: e.target.value })} />
-              <select className="h-10 w-[92px] appearance-none rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none [color-scheme:dark] disabled:text-white/60" aria-label="TVA" value={x.tv ?? 20} disabled={ro || CO.tvaNA || !!d.autoliquidation} onChange={e => setLine(i, { tv: Number(e.target.value) })}>{[20, 10, 5.5, 2.1, 0].map(r => <option key={r} value={r}>{String(r).replace(".", ",")} %</option>)}</select>
-              <div className="ml-auto text-right"><div className="text-[11.5px] text-white/35">Total HT</div><div className="text-[17px] font-semibold tabular-nums">{e2(Math.round((Number(x.q) || 0) * (Number(x.pu) || 0) * 100) / 100)}</div></div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input className="h-10 w-[84px] rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none disabled:text-white/60" aria-label="Unité" value={x.u || "u"} disabled={ro} onChange={e => setLine(i, { u: e.target.value })} />
+              <select className="h-10 w-[84px] appearance-none rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none [color-scheme:dark] disabled:text-white/60" aria-label="TVA" value={x.tv ?? 20} disabled={ro || CO.tvaNA || !!d.autoliquidation} onChange={e => setLine(i, { tv: Number(e.target.value) })}>{[20, 10, 5.5, 0].map(r => <option key={r} value={r}>{String(r).replace(".", ",")} %</option>)}</select>
+              <div className="ml-auto min-w-0 text-right"><div className="text-[11.5px] text-white/35">Total HT</div><div className="text-[17px] font-semibold tabular-nums">{e2(Math.round((Number(x.q) || 0) * (Number(x.pu) || 0) * 100) / 100)}</div></div>
             </div>
           </div>)}
           {!ro && <button type="button" className="ig-card flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[#141416] text-[15.5px] font-medium text-[#7EA6FF] transition-colors active:bg-white/[.06]" onClick={() => set({ lignes: [...d.lignes, { l: "", q: 1, u: "u", pu: 0, tv: 10 }] })}><Plus size={17} strokeWidth={2.2} />Ajouter une ligne</button>}
         </div>
-      </section>
+      </section>}
       {(!CO.tvaNA || (f.type !== "avoir" && f.type !== "acompte")) && <IGroup title="Conditions" id="fa-g-cond">
         {!CO.tvaNA && <IToggleRow label="TVA sur les débits" sub="Option pour le paiement de la TVA d'après les débits" on={!!d.tva_sur_debits} disabled={ro} onChange={() => !ro && set({ tva_sur_debits: !d.tva_sur_debits })} />}
         {f.type !== "avoir" && f.type !== "acompte" && <IToggleRow label="Retenue de garantie" sub={Number(d.retenue_garantie_pct) > 0 ? fmtPct(Number(d.retenue_garantie_pct)) + " du TTC" : "5 % maximum"} on={Number(d.retenue_garantie_pct) > 0} disabled={ro} onChange={() => !ro && set({ retenue_garantie_pct: Number(d.retenue_garantie_pct) > 0 ? 0 : 5 })} />}
@@ -215,7 +242,7 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
       {!draft && f.type !== "avoir" && f.statut !== "annulee" && <Card className="space-y-3 p-4">
         {f.statut === "payee"
           ? <div className="flex items-center justify-between"><span className="text-[14px]">Payée{f.payee_le ? ` le ${new Date(f.payee_le).toLocaleDateString("fr-FR")}` : ""}</span><button className="text-[13px] text-white/50" onClick={() => paid(false)}>Annuler</button></div>
-          : <div className="flex gap-2"><select className={inp} value={mode} onChange={e => setMode(e.target.value)} aria-label="Mode de paiement">{["Virement", "Chèque", "Espèces", "Carte", "Autre"].map(m => <option key={m}>{m}</option>)}</select><Btn c={GREEN} disabled={!!busy} onClick={() => paid(true)}>Marquer payée</Btn></div>}
+          : <><div className="text-[15px] font-medium">Paiement reçu ?</div><div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2"><select className={inp} value={mode} onChange={e => setMode(e.target.value)} aria-label="Mode de paiement">{["Virement", "Chèque", "Espèces", "Carte", "Autre"].map(m => <option key={m}>{m}</option>)}</select><Btn c={GREEN} primary disabled={!!busy} onClick={() => paid(true)}>Marquer comme payée</Btn></div></>}
         {f.statut !== "payee" && <button className="w-full text-[13.5px] text-white/55" onClick={avoir}>Corriger ou annuler par un avoir</button>}
       </Card>}
       {draft && <button className="w-full py-2 text-[13.5px] text-[#FF9B96]" onClick={delDraft}>Supprimer le brouillon</button>}

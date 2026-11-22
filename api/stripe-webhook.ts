@@ -1,3 +1,4 @@
+import { markPaidFromStripe } from "./_lib/chain.js"
 import { adminClient, env } from "./_lib/mail.js"
 import { jsonResponse, type ApiResult, type Headers } from "./_lib/http.js"
 import { verifyStripeSignature, type StripeObj } from "./_lib/stripe.js"
@@ -20,11 +21,21 @@ function headerOf(h: Headers, name: string) {
 export async function handleStripeWebhook(raw: string, headers: Headers): Promise<ApiResult> {
   const secret = (env("STRIPE_WEBHOOK_SECRET") || "").trim()
   if (!secret || !env("STRIPE_SECRET_KEY")) return { status: 503, body: { error: "Stripe n'est pas configuré." } }
-  if (!await verifyStripeSignature(raw, headerOf(headers, "stripe-signature"), secret)) return { status: 400, body: { error: "Signature invalide." } }
-  let event: { id?: string; type?: string; data?: { object?: StripeObj } }
+  // update71 : un second point de terminaison « Connect » (comptes des artisans) peut avoir son propre secret
+  const sigHeader = headerOf(headers, "stripe-signature"), connectSecret = (env("STRIPE_CONNECT_WEBHOOK_SECRET") || "").trim()
+  if (!await verifyStripeSignature(raw, sigHeader, secret) && !(connectSecret && await verifyStripeSignature(raw, sigHeader, connectSecret))) return { status: 400, body: { error: "Signature invalide." } }
+  let event: { id?: string; type?: string; account?: string; data?: { object?: StripeObj } }
   try { event = JSON.parse(raw) } catch { return { status: 400, body: { error: "Payload invalide." } } }
   const obj = event.data?.object || {}
   try {
+    // update71 · paiement d'une facture client sur le compte connecté de l'artisan → facture « payée »
+    const meta = (obj.metadata || {}) as Record<string, string>
+    if (meta.akno_facture_id && (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded")) {
+      if (event.type === "checkout.session.completed" && obj.payment_status !== "paid") return { status: 200, body: { ok: true, pending: true } } // SEPA : attendre la confirmation
+      const r = await markPaidFromStripe(adminClient(), obj, event.account)
+      if ("paid" in r && r.paid) await notifyArtisan(String(r.artisan), { title: "Facture payée", body: `${r.numero} réglée en ligne`, url: "/devis", tag: `facture-${r.paid}` }, 1)
+      return { status: 200, body: { ok: true, ...r } }
+    }
     switch (event.type) {
       case "checkout.session.completed": {
         const artisan = String(obj.client_reference_id || ((obj.metadata || {}) as Record<string, string>).artisan_id || "")

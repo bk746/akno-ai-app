@@ -5,7 +5,7 @@ import { ChevronLeft, Check } from "lucide-react"
 import { EASE, Spinner } from "../auth/fields"
 
 export function MScreen({ children, back, footer, center }: { children: ReactNode; back?: () => void; footer?: ReactNode; center?: boolean }) {
-  return <div className="flex min-h-[100dvh] flex-col bg-black text-white antialiased" style={{ paddingTop: "max(env(safe-area-inset-top), 12px)", paddingBottom: "max(env(safe-area-inset-bottom), 16px)" }}>
+  return <div className="flex min-h-[100dvh] flex-col bg-black text-white antialiased" style={{ paddingTop: "max(env(safe-area-inset-top), 12px)", paddingBottom: "max(var(--sab), 16px)" }}>
     <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col px-6">
       <div className="h-11">{back && <button type="button" onClick={back} aria-label="Retour" className="-ml-2 flex h-11 w-11 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/[.06]"><ChevronLeft size={24} strokeWidth={2} /></button>}</div>
       <div className={`flex flex-1 flex-col ${center ? "items-center justify-center text-center" : ""}`}>{children}</div>

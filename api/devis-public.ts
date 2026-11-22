@@ -4,6 +4,7 @@ import { notifyArtisan } from "./_lib/push.js"
 import { clientIp, header, sha256Hex, type Headers } from "./_lib/http.js"
 import { publicRate } from "./_lib/limits.js"
 import { devisHash, logEvent } from "./_lib/signature.js"
+import { afterSign, checkoutForFacture, connectAccount, connectEnabled, dueOfRow, payUrl } from "./_lib/chain.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
@@ -81,6 +82,11 @@ export async function handleDevisPublic(method?: string, url?: string, body?: un
     if (!await publicRate(`dossier:${await sha256Hex(clientIp(headers))}`, 60)) return { status: 429, body: { error: "Trop de requêtes." } }
     return handleDossier(dossier.trim())
   }
+  const factureTok = param(url, "facture") || (body && typeof body === "object" ? String((body as { facture?: string }).facture || "") : "")
+  if (factureTok) {
+    if (!await publicRate(`payer:${await sha256Hex(clientIp(headers))}`, 60)) return { status: 429, body: { error: "Trop de requêtes." } }
+    return handleFacturePublic(method, factureTok.trim(), body, headers)
+  }
   const token = tokenOf(url, body)
   if (!UUID.test(token)) return { status: 400, body: { error: "Lien invalide." } }
   let sb
@@ -107,6 +113,8 @@ export async function handleDevisPublic(method?: string, url?: string, body?: un
       const since = new Date(Date.now() - 3600e3).toISOString()
       const { data: recent } = await sb.from("signature_events").select("id").eq("devis_id", devis.id).eq("event", "ouverture").eq("ip", ip.slice(0, 64) || "").gte("at", since).limit(1)
       if (!recent?.length) await logEvent(sb, { artisan_id: devis.artisan_id, devis_id: devis.id, event: "ouverture", ip, ua, document_hash: docHash })
+      // update71 : l'artisan voit « Ouvert » (colonne facultative, migration 20261122_14)
+      if (!devis.ouvert_le && devis.statut === "env") await sb.from("devis").update({ ouvert_le: new Date().toISOString() }).eq("id", devis.id).is("ouvert_le", null)
     } catch { /* journal facultatif avant migration */ }
     let logo_url = ""
     if (artisan?.logo_path) { try { const { data } = await sb.storage.from("logos").createSignedUrl(String(artisan.logo_path), 3600); logo_url = data?.signedUrl || "" } catch { /* logo facultatif */ } }
@@ -134,6 +142,7 @@ export async function handleDevisPublic(method?: string, url?: string, body?: un
   if (uErr) return { status: 500, body: { error: "Impossible d'enregistrer votre réponse." } }
   await logEvent(sb, { artisan_id: devis.artisan_id, devis_id: devis.id, event: action === "accept" ? "consentement" : "refus", ip, ua, signataire: nom || undefined, document_hash: docHash, at: now })
   await stopDevisReminders(sb, devis.id, { markResponded: true })
+  if (action === "accept") { try { await afterSign(sb, devis) } catch { /* chaîne facultative */ } }
   await notifyArtisan(devis.artisan_id, {
     title: action === "accept" ? "Devis accepté" : "Devis refusé",
     body: `${devis.numero} · ${devis.client_nom || "Client"}`,
@@ -168,9 +177,39 @@ async function handleSign(sb: ReturnType<typeof adminClient>, devis: Record<stri
   if (error) return { status: 500, body: { error: "Impossible d'enregistrer votre signature." } }
   await logEvent(sb, { artisan_id: devis.artisan_id, devis_id: devis.id, event: "signature", ip: c.ip, ua: c.ua, signataire: nom, document_hash: c.docHash, at: now, data: { signature_sha256: await sha256Hex(png) } })
   await stopDevisReminders(sb, devis.id, { markResponded: true })
-  await notifyArtisan(devis.artisan_id, { title: "Devis signé", body: `${devis.numero} · ${nom}`, url: "/devis", tag: `devis-${devis.id}` }, 1)
+  // update71 : la signature déclenche la suite (facture d'acompte prête + chantier sur la carte), sans jamais bloquer la signature
+  let chain: { acompte: string | null; chantier: string | null } = { acompte: null, chantier: null }
+  try { chain = await afterSign(sb, devis) } catch { /* facultatif */ }
+  const next = [chain.acompte ? "acompte prêt à envoyer" : "", chain.chantier ? "chantier créé" : ""].filter(Boolean).join(" · ")
+  await notifyArtisan(devis.artisan_id, { title: "Devis signé", body: `${devis.numero} · ${nom}${next ? ` — ${next}` : ""}`, url: "/devis", tag: `devis-${devis.id}` }, 1)
   const { data: events } = await sb.from("signature_events").select("event, at, ip, ua, event_hash, prev_hash, document_hash").eq("devis_id", devis.id).order("id")
   return { status: 200, body: { ...c.summary, statut: "val", decided_at: now, document_hash: c.docHash, signed: { nom, at: now, png, hash: c.docHash, certif_tva: reduced || null }, proof: full ? "signature" : "simple", events: events || [] } }
+}
+
+/** update71 · Page publique de paiement d'une facture émise (/payer/:token) : montant, virement (IBAN + référence)
+    et, si l'artisan a activé Stripe Connect, paiement en ligne CB / prélèvement SEPA sur SON compte. */
+async function handleFacturePublic(method: string | undefined, token: string, body: unknown, headers?: Headers): Promise<ApiResult> {
+  if (!UUID.test(token)) return { status: 400, body: { error: "Lien invalide." } }
+  let sb
+  try { sb = adminClient() } catch { return { status: 503, body: { error: "Configuration serveur manquante." } } }
+  const { data: f } = await sb.from("factures").select("*").eq("token", token).maybeSingle()
+  if (!f || !f.numero || f.type === "avoir" || f.statut === "annulee") return { status: 404, body: { error: "Cette facture est introuvable." } }
+  const verb = (method || "GET").toUpperCase()
+  if (verb === "POST") {
+    const action = body && typeof body === "object" ? String((body as { action?: string }).action || "") : ""
+    if (action !== "pay") return { status: 400, body: { error: "Action invalide." } }
+    return checkoutForFacture(sb, f, payUrl(token) || `https://${header(headers, "host")}/payer/${token}`)
+  }
+  const { data: a } = await sb.from("artisans").select("*").eq("id", f.artisan_id).maybeSingle()
+  let online = false
+  if (connectEnabled()) { const acc = await connectAccount(sb, String(f.artisan_id)); online = !!acc.id && acc.charges }
+  return { status: 200, body: {
+    ok: true, numero: f.numero, type: f.type, objet: f.objet, client_nom: f.client_nom, lignes: f.lignes,
+    total_ht: f.total_ht, total_tva: f.total_tva, total_ttc: f.total_ttc, acompte_deduit: f.acompte_deduit || 0,
+    reste: dueOfRow(f), date_emission: f.date_emission, date_echeance: f.date_echeance, payee: f.statut === "payee", payee_le: f.payee_le || null,
+    company: a?.entreprise_nom || a?.nom_entreprise || "Votre artisan", siret: a?.entreprise_siret || "",
+    iban: a?.iban || "", bic: a?.bic || "", reference: f.numero, online,
+  } }
 }
 
 type Res = { status: (n: number) => Res; json: (b: unknown) => void; setHeader: (k: string, v: string) => void; end: () => void }

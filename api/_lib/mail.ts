@@ -218,24 +218,25 @@ const euro = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString("fr-FR
 export const formatEuro = euro
 export const frDate = (iso?: string | null) => iso ? new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso).toLocaleDateString("fr-FR", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric" }) : ""
 
-export function factureEmailHtml(input: { client?: string; numero: string; objet?: string; company: string; ttc: number; echeance?: string | null; iban?: string | null; avoir?: boolean }) {
+export function factureEmailHtml(input: { client?: string; numero: string; objet?: string; company: string; ttc: number; echeance?: string | null; iban?: string | null; avoir?: boolean; payUrl?: string }) {
   const who = input.client ? ` ${escapeHtml(input.client)}` : ""
   const what = input.avoir ? "l'avoir" : "la facture"
   return `<p>Bonjour${who},</p>
 <p>Veuillez trouver ci-joint ${what} n° ${escapeHtml(input.numero)}${input.objet ? ` concernant « ${escapeHtml(input.objet)} »` : ""}, d'un montant de <strong>${euro(input.ttc)} TTC</strong>.</p>
 ${!input.avoir && input.echeance ? `<p>Date d'échéance : <strong>${escapeHtml(frDate(input.echeance))}</strong>.</p>` : ""}
-${!input.avoir && input.iban ? `<p>Règlement par virement : IBAN ${escapeHtml(input.iban)}</p>` : ""}
+${!input.avoir && input.payUrl ? `<p><a href="${escapeHtml(input.payUrl)}" style="display:inline-block;background:#111;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:600">Voir et régler la facture</a></p>` : ""}
+${!input.avoir && input.iban ? `<p>Règlement par virement : IBAN ${escapeHtml(input.iban)}</p>` : ""}${!input.avoir && input.iban ? `<p>Référence à indiquer : <strong>${escapeHtml(input.numero)}</strong></p>` : ""}
 <p>Cordialement,<br/>${escapeHtml(input.company)}</p>`
 }
 
 /** Modèles de relance d'impayé. Niveau 1 : rappel courtois · 2 : relance · 3 : relance ferme · 4 : mise en demeure. */
-export function impayeTemplate(input: { niveau: number; client?: string; numero: string; company: string; ttc: number; echeance?: string | null; pro: boolean; iban?: string | null }) {
+export function impayeTemplate(input: { niveau: number; client?: string; numero: string; company: string; ttc: number; echeance?: string | null; pro: boolean; iban?: string | null; payUrl?: string }) {
   const who = input.client ? ` ${input.client}` : ""
   const due = frDate(input.echeance)
   const penal = input.pro
     ? "\n\nConformément aux articles L441-10 et D441-5 du Code de commerce, tout retard de paiement entraîne des pénalités de retard au taux de trois fois le taux d'intérêt légal ainsi qu'une indemnité forfaitaire pour frais de recouvrement de 40 €."
     : ""
-  const pay = input.iban ? `\n\nRèglement possible par virement : IBAN ${input.iban}` : ""
+  const pay = (input.payUrl ? `\n\nPour consulter et régler la facture : ${input.payUrl}` : "") + (input.iban ? `\n\nRèglement possible par virement : IBAN ${input.iban} (référence : ${input.numero})` : "")
   const sign = `\n\nCordialement,\n${input.company}`
   const amount = euro(input.ttc)
   if (input.niveau <= 1) return {

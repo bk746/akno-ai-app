@@ -6,7 +6,7 @@ import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
 import { CO, buildDoc, e2, missingLegal } from "../lib/devisDoc"
 import { openUpgrade, useAccount, useRights } from "../lib/accountApi"
 import { LockTag, ReceptionLocked, UpgradeHost } from "./billing/Upgrade"
-import { Lock as LockIco } from "lucide-react"
+import { Lock as LockIco, MessageSquare, Copy } from "lucide-react"
 import { useProfile } from "../lib/profile"
 import EntrepriseSheet from "./sheets/EntrepriseSheet"
 import AbonnementSheet from "./sheets/AbonnementSheet"
@@ -19,6 +19,11 @@ import { voiceInfo } from "../lib/voice/receptionist"
 import Gate from "./sheets/Gate"
 import SetupGate from "./setup/SetupGate"
 import DevisEditor, { type EditorReq, type CtInfo } from "./devis/DevisEditor"
+import { chainProgress, looksPhone, sendDevisSms, useChain } from "../lib/chaine"
+import { Frise, LinesCard, NextCard } from "./devis/Chaine"
+import { Tiles } from "./sheets/PilotageSheet"
+import { pilotage } from "../lib/compta"
+import { connectUi } from "../lib/chaine"
 import { PrestationsSheet } from "./devis/Prestations"
 import { usePrestations } from "../lib/prestations"
 import { isPageLocked, openSetup } from "../lib/setup"
@@ -78,7 +83,9 @@ const dd = (iso: string) => new Date(iso + "T12:00:00")
 const dlabel = (iso: string) => `${DAYS[(dd(iso).getDay() + 6) % 7]} ${dd(iso).getDate()}`
 const short = (n: string) => /^(M\.|Mme|Chantier)/.test(n) ? n : n.split(" ").length > 1 ? `${n[0]}. ${n.split(" ").slice(1).join(" ")}` : n
 const ttc = (ht: number, tv: number) => Math.round(ht * (1 + tv / 100))
-const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#2F6BFF"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"], sans: ["Sans réponse", "rgba(255,255,255,.3)"] }
+const PilotageL = lazy(() => import("./sheets/PilotageSheet"))
+const ConnectL = lazy(() => import("./sheets/PilotageSheet").then(m => ({ default: m.ConnectSheet })))
+const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#2F6BFF"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"], sans: ["Sans réponse", "rgba(255,255,255,.3)"], perdu: ["Perdu", "rgba(255,255,255,.3)"] }
 const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
@@ -199,11 +206,11 @@ function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt 
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0">{bodyKey === undefined ? <QA items={actions} /> : swap(a => <QA items={a} />, "")}</div></motion.div>{mid && <motion.div variants={rise} className="mt-8">{mid}</motion.div>}{bodyKey === undefined ? <div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div> : swap((_a, c) => c, "mt-10 grid grid-cols-2 items-start gap-6")}{foot}</motion.div></div>
   return <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
     {/* update70 · en-tête fixe et translucide (façon Revolut) : le contenu défile dessous, rien n'est coupé */}
-    <div data-mobile-head className="sticky top-0 z-20 shrink-0 bg-black/55 backdrop-blur-[20px] backdrop-saturate-150" style={{ paddingTop: "calc(var(--sat) + 2px)" }}><MobileHead k={k} /></div>
+    <div data-mobile-head className="sticky top-0 z-20 shrink-0 bg-black/70 backdrop-blur-[20px] backdrop-saturate-150" style={{ paddingTop: "calc(var(--sat) + 2px)" }}><MobileHead k={k} /></div>
     <motion.div variants={rise} className="mt-6 flex flex-col items-center px-5">{LB}{H}</motion.div>
     {mid && <motion.div variants={rise} className="mt-6 px-5">{mid}</motion.div>}
     {bodyKey === undefined ? <><motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
-    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div></> : swap((a, c) => <><div className="mt-7 px-4"><QA items={a} /></div><div className="mt-5 flex flex-col gap-8 px-4">{c}</div></>, "")}{foot}<div aria-hidden className="shrink-0" style={{ height: "calc(92px + max(var(--sab) - 10px, 12px))" }} /></motion.div>
+    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div></> : swap((a, c) => <><div className="mt-7 px-4"><QA items={a} /></div><div className="mt-5 flex flex-col gap-8 px-4">{c}</div></>, "")}{foot}<div aria-hidden className="shrink-0" style={{ height: "var(--page-bottom)" }} /></motion.div>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
 const meName = (s: St) => s.settings.name?.trim() || s.settings.company?.trim() || s.settings.email?.split("@")[0] || "Mon compte"
@@ -537,9 +544,9 @@ function useDevisView(active: boolean) {
     set(x => ({ ...x, rels: [{ id: uid(), client: d.client, type: `Relance devis N° ${d.num}`, canal: d.email ? (s.settings.sms && d.phone ? "E-mail + SMS" : "E-mail") : auto ? "SMS" : "Appel", status: "prog", date: auto ? "Demain 9:00" : "À faire", ...(auto && isUuidL(d.id) ? { devisId: d.id, scheduledFor: t.toISOString() } : {}) }, ...x.rels] }))
     toast(auto ? `Relance prévue demain 9:00 · ${d.client}` : `Rappel ajouté : appelez ${d.client} (pas d'e-mail sur le devis)`, () => set(() => snap))
   }
-  const FRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${eur(d.amount)}`} r={<div className="flex items-center gap-3"><Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>{d.status === "brouillon" ? <TBtn I={Send} label={`Envoyer le devis ${d.num}`} c={c} onClick={() => openD(d)} /> : queued(d) ? <TBtn I={Check} label="Relance déjà prévue" dis /> : <TBtn I={Repeat2} label={`Relancer ${d.client}`} c={c} onClick={() => relance(d)} />}</div>} />
+  const FRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Ouvrir le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${eur(d.amount)}`} r={<div className="flex items-center gap-3"><Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>{d.status === "brouillon" ? <TBtn I={Send} label={`Envoyer le devis ${d.num}`} c={c} onClick={() => openD(d)} /> : queued(d) ? <TBtn I={Check} label="Relance déjà prévue" dis /> : <TBtn I={Repeat2} label={`Relancer ${d.client}`} c={c} onClick={() => relance(d)} />}</div>} />
   const exp = () => { const csv = ["N°;Client;Objet;Statut;Montant HT", ...s.devis.map(d => [d.num, d.client, d.objet, ST[d.status][0], d.amount].join(";"))].join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new window.Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = "devis-akno.csv"; a.click(); toast("Export CSV téléchargé") }
-  const DRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "client", data: { name: d.client } })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />
+  const DRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Ouvrir le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />
   const todo = ds.filter(d => (d.status === "brouillon" && !d.ai) || d.status === "att" || d.status === "env")
   const aval = ds.filter(toValidate), { desk } = useC()
   /* Pop-up : brouillon IA à valider, sinon dernière réponse client (accepté / refusé) — au premier affichage du mode Devis */
@@ -589,7 +596,7 @@ const F_ST: Record<string, [string, string]> = { brouillon: ["Brouillon", GREY],
 const fLabel = (f: FactureLite) => f.type === "situation" && f.situation_numero ? `Situation n° ${f.situation_numero}` : F_LABEL[f.type] || "Facture"
 /* update63 · contenu du mode Factures de la page unifiée */
 function useFacturesView() {
-  const { modal, setChat } = useC(), st = useFacturesLite()
+  const { modal, setChat, s: { devis: sDev } } = useC(), st = useFacturesLite()
   useEffect(() => { void refreshFactures() }, [])
   const rows = st.rows || [], unpaid = rows.filter(isUnpaid), late = unpaid.filter(isLate).length
   const total = unpaid.reduce((a, f) => a + dueOf(f), 0), others = rows.filter(f => !isUnpaid(f)).slice(0, 8)
@@ -599,6 +606,7 @@ function useFacturesView() {
     sub: st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}${late ? ` · ${late} en retard` : ""}`, actions: [
       { I: Plus, l: "Nouvelle", on: () => modal({ kind: "factures", data: { create: true } }) }, { I: Receipt, l: "Toutes", on: () => modal({ kind: "factures" }) },
       { I: Sparkles, l: "Assistant", on: () => setChat(true) }] as QAi[], body: <>
+    <Col><Section t="Suivi" more={() => modal({ kind: "pilotage" })} moreL="Détails et export"><Tiles k={pilotage(sDev.map(d => ({ status: d.status, amount: d.amount, at: d.at, sentAt: d.sentAt })), rows as never, new Date().getFullYear())} /></Section></Col>
     <Col><Section t="À encaisser" aside={unpaid.length ? e2(total) : undefined}><List I={Check} empty={st.error ? "Factures indisponibles pour le moment." : "Aucune facture en attente de paiement."}>{unpaid.map(FRow)}</List></Section></Col>
     <Col><Section t="Récentes" more={rows.length ? () => modal({ kind: "factures" }) : undefined}><List empty="Aucune facture pour l'instant.">{others.map(FRow)}</List></Section></Col>
   </> }
@@ -702,6 +710,9 @@ function SetP() {
   const support = (import.meta.env.VITE_SUPPORT_URL as string | undefined) || ((import.meta.env.VITE_SUPPORT_EMAIL as string | undefined) ? `mailto:${import.meta.env.VITE_SUPPORT_EMAIL}` : "")
   const help = () => { if (!support) return; if (isNative && support.startsWith("mailto:")) location.href = support; else window.open(support, "_blank", "noopener") }
   const { p: prof, save: saveProf } = useProfile()
+  const acPctS = Math.round(Number(prof?.acompte_pct ?? 30))
+  const cycA = async () => { const opts = [30, 40, 50, 20, 0], i = opts.indexOf(acPctS), nx = opts[(i + 1) % opts.length]; const e = await saveProf({ acompte_pct: nx }); toast(e ? "Réglage indisponible : appliquez la migration 20261122_14 (voir LISEZMOI)." : nx ? `Acompte demandé à la signature : ${nx} %` : "Pas d'acompte à la signature") }
+  const cycI = async () => { const nx = prof?.relances_auto !== true; const e = await saveProf({ relances_auto: nx }); toast(e ? "Réglage indisponible : appliquez la migration 20261122_14 (voir LISEZMOI)." : nx ? "Relances d'impayés J+1, J+7, J+15 envoyées automatiquement" : "Relances d'impayés à valider avant envoi") }
   const cycR = async () => { const opts = [[3, 7], [2, 5, 10], [7, 14], [3, 7, 15]], cur = JSON.stringify(relDelays(prof?.relance_delais)), i = opts.findIndex(o => JSON.stringify(o) === cur), nx = opts[(i + 1) % opts.length]; const e = await saveProf({ relance_delais: nx }); toast(e || `Relances : ${relDelaysL(nx)}`) }
   const hor = prof?.horaires && typeof prof.horaires === "object" ? Object.values(prof.horaires as Record<string, unknown>).filter(Boolean).length : 0
   const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
@@ -725,6 +736,7 @@ function SetP() {
     <Col>{recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><List><Row first label="Ma réceptionniste" onClick={() => modal({ kind: "studio" })} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Ma réceptionniste" s={`Voix ${voiceInfo(prof?.reception_config?.voice).name} · script, prestations, FAQ`} r={<Chev />} /><S I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
       <Section t="Devis"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={Package} l="Mes prestations" v={presta.ready ? String(presta.items.length) : "…"} onClick={() => modal({ kind: "prestations" })} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={ImageIcon} l="Logo" v={prof?.logo_path ? "Ajouté" : "À ajouter"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
+      <Section t="Paiements"><List><S first I={Percent} l="Acompte à la signature" v={`${acPctS} %`} onClick={cycA} /><S I={Repeat2} l="Relances d'impayés" v={prof?.relances_auto === false ? "À valider" : prof?.relances_auto === true ? "Automatiques" : "À valider"} onClick={cycI} />{connectUi() && <S I={CreditCard} l="Paiement en ligne" v="Carte, SEPA" onClick={() => modal({ kind: "connect" })} />}<S I={Receipt} l="Suivi et export comptable" v="CSV, FEC" onClick={() => modal({ kind: "pilotage" })} /></List></Section>
       <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
       <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /></List></Section>
       <Section t="Avis clients"><List>{cliLock ? <Row first label="Demandes d'avis Google" onClick={() => openUpgrade("clients")} lead={<Ic I={Sparkles} />} t="Demandes d'avis Google" s="Automatiques après chaque chantier" r={<LockTag />} /> : <S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} />}</List></Section>
@@ -866,14 +878,13 @@ const CallInline = ({ call, onMic }: { call: Call; onMic: () => void }) => { con
 const relDelays = (raw: unknown) => { const a = Array.isArray(raw) ? [...new Set(raw.map(Number).filter(n => n >= 1 && n <= 60))].sort((x, y) => x - y).slice(0, 3) : []; return a.length ? a : [3, 7] }
 const relDelaysL = (a: number[]) => a.map(n => `J+${n}`).join(", ").replace(/, (J\+\d+)$/, " et $1")
 function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => void }) {
-  const { s, set, toast, modal } = useC()
+  const { s, set, toast, modal, desk } = useC()
   const prof = useProfile().p, delays = relDelays(prof?.relance_delais)
   const [factBusy, setFactBusy] = useState(false)
-  const toFacture = async (type: "facture" | "acompte" | "situation") => {
+  const toFacture = async (type: "facture" | "acompte" | "situation", given?: number) => {
     if (!isUuidL(String(dv.id))) { toast("Enregistrez d'abord le devis"); return }
-    let pct: number | undefined
-    if (type === "acompte") { const r = prompt("Pourcentage d'acompte ?", "30"); if (!r) return; pct = Number(r.replace(",", ".")); if (!(pct > 0 && pct <= 100)) { toast("Pourcentage invalide"); return } }
-    if (type === "situation") { const r = prompt("Avancement cumulé des travaux (en %) ?", "50"); if (!r) return; pct = Number(r.replace(",", ".").replace("%", "")); if (!(pct > 0 && pct <= 100)) { toast("Pourcentage invalide"); return } }
+    const pct = given
+    if ((type === "acompte" || type === "situation") && !(Number(pct) > 0 && Number(pct) <= 100)) { toast("Pourcentage invalide (entre 1 et 100)"); return }
     setFactBusy(true)
     const { createFactureFromDevis } = await import("./sheets/FacturesSheet")
     const r = await createFactureFromDevis(String(dv.id), type, pct)
@@ -923,33 +934,80 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
   }
   const when = (iso?: string) => iso ? new Date(iso).toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : ""
   const stopRem = () => { set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, remindersOff: true } : y), rels: x.rels.map(r => r.devisId === dv.id && r.status === "prog" ? { ...r, status: "pause" } : r) })); toast("Relances de ce devis arrêtées") }
-  return <Sheet title={`Devis N° ${dv.num}`} sub={draft ? "Brouillon — à valider" : ST[dv.status][0]} c={A.dev.c} onClose={onClose} footer={draft ? <Btn primary c={A.dev.c} className="w-full" disabled={busy} onClick={send}><Send size={16} />{busy ? "Envoi…" : "Valider et envoyer"}</Btn> : <Btn className="w-full" onClick={onClose}>Fermer</Btn>}>
-    {!draft && (dv.status === "val" || dv.status === "ref" || dv.status === "sans" || dv.reply) && <div className="mb-4 rounded-[16px] bg-white/[.04] px-4 py-3 text-[13.5px] text-white/80">
+  // update71 · chaîne devis → acompte → chantier → facture → paiement : frise + une seule prochaine étape
+  const acPct = Math.min(100, Math.max(0, Number((prof as { acompte_pct?: number } | null)?.acompte_pct ?? 30)))
+  const ch = useChain(String(dv.id), !draft)
+  const cp = chainProgress({ status: dv.status, sentAt: dv.sentAt, openedAt: dv.openedAt, factures: ch.factures, chantier: ch.chantier, acomptePct: acPct })
+  const [phone, setPhone] = useState(dv.phone || cl?.phone || "")
+  const [sit, setSit] = useState<number | null>(null), [more, setMore] = useState(false)
+  const openF = (id?: string) => { if (!id) return; onClose(); modal({ kind: "factures", data: { id } }) }
+  const sendSms = async () => {
+    const ph = phone.trim()
+    if (!looksPhone(ph)) { setMailErr("Indiquez le numéro de portable du client (ex. 06 12 34 56 78)."); return }
+    setBusy(true); setMailErr("")
+    const r = await sendDevisSms(String(dv.id), ph)
+    setBusy(false)
+    if (!r.ok) { setMailErr(r.error || "Le SMS n'a pas pu partir."); return }
+    set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: "env", phone: ph, sentAt: new Date().toISOString() } : y) }))
+    toast(`Devis ${dv.num} envoyé par SMS au ${ph}`); onClose()
+  }
+  const sendAny = () => { if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) void send(); else if (looksPhone(phone)) void sendSms(); else setMailErr("Indiquez l'e-mail ou le portable du client.") }
+  const nx = cp.next
+  const act = () => {
+    if (nx.key === "send") return sendAny()
+    if (nx.key === "acompte_create") return void toFacture("acompte", acPct)
+    if (nx.key === "facture_create") return void toFacture("facture")
+    if (nx.factureId) return openF(nx.factureId)
+  }
+  const avenant = () => { onClose(); setTimeout(() => modal({ kind: "devisEditor", data: undefined, prefill: { client: dv.client, email: dv.email, phone: dv.phone, addr: dv.addr, objet: `Avenant au devis n° ${dv.num}`, parentId: String(dv.id) } } as never), 0) }
+  const tone = nx.key === "refused" || nx.key === "lost" ? "warn" : nx.key === "done" ? "ok" : undefined
+  const footer = draft
+    ? <Btn primary c={A.dev.c} className="w-full" disabled={busy} onClick={sendAny} data-next-action><Send size={16} />{busy ? "Envoi…" : "Envoyer au client"}</Btn>
+    : nx.verb && nx.key !== "send" ? <Btn primary c={A.dev.c} className="w-full" disabled={factBusy} onClick={act} data-next-action>{factBusy ? "Un instant…" : nx.verb}</Btn>
+    : <Btn className="w-full" onClick={onClose}>Fermer</Btn>
+  return <Sheet title={`Devis N° ${dv.num}`} sub={draft ? "Brouillon — rien n'est encore envoyé" : ST[dv.status][0]} c={A.dev.c} onClose={onClose} footer={footer}>
+    <Frise done={cp.done} current={cp.current} sub={cp.sub} c={A.dev.c} />
+    <NextCard c={A.dev.c} title={nx.title} text={nx.text} tone={tone}>
+      {nx.key === "facture_create" && <div className="mt-3 flex flex-wrap gap-2">
+        {sit == null ? <Btn className="flex-1" onClick={() => setSit(50)}>Facturer une partie (situation)</Btn>
+          : <div className="flex w-full flex-wrap items-center gap-2"><label className="flex min-w-0 flex-1 items-center gap-2 text-[15px] text-white/80">Avancement<input type="number" inputMode="decimal" min={1} max={100} value={sit} onChange={e => setSit(Number(e.target.value))} className="h-11 w-[84px] rounded-[12px] bg-white/[.08] px-2 text-center text-[16px] text-white outline-none" aria-label="Avancement en %" />%</label><Btn primary c={A.dev.c} disabled={factBusy} onClick={() => toFacture("situation", Number(sit))}>Créer la situation</Btn></div>}
+      </div>}
+      {nx.key === "acompte_create" && <div className="mt-3"><Btn className="w-full" disabled={factBusy} onClick={() => toFacture("facture")}>Facturer directement, sans acompte</Btn></div>}
+    </NextCard>
+    {!draft && (dv.status === "val" || dv.status === "ref" || dv.status === "sans" || dv.reply) && <div className="mb-4 rounded-[16px] bg-white/[.04] px-4 py-3 text-[14px] text-white/80">
       {dv.status === "val" && dv.repliedAt && <div>{signed ? `Signé électroniquement par ${signed.nom} le ${when(signed.at)}.` : `Accepté par le client le ${when(dv.repliedAt)}.`}</div>}
       {signed && <div className="mt-1 break-all text-[11.5px] text-white/40">Empreinte SHA-256 : {signed.hash} · {signed.events?.length || 0} entrée{(signed.events?.length || 0) > 1 ? "s" : ""} au journal de preuve</div>}
       {dv.status === "ref" && dv.repliedAt && <div>Refusé par le client le {when(dv.repliedAt)}.</div>}
       {dv.status === "sans" && <div>Sans réponse après les relances automatiques.</div>}
       {dv.reply && <div className={`${dv.repliedAt || dv.status === "sans" ? "mt-2" : ""} text-white/70`}>« {dv.reply} »</div>}
     </div>}
-    {dv.status === "env" && <div className="mb-4 flex items-center justify-between gap-3 rounded-[16px] bg-white/[.04] px-4 py-3 text-[13.5px] text-white/75">
-      <span>{dv.remindersOff ? "Relances automatiques arrêtées." : `Relances automatiques prévues à ${relDelaysL(delays)}.`}</span>
-      {!dv.remindersOff && <button type="button" className="shrink-0 text-[13px] font-medium text-white" onClick={stopRem}>Arrêter</button>}
+    {dv.status === "env" && <div className="mb-4 flex items-center justify-between gap-3 rounded-[16px] bg-white/[.04] px-4 py-3 text-[14px] text-white/75">
+      <span className="min-w-0">{dv.remindersOff ? "Relances automatiques arrêtées." : `Relances automatiques à ${relDelaysL(delays)}, puis « perdu » après 30 jours.`}</span>
+      {!dv.remindersOff && <button type="button" className="shrink-0 text-[14px] font-medium text-white" onClick={stopRem}>Arrêter</button>}
     </div>}
-    {draft && <>
-      <div className="mb-4 rounded-[16px] border border-[#2F6BFF]/35 bg-[#2F6BFF]/10 px-4 py-3 text-[13.5px] text-white/80">Brouillon — à valider. Rien n'est envoyé au client tant que vous n'avez pas cliqué sur « Valider et envoyer ».</div>
-      <div className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[20px] bg-white/[.04] p-4">
-        <div className="min-w-0"><div className={tx.cap}>Total TTC</div><div className="mt-1 text-[24px] font-semibold tabular-nums tracking-[-0.02em]">{e2(Math.round((ht + tax) * 100) / 100)}</div><div className="text-[12.5px] text-white/45">{e2(Math.round(ht * 100) / 100)} HT · {lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length} ligne{lines.filter(x => x.k !== "sec" && x.k !== "meta" && x.k !== "rem").length > 1 ? "s" : ""}</div></div>
-        <Btn c={A.dev.c} onClick={() => { onClose(); modal({ kind: "devisEditor", data: dv }) }}><FilePen size={16} strokeWidth={1.6} />Modifier</Btn>
-        <div className="col-span-2"><F l="E-mail du client"><input className={inp} type="email" value={email} placeholder="kevin.m@example.com" onChange={e => { setEmail(e.target.value); setMailErr("") }} /></F></div>
-      </div>
-    </>}
-    {draft && missingLegal("devis").length > 0 && <button type="button" onClick={() => modal({ kind: "entreprise" })} className="mb-3 block w-full rounded-[14px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-4 py-3 text-left text-[13px] text-white/80">Mentions obligatoires manquantes : {missingLegal("devis").join(", ")}. <span className="font-medium text-white">Compléter</span></button>}
-    {mailErr && <div className="mb-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{mailErr}</div>}
-    {dv.status === "val" && <div className="mb-3 grid grid-cols-2 gap-2"><Btn primary c={A.dev.c} disabled={factBusy} onClick={() => toFacture("facture")}><Receipt size={16} />{factBusy ? "…" : "Créer la facture"}</Btn><Btn disabled={factBusy} onClick={() => toFacture("acompte")}>Acompte</Btn><Btn className="col-span-2" disabled={factBusy} onClick={() => toFacture("situation")}>Situation d'avancement</Btn></div>}
-    <DevisPaper d={doc} sig={signed || undefined} />
-    <div className="mt-3"><Btn className="w-full" onClick={download}><Download size={15} strokeWidth={1.5} />{signed ? "PDF signé + certificat" : "Télécharger PDF"}</Btn></div>
-    {dv.token && !draft && <div className="mt-2"><Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${webOrigin()}/accept/${dv.token}`); toast("Lien de signature copié") }}>Copier le lien de signature</Btn></div>}
-    {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[12.5px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
+    {draft && <div className="mb-4 space-y-3 rounded-[20px] bg-white/[.04] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0"><div className={tx.cap}>Total TTC</div><div className="mt-1 text-[24px] font-semibold tabular-nums tracking-[-0.02em]">{e2(Math.round((ht + tax) * 100) / 100)}</div></div>
+        <Btn c={A.dev.c} onClick={() => { onClose(); modal({ kind: "devisEditor", data: dv }) }}><FilePen size={16} strokeWidth={1.6} />Modifier</Btn></div>
+      <F l="E-mail du client"><input className={inp} type="email" inputMode="email" autoCapitalize="off" value={email} placeholder="client@example.fr" onChange={e => { setEmail(e.target.value); setMailErr("") }} /></F>
+      <F l="Ou son portable (envoi par SMS)"><input className={inp} type="tel" inputMode="tel" value={phone} placeholder="06 12 34 56 78" onChange={e => { setPhone(e.target.value); setMailErr("") }} /></F>
+      {/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && looksPhone(phone) && <Btn className="w-full" disabled={busy} onClick={sendSms}><MessageSquare size={16} />Envoyer plutôt par SMS</Btn>}
+    </div>}
+    {draft && missingLegal("devis").length > 0 && <button type="button" onClick={() => modal({ kind: "entreprise" })} className="mb-3 block w-full rounded-[14px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-4 py-3 text-left text-[14px] text-white/80">Mentions obligatoires manquantes : {missingLegal("devis").join(", ")}. <span className="font-medium text-white">Compléter</span></button>}
+    {mailErr && <div role="alert" className="mb-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[14px] text-[#FF9B96]">{mailErr}</div>}
+    {desk ? <DevisPaper d={doc} sig={signed || undefined} />
+      : <LinesCard lines={lines as never} tv={tv} tvaNA={CO.tvaNA} head={<div className="min-w-0"><div className="text-[13px] text-white/50">Devis n° {dv.num} · {dv.client || "Client"}</div><div className="mt-0.5 break-words text-[16px] font-medium leading-snug">{dv.objet}</div></div>} />}
+    <div className="mt-3 grid grid-cols-1 gap-2"><Btn className="w-full" onClick={download}><FileText size={16} strokeWidth={1.6} />{signed ? "Voir le PDF signé" : "Voir le PDF"}</Btn>
+      {dv.token && !draft && <Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${webOrigin()}/accept/${dv.token}`); toast("Lien de signature copié") }}><Copy size={16} />Copier le lien de signature</Btn>}
+      {dv.status === "val" && <Btn className="w-full" onClick={() => setMore(m => !m)} aria-expanded={more}>{more ? "Moins d'options" : "Autres actions"}</Btn>}
+      {dv.status === "val" && more && <>
+        <Btn className="w-full" onClick={avenant}><FilePen size={16} strokeWidth={1.6} />Faire un avenant (travaux en plus)</Btn>
+        {cp.next.key !== "acompte_create" && !ch.factures.some(f => f.type === "acompte") && <Btn className="w-full" disabled={factBusy} onClick={() => toFacture("acompte", acPct)}>Demander un acompte de {acPct} %</Btn>}
+        {cp.next.key !== "facture_create" && <Btn className="w-full" disabled={factBusy} onClick={() => setSit(s => s ?? 50)}>Facture de situation</Btn>}
+        {sit != null && cp.next.key !== "facture_create" && <div className="flex flex-wrap items-center gap-2"><label className="flex min-w-0 flex-1 items-center gap-2 text-[15px] text-white/80">Avancement<input type="number" inputMode="decimal" min={1} max={100} value={sit} onChange={e => setSit(Number(e.target.value))} className="h-11 w-[84px] rounded-[12px] bg-white/[.08] px-2 text-center text-[16px] text-white outline-none" aria-label="Avancement en %" />%</label><Btn primary c={A.dev.c} disabled={factBusy} onClick={() => toFacture("situation", Number(sit))}>Créer</Btn></div>}
+        {ch.factures.filter(f => f.numero || f.statut === "brouillon").map(f => <button key={f.id} type="button" onClick={() => openF(f.id)} className="flex min-h-12 w-full items-center justify-between gap-3 rounded-[14px] bg-white/[.04] px-4 text-left text-[15px]"><span className="min-w-0 truncate">{f.type === "acompte" ? "Acompte" : f.type === "avoir" ? "Avoir" : f.type === "situation" ? "Situation" : "Facture"} {f.numero || "(brouillon)"}</span><span className="shrink-0 tabular-nums text-white/60">{e2(Number(f.total_ttc))}</span></button>)}
+      </>}
+    </div>
+    {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[13px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
   </Sheet>
 }
 function numField(s: string) {
@@ -1094,6 +1152,8 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
       <div className="mt-6"><Btn primary c={A.dev.c} className="w-full" onClick={() => modal({ kind: "devisPrev", data: dv })}>Regarder le devis</Btn></div></Sheet> }
   if (m.kind === "devisPrev") return <DevisPrevSheet initial={d as Devis} onClose={close} />
   if (m.kind === "prestations") return <PrestationsSheet close={close} />
+  if (m.kind === "pilotage") return <Suspense fallback={null}><PilotageL close={close} /></Suspense>
+  if (m.kind === "connect") return <Suspense fallback={null}><ConnectL close={close} /></Suspense>
   if (m.kind === "devisEdit") { const dv = s.devis.find(x => x.id === d.id) || d as Devis; const setS = (st: DevStatus) => { set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: st } : y) })); toast(`Devis ${dv.num} : ${ST[st][0]}`) }
     return <Sheet title={`Devis N° ${dv.num}`} sub={`${dv.client} · ${dv.objet}`} c={A.dev.c} onClose={close}><div className={`text-[40px] ${tx.fig}`}>{eur(dv.amount)}</div><div className="mt-2"><Sub>HT · {eur(Math.round(dv.amount * (1 + s.settings.tva / 100)))} TTC (TVA {String(s.settings.tva).replace(".", ",")} %)</Sub></div>
       <div className="mt-5 grid grid-cols-2 gap-2"><Btn primary c={A.dev.c} onClick={() => modal({ kind: "devisPrev", data: dv })}><FileText size={16} strokeWidth={1.6} />Voir le devis</Btn><Btn onClick={() => modal({ kind: "devisEditor", data: dv })}><FilePen size={16} strokeWidth={1.6} />Modifier</Btn></div>
@@ -1182,7 +1242,7 @@ function Chat() {
   const input = <form onSubmit={e => { e.preventDefault(); send(v) }} className="flex h-12 shrink-0 items-center gap-2 rounded-full bg-white/[.07] pl-4 pr-1.5"><input aria-label="Message" value={v} onChange={e => setV(e.target.value)} placeholder={facMode ? "Une question sur vos factures ou devis…" : "Écrire à l'assistant…"} className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-white/30" /><Mic size={17} strokeWidth={1.5} className="shrink-0 text-white/40" /><button aria-label="Envoyer" disabled={!v.trim() || busy} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-60" style={{ background: c, color: c === "#E6E6E6" ? "#000" : "#fff" }}><ArrowUp size={16} strokeWidth={1.8} /></button></form>
   if (desk) return <motion.aside initial={{ x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} className="flex w-[380px] shrink-0 flex-col border-l border-white/[.06] bg-[#0B0B0C]">
     <div className="flex h-16 shrink-0 items-center border-b border-white/[.06] px-5">{head}</div>{msgs}<div className="p-5">{input}</div></motion.aside>
-  return <ModalSheet label="Assistant" onClose={() => setChat(false)} z={40} backdrop="bg-black/60" className="h-[560px] border-t border-white/[.08] bg-[#121214] px-5 pt-3" style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}>
+  return <ModalSheet label="Assistant" onClose={() => setChat(false)} z={40} backdrop="bg-black/60" className="h-[560px] border-t border-white/[.08] bg-[#121214] px-5 pt-3" style={{ paddingBottom: "max(28px, var(--sab))" }}>
       <div aria-hidden className="h-[5px] shrink-0" /><div className="mt-4 shrink-0">{head}</div>{msgs}<div className="pt-3">{input}</div></ModalSheet>
 }
 
@@ -1253,6 +1313,9 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
       pt.current = !desk && isPushP(b) && !isPushP(a) ? { kind: "push", dir: 1 } : !desk && isPushP(a) && !isPushP(b) ? { kind: "pop", dir: -1 } : { kind: "fade", dir: (ORDER[b] ?? 9) >= (ORDER[a] ?? 9) ? 1 : -1 }
       fromSet.current = false
     }
+    // update71 · mobile : Réglages / Relance s'ouvrent et se ferment aussi en fondu court sur place (plus de glissement des
+    // deux pages pendant le retour, qui coupait l'écran et faisait un effet bizarre)
+    if (!desk) pt.current = { kind: "fade", dir: 1 }
     prev.current = b
   }
   const run = useRef<{ token: number; anims: { stop: () => void }[]; from: string | null }>({ token: 0, anims: [], from: null })
@@ -1374,7 +1437,7 @@ function AknoApp() {
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }
   const modal = (x: Modal) => {
     if (x?.kind === "devis") { setM(null); setEd({ prefill: x.data }); return }
-    if (x?.kind === "devisEditor") { setM(null); setEd({ initial: x.data }); return }
+    if (x?.kind === "devisEditor") { setM(null); setEd({ initial: x.data, prefill: (x as { prefill?: EditorReq["prefill"] }).prefill }); return }
     if (x?.kind === "contacts") { go("cl"); return } // update66 : l'ancienne liste Clients est remplacée par la page /clients
     setM(x)
   }

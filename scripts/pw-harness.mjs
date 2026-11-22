@@ -30,10 +30,13 @@ export function harness({ cwd = process.cwd(), port = 5199 } = {}) {
     await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error("vite timeout")), 60000); vite.stdout.on("data", d => { if (/ready|Local:/i.test(String(d))) { clearTimeout(t); res() } }) })
   }
   const stop = () => { try { vite?.kill() } catch { /* ignore */ } }
-  async function newPage(browser, { calls = demoCalls(), devis = demoDevis(), statusDelay = 0, video = "" } = {}) {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: video ? 2 : 3, isMobile: true, hasTouch: true, locale: "fr-FR", timezoneId: "Europe/Paris",
+  /* update71 : tables = données simulées par table (filtres eq. appliqués), width/height = écran, api = réponses /api simulées,
+     profile = champs ajoutés au profil artisan. Les écritures (POST/PATCH) sont journalisées dans `writes` et appliquées en mémoire. */
+  async function newPage(browser, { calls = demoCalls(), devis = demoDevis(), tables = {}, width = 390, height = 844, api, profile = {}, statusDelay = 0, video = "", scale } = {}) {
+    const writes = [], db = { calls, devis, ...tables }, prof = { ...PROFILE, ...profile }
+    const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale || (video ? 2 : 3), isMobile: true, hasTouch: true, locale: "fr-FR", timezoneId: "Europe/Paris",
       userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-      ...(video ? { recordVideo: { dir: video, size: { width: 390, height: 844 } } } : {}) })
+      ...(video ? { recordVideo: { dir: video, size: { width, height } } } : {}) })
     const page = await ctx.newPage()
     await ctx.addInitScript(([key, session, uid]) => {
       try {
@@ -49,12 +52,23 @@ export function harness({ cwd = process.cwd(), port = 5199 } = {}) {
       if (p.startsWith("/auth/v1/token")) return json({ access_token: jwt(), refresh_token: "rt", token_type: "bearer", expires_in: 86400, user: USER })
       if (p.startsWith("/rest/v1/")) {
         const table = p.split("/")[3], single = (req.headers()["accept"] || "").includes("vnd.pgrst.object")
-        if (req.method() !== "GET") return json(single ? {} : [])
-        if (table === "artisans") return json(single ? PROFILE : [PROFILE])
-        if (table === "calls" && !single) return json(calls)
-        if (table === "devis" && !single) return json(devis)
-        if (single) return json({ code: "PGRST116", message: "no rows", details: "", hint: "" }, 406)
-        return json([])
+        const q = new URL(req.url()).searchParams, eqs = [...q.entries()].filter(([k, v]) => !["select", "order", "limit", "offset", "on_conflict", "columns"].includes(k) && /^(eq|is)\./.test(v))
+        const match = r => eqs.every(([k, v]) => v.startsWith("is.") ? (v === "is.null" ? r[k] == null : true) : String(r[k]) === v.slice(3))
+        if (table === "artisans") {
+          if (req.method() === "PATCH") { Object.assign(prof, req.postDataJSON?.() || {}); writes.push({ table, method: "PATCH", body: req.postDataJSON?.() }) }
+          return json(single ? prof : [prof])
+        }
+        const rows = db[table] || []
+        if (req.method() !== "GET") {
+          let body = {}; try { body = req.postDataJSON?.() || {} } catch { /* ignore */ }
+          writes.push({ table, method: req.method(), body, filter: Object.fromEntries(eqs) })
+          if (req.method() === "PATCH") { const hit = rows.filter(match); hit.forEach(r => Object.assign(r, body)); return json(single ? (hit[0] || {}) : hit) }
+          if (req.method() === "POST") { const list = (Array.isArray(body) ? body : [body]).map(b => ({ id: b.id || `n${Date.now()}${Math.random().toString(36).slice(2, 6)}`, created_at: new Date().toISOString(), ...b })); db[table] = [...list, ...rows]; return json(single ? list[0] : list, 201) }
+          return json(single ? {} : [])
+        }
+        const out = rows.filter(match)
+        if (single) return out.length ? json(out[0]) : json({ code: "PGRST116", message: "no rows", details: "", hint: "" }, 406)
+        return json(out)
       }
       return json({})
     })
@@ -62,10 +76,13 @@ export function harness({ cwd = process.cwd(), port = 5199 } = {}) {
       const req = route.request(), body = req.postDataJSON?.() || {}
       const json = b => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(b) })
       if (req.url().includes("/api/account") && body.action === "status") { if (statusDelay) await new Promise(r => setTimeout(r, statusDelay)); return json(STATUS) }
+      writes.push({ api: new URL(req.url()).pathname, body })
+      const custom = api ? await api(new URL(req.url()).pathname, body, db) : undefined
+      if (custom) return route.fulfill({ status: custom.status || 200, contentType: "application/json", body: JSON.stringify(custom.body ?? custom) })
       return json({ ok: true })
     })
     page.on("pageerror", e => console.log("  [pageerror]", String(e.message).slice(0, 160)))
-    return { ctx, page }
+    return { ctx, page, writes, db }
   }
   return { BASE, start, stop, newPage }
 }

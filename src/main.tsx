@@ -12,6 +12,7 @@ import { initNative } from "./lib/native"
 
 const Legal = lazy(() => import("./components/Legal"))
 const DossierPublic = lazy(() => import("./components/DossierPublic"))
+const PayerPublic = lazy(() => import("./components/PayerPublic"))
 const LEGAL = ["cgv", "mentions-legales", "confidentialite", "dpa", "suppression-compte"] // update70 : page publique de suppression de compte (Google Play)
 const Lazy = ({ children }: { children: React.ReactNode }) => <Suspense fallback={<div className="fixed inset-0 bg-black" />}>{children}</Suspense>
 initMonitoring()
@@ -26,6 +27,7 @@ createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/accept/:token" element={<AcceptDevis />} />
         <Route path="/dossier/:token" element={<Lazy><DossierPublic /></Lazy>} />
+        <Route path="/payer/:token" element={<Lazy><PayerPublic /></Lazy>} />
         {LEGAL.map(d => <Route key={d} path={`/${d}`} element={<Lazy><Legal doc={d} /></Lazy>} />)}
         <Route path="/inscription" element={<Navigate to="/reception?signup=1" replace />} />
         {PAGES.map(p => <Route key={p} path={`/${p}`} element={<AknoApp />} />)}

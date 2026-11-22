@@ -101,3 +101,20 @@ export function unitCode(u?: string) {
   const k = String(u || "").toLowerCase().replace(/\.$/, "")
   return ({ h: "HUR", heure: "HUR", heures: "HUR", "m²": "MTK", m2: "MTK", ml: "MTR", m: "MTR", "m³": "MTQ", m3: "MTQ", kg: "KGM", l: "LTR", j: "DAY", jour: "DAY", forfait: "LS", fft: "LS", lot: "LS", ens: "SET", "%": "P1" } as Record<string, string>)[k] || "C62"
 }
+
+/** update52/71 · lignes d'un devis pour une facture : garde les remises, ignore titres de section et réglages, ajoute la description. */
+export function devisToFactureLines(raw: unknown): FLine[] {
+  if (!Array.isArray(raw)) return []
+  const out: FLine[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const o = item as Record<string, unknown>
+    if (o.k === "sec" || o.k === "meta") continue
+    const base = String(o.l ?? o.designation ?? o.libelle ?? "").trim()
+    const d = typeof o.d === "string" ? o.d.trim() : ""
+    const q = Number(o.q ?? o.qty ?? o.quantite), pu = Number(o.pu ?? o.prix ?? o.prix_ht), tv = Number(o.tv ?? o.tva ?? o.tva_taux)
+    if (!base || !Number.isFinite(q) || q <= 0 || !Number.isFinite(pu) || (pu < 0 && o.k !== "rem")) continue
+    out.push({ l: (d ? `${base}\n${d}` : base).slice(0, 1200), q: r2(q), u: String(o.u ?? o.unite ?? "u").trim().slice(0, 12) || "u", pu: r2(pu), tv: tv === 5.5 || tv === 10 || tv === 20 || tv === 0 ? tv : 20 })
+  }
+  return out.slice(0, 200)
+}
