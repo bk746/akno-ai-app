@@ -77,7 +77,7 @@ export const Chip = ({ c, children }: any) => <span className="inline-flex h-[22
 export const Circ = ({ children, c, className = "" }: any) => <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white ${className}`} style={c ? { background: c + "29", color: ink(c) } : {}}>{children}</span>
 export const Ic = ({ I, c }: any) => <Circ c={c}><I size={IS} strokeWidth={SW} /></Circ>
 export const Av = ({ n }: { n: string }) => { const { page } = useC(), c = isK(page) ? A[page].c : "#FFFFFF"; return <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold tracking-[.02em] text-white/90" style={{ background: `linear-gradient(180deg, ${c}38, ${c}1A)`, boxShadow: `inset 0 0 0 1px ${c}26` }}>{initials(n)}</span> }
-export const Row = ({ lead, t, s, r, rs, onClick, first, label }: any) => <div onClick={onClick} {...(onClick ? { role: "button", tabIndex: 0, "aria-label": label, onKeyDown: (e: any) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick() } } } : {})} className={`flex w-full items-center gap-3 pl-4 text-left ${onClick ? "cursor-pointer transition-colors hover:bg-white/[.03] focus-visible:bg-white/[.04]" : ""} first:rounded-t-[24px] last:rounded-b-[24px]`}>
+export const Row = ({ lead, t, s, r, rs, onClick, first, label, className = "" }: any) => <div onClick={onClick} {...(onClick ? { role: "button", tabIndex: 0, "aria-label": label, onKeyDown: (e: any) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick() } } } : {})} className={`flex w-full items-center gap-3 pl-4 text-left ${onClick ? "cursor-pointer transition-colors hover:bg-white/[.03] focus-visible:bg-white/[.04]" : ""} ${first ? "rounded-t-[24px]" : ""} last:rounded-b-[24px] ${className}`}>
   {lead}<div className={`flex min-h-[64px] min-w-0 flex-1 items-center gap-3 py-3 pr-4 ${first ? "" : "border-t border-white/[.07]"}`}>
     <div className="min-w-0 flex-1"><div className={`truncate ${tx.body}`}>{t}</div>{s && <div className={`mt-0.5 truncate ${tx.cap}`}>{s}</div>}</div>
     {(r !== undefined || rs) && <div className="flex shrink-0 flex-col items-end">{typeof r === "string" || typeof r === "number" ? <div className={tx.body}>{r}</div> : r}{rs && <div className="mt-0.5">{typeof rs === "string" ? <span className={tx.cap}>{rs}</span> : rs}</div>}</div>}</div></div>
@@ -98,13 +98,14 @@ export const TBtn = ({ I, label, onClick, href, c, dis }: any) => { const cls = 
 export const Chev = () => <ChevronRight size={IS} strokeWidth={SW} className="text-white/30" />
 
 export const inp = "h-12 w-full rounded-[14px] border border-transparent bg-white/[.07] px-4 text-[15px] text-white outline-none [color-scheme:dark] placeholder:text-white/35 focus:border-white/25"
+export const dt = inp + " akno-dt text-[16px]"
 export const F = ({ l, children }: any) => <label className="block"><span className="mb-2 block px-1 text-[13px] text-white/50">{l}</span>{children}</label>
 
 /* update67 · feuille générique : même composant que toutes les feuilles de l'app (ModalSheet, façon iOS)
    update73 · pied de feuille = un seul bloc plein (plus de dégradé ni de boutons flottants) ; le contenu réserve la hauteur
    réelle du pied (mesurée) et, quand un champ prend le focus (clavier ouvert), il défile pour que ce champ reste visible
    AU-DESSUS du pied : le pied ne recouvre plus jamais le champ en cours de saisie. */
-export function Sheet({ title, sub, onClose, children, c, footer }: any) {
+export function Sheet({ title, sub, onClose, children, c, footer, z = 50 }: any) {
   const { desk } = useC(), sc = useRef<HTMLDivElement>(null), ft = useRef<HTMLDivElement>(null), [fh, setFh] = useState(0)
   useEffect(() => {
     const f = ft.current; if (!f) return
@@ -125,7 +126,7 @@ export function Sheet({ title, sub, onClose, children, c, footer }: any) {
     return () => { clearTimeout(t); el.removeEventListener("focusin", onFocus); vv?.removeEventListener("resize", onVV) }
   }, [])
   const padB = footer ? (fh ? fh + 20 : desk ? 104 : 132) : undefined
-  return <ModalSheet label={title} onClose={onClose} desk={desk} z={50} className={`bg-[#121214] ${desk ? "" : "border-t border-white/[.08]"}`} deskClass="max-w-[480px]">
+  return <ModalSheet label={title} onClose={onClose} desk={desk} z={z} className={`bg-[#121214] ${desk ? "" : "border-t border-white/[.08]"}`} deskClass="max-w-[480px]">
       <div ref={sc} data-sheet-scroll className={`min-h-0 overflow-y-auto overscroll-contain ${footer ? "flex-1" : ""} ${desk ? (footer ? "px-6 pt-6" : "p-6") : "px-5 pt-3"}`} style={footer ? { paddingBottom: padB, scrollPaddingBottom: padB } : desk ? {} : { paddingBottom: "max(28px, var(--sab))" }}>
       {!desk && <div aria-hidden className="mb-4 h-[5px]" />}
       <div className="mb-6 flex items-center gap-3">{c && <Circ><Blob c={c} s={20} /></Circ>}<div className="min-w-0"><div className={`truncate ${tx.title}`}>{title}</div>{sub && <div className={`truncate ${tx.cap}`}>{sub}</div>}</div><button type="button" aria-label="Fermer" onClick={onClose} className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[.07] text-white/70 hover:text-white"><X size={IS} strokeWidth={SW} /></button></div>

@@ -64,6 +64,7 @@ export function harness({ cwd = process.cwd(), port = 5199 } = {}) {
           writes.push({ table, method: req.method(), body, filter: Object.fromEntries(eqs) })
           if (req.method() === "PATCH") { const hit = rows.filter(match); hit.forEach(r => Object.assign(r, body)); return json(single ? (hit[0] || {}) : hit) }
           if (req.method() === "POST") { const list = (Array.isArray(body) ? body : [body]).map(b => ({ id: b.id || `n${Date.now()}${Math.random().toString(36).slice(2, 6)}`, created_at: new Date().toISOString(), ...b })); db[table] = [...list, ...rows]; return json(single ? list[0] : list, 201) }
+          if (req.method() === "DELETE") { db[table] = rows.filter(r => !match(r)); return json(single ? {} : []) }
           return json(single ? {} : [])
         }
         const out = rows.filter(match)

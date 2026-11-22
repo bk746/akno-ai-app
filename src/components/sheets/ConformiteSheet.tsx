@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Copy, FileCheck2, Link2, Plus, Trash2 } from "lucide-react"
-import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, inp, tx, useC } from "../ui"
+import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, inp, dt, tx, useC } from "../ui"
 import { supabase } from "../../lib/supabase"
 import { useProfile } from "../../lib/profile"
 import { webOrigin } from "../../lib/native"
@@ -62,7 +62,7 @@ export default function ConformiteSheet({ close }: { close: () => void }) {
     <div className="space-y-3">
       <F l="Type"><select className={inp} value={n.type} onChange={e => { const t = DOC_TYPES.find(x => x[0] === e.target.value)!; setN({ ...n, type: t[0], date_expiration: addMonths(n.date_emission || today(), t[2]) }) }}>{DOC_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></F>
       {n.type === "autre" && <F l="Nom du document"><input className={inp} value={n.libelle} onChange={e => setN({ ...n, libelle: e.target.value })} /></F>}
-      <div className="grid grid-cols-2 gap-2"><F l="Date du document"><input className={inp} type="date" value={n.date_emission} onChange={e => { const t = DOC_TYPES.find(x => x[0] === n.type)!; setN({ ...n, date_emission: e.target.value, date_expiration: e.target.value ? addMonths(e.target.value, t[2]) : n.date_expiration }) }} /></F><F l="Valable jusqu'au"><input className={inp} type="date" value={n.date_expiration} onChange={e => setN({ ...n, date_expiration: e.target.value })} /></F></div>
+      <div className="grid grid-cols-2 gap-2"><F l="Date du document"><input className={dt} type="date" value={n.date_emission} onChange={e => { const t = DOC_TYPES.find(x => x[0] === n.type)!; setN({ ...n, date_emission: e.target.value, date_expiration: e.target.value ? addMonths(e.target.value, t[2]) : n.date_expiration }) }} /></F><F l="Valable jusqu'au"><input className={dt} type="date" value={n.date_expiration} onChange={e => setN({ ...n, date_expiration: e.target.value })} /></F></div>
       <label className="flex h-14 cursor-pointer items-center justify-center rounded-[14px] border border-dashed border-white/20 text-[14px] text-white/70">{file ? file.name : "Choisir le fichier (PDF ou photo)"}<input type="file" accept="application/pdf,image/*" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} /></label>
       <p className={`px-1 ${tx.cap}`}>L'attestation Urssaf est valable 6 mois : Akno vous prévient 30 jours et 7 jours avant l'expiration.</p>
     </div>

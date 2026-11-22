@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { BellRing, Download, FileCode2, FileText, Plus, Receipt, Send, ShieldCheck, Trash2 } from "lucide-react"
 import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, Tg, inp, tx, useC } from "../ui"
+import { SwipeRow, askConfirm } from "../form/SwipeRow"
+import { factureSwipeAction } from "../../lib/docDelete"
+import { refreshFactures } from "../../lib/facturesLite"
 import { supabase } from "../../lib/supabase"
 import { api } from "../../lib/accountApi"
 import { CO, e2, missingLegal } from "../../lib/devisDoc"
@@ -60,7 +63,40 @@ export default function FacturesSheet({ close, openId, startNew, clients = [] }:
   // update62 · bouton « + » → « Nouvelle facture » : ouvre directement un brouillon (même parcours que le bouton du bas)
   const started = useRef(false)
   useEffect(() => { if (startNew && rows !== null && !err && !started.current) { started.current = true; void newBlank() } }, [startNew, rows, err]) // eslint-disable-line react-hooks/exhaustive-deps
-  const closeDetail = () => { if (!fromList.current) { close(); return } setOpen(null); void load() }
+  const swipeFacture = (x: Facture) => {
+    const act = factureSwipeAction(x)
+    if (act === "blocked") {
+      askConfirm({ title: "Cet avoir ne peut pas être supprimé", text: "Un avoir émis est une pièce comptable à conserver. Pour le corriger, ouvrez la facture d'origine.", onlyOk: true, confirmLabel: "Compris" })
+      return
+    }
+    if (act === "avoir") {
+      askConfirm({
+        title: "Créer un avoir pour cette facture ?",
+        text: "La facture n'est pas supprimée. Un avoir en brouillon sera créé pour l'annuler ou la corriger.",
+        confirmLabel: "Créer un avoir",
+        onConfirm: async () => {
+          const r = await api("/api/devis", { action: "avoir", facture_id: x.id })
+          if (!r.ok || typeof r.facture_id !== "string") { setErr(r.error || "Création de l'avoir impossible."); return }
+          await load()
+          void refreshFactures()
+          setOpen(r.facture_id)
+        },
+      })
+      return
+    }
+    askConfirm({
+      title: "Supprimer ce brouillon ?",
+      text: "Ce brouillon n'a pas encore de numéro. Il sera définitivement effacé.",
+      confirmLabel: "Supprimer", danger: true,
+      onConfirm: async () => {
+        const { error } = await supabase.from("factures").delete().eq("id", x.id).is("numero", null)
+        if (error) { setErr("Suppression impossible."); return }
+        await load()
+        void refreshFactures()
+      },
+    })
+  }
+    const closeDetail = () => { if (!fromList.current) { close(); return } setOpen(null); void load() }
   if (open && rows) {
     const f = rows.find(x => x.id === open)
     if (f) return <FactureDetail clients={clients} f={f} rels={rels.filter(r => r.facture_id === f.id)} close={closeDetail} reload={load} openOther={id => { void load().then(() => setOpen(id)) }} />
@@ -75,7 +111,7 @@ export default function FacturesSheet({ close, openId, startNew, clients = [] }:
     <div data-factures-list hidden />{rels.length > 0 && <Card className="mb-4 p-4"><div className="flex items-center gap-2 text-[15px] font-medium"><BellRing size={17} className="text-[#FFB340]" />{rels.length} relance{rels.length > 1 ? "s" : ""} d'impayé à valider</div><div className={`mt-1 ${tx.cap}`}>Akno prépare le texte, vous relisez et envoyez. Rien ne part sans vous.</div></Card>}
     <div className="mb-3 flex gap-2">{([["all", "Toutes"], ["todo", "À traiter"], ["paid", "Payées"]] as const).map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`h-9 rounded-full px-4 text-[14px] font-medium ${tab === k ? "bg-white text-black" : "bg-white/[.07] text-white/70"}`}>{l}</button>)}</div>
     <List empty="Aucune facture. Créez-en une depuis un devis accepté ou avec « Nouvelle facture »." I={Receipt}>
-      {list.map((x, i) => { const [l, c] = late(x) ? ["En retard", RED] : ST[x.statut] || ST.brouillon; return <Row key={x.id} first={!i} lead={<Ic I={x.type === "avoir" ? FileText : Receipt} />} t={`${label(x)} ${x.numero || "(brouillon)"}`} s={x.client_nom || "Client à renseigner"} r={e2(x.type === "avoir" ? -Number(x.total_ttc) : due(x))} rs={<Chip c={c}>{rels.some(r => r.facture_id === x.id) ? "Relance à valider" : l}</Chip>} onClick={() => setOpen(x.id)} label={`Ouvrir ${x.numero || "brouillon"}`} /> })}
+      {list.map((x, i) => { const [l, c] = late(x) ? ["En retard", RED] : ST[x.statut] || ST.brouillon; const act = factureSwipeAction(x); return <SwipeRow key={x.id} id={"sheet-" + x.id} first={!i} label={act === "avoir" ? "Avoir" : "Supprimer"} tone={act === "avoir" ? "accent" : "danger"} onAction={() => swipeFacture(x)}><Row className="!rounded-none" first={!i} lead={<Ic I={x.type === "avoir" ? FileText : Receipt} />} t={`${label(x)} ${x.numero || "(brouillon)"}`} s={x.client_nom || "Client à renseigner"} r={e2(x.type === "avoir" ? -Number(x.total_ttc) : due(x))} rs={<Chip c={c}>{rels.some(r => r.facture_id === x.id) ? "Relance à valider" : l}</Chip>} onClick={() => setOpen(x.id)} label={`Ouvrir ${x.numero || "brouillon"}`} /></SwipeRow> })}
     </List>
     {err && <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{err}</p>}
   </Sheet>

@@ -4,7 +4,7 @@ import VoiceCall from "./VoiceCall"
 import { formatVoiceTimings, isVoiceDebugEnabled, setVoiceDebugEnabled, subscribeVoiceTimings } from "../lib/voice/timing"
 import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
 import { CO, buildDoc, e2, missingLegal } from "../lib/devisDoc"
-import { openUpgrade, useAccount, useRights } from "../lib/accountApi"
+import { api, openUpgrade, useAccount, useRights } from "../lib/accountApi"
 import { LockTag, ReceptionLocked, UpgradeHost } from "./billing/Upgrade"
 import { Lock as LockIco, MessageSquare, Copy } from "lucide-react"
 import { useProfile } from "../lib/profile"
@@ -48,7 +48,7 @@ import { LockScreen, LockSetup } from "./Lock"
 import { bioAvailable, disableBio, enableBio, getLock, hasLock } from "../lib/lock"
 import type { Session } from "@supabase/supabase-js"
 import type { Client, St, Devis, DevisLine, DevStatus, Rel, Ev, Call, Msg } from "../lib/store"
-import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, isK, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
+import { A, C, useC, setListen, useListen, Blob, GREEN, AMBER, RED, GREY, tx, IS, SW, ink, initials, durF, isK, Card, Dot, Chip, Circ, Ic, Av, Row, List, rise, Section, Col, QA, Chart, Tg, Btn, TBtn, Chev, inp, dt, F, Sheet, Sub, type K, type P, type Modal, type Ctx, type QAi } from "./ui"
 // update45 : déclaré après les imports (sinon « Cannot access lazy before initialization » en mode dev Vite)
 const FacturesSheet = lazyPage(() => import("./sheets/FacturesSheet")) // update67 : préchargée au repos
 // update64 · Chantiers (carte Leaflet) et Équipe : chargés à la demande, hors bundle principal
@@ -69,6 +69,8 @@ import MobileNav, { type CreateKind } from "./nav/MobileNav"
 import { PUSH, SNAP, TAB, idle, lazyPage } from "../lib/motion"
 import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
 import ModalSheet from "./sheet/ModalSheet"
+import { SwipeRow, askConfirm, ConfirmHost } from "./form/SwipeRow"
+import { devisDeleteReason, factureSwipeAction } from "../lib/docDelete"
 
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
@@ -88,6 +90,9 @@ const PilotageL = lazy(() => import("./sheets/PilotageSheet"))
 const ConnectL = lazy(() => import("./sheets/PilotageSheet").then(m => ({ default: m.ConnectSheet })))
 const ST: Record<DevStatus, [string, string]> = { aval: ["À valider", "#2F6BFF"], brouillon: ["Brouillon", "rgba(255,255,255,.3)"], att: ["En attente", "#FFB340"], env: ["Envoyé", "rgba(255,255,255,.3)"], val: ["Validé", "#30D158"], ref: ["Refusé", "#FF5F57"], sans: ["Sans réponse", "rgba(255,255,255,.3)"], perdu: ["Perdu", "rgba(255,255,255,.3)"] }
 const toValidate = (d: Devis) => d.status === "aval" || (d.status === "brouillon" && !!d.ai)
+/* update77 · durées du nouveau RDV (journée = 8 h) */
+const DUR_OPTS: [string, string][] = [["0.5", "0h30"], ["1", "1h"], ["1.5", "1h30"], ["2", "2h"], ["3", "3h"], ["4", "4h"], ["8", "journée"]]
+
 const RS: Record<Rel["status"], [string, string]> = { prog: ["Programmée", "#FFB340"], pause: ["En pause", "rgba(255,255,255,.15)"], env: ["Envoyée", "rgba(255,255,255,.3)"], rep: ["Répondu", "#30D158"] }
 
 const match = (q: string, ...xs: string[]) => !q || xs.join(" ").toLowerCase().includes(q.toLowerCase())
@@ -528,6 +533,52 @@ function RelP() {
 /* ---------------- Devis ---------------- */
 const MO = ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"]
 /* update63 · contenu du mode Devis de la page unifiée Devis | Factures (même bot bleu) */
+
+/* update77 · swipe gauche sur une ligne devis / facture */
+function askDelDevis(d: Devis, set: (fn: (x: St) => St) => void, toast: (m: string) => void) {
+  void devisDeleteReason(d).then(reason => {
+    if (reason) { askConfirm({ title: "Ce devis ne peut pas être supprimé", text: reason, onlyOk: true, confirmLabel: "Compris" }); return }
+    askConfirm({
+      title: "Supprimer ce devis ?",
+      text: `Devis n° ${d.num}${d.client ? ` — ${d.client}` : ""}. Cette action est définitive.`,
+      confirmLabel: "Supprimer", danger: true,
+      onConfirm: () => { set(x => ({ ...x, devis: x.devis.filter(y => y.id !== d.id) })); toast("Devis supprimé") },
+    })
+  })
+}
+function askFactureSwipe(f: FactureLite, modal: (m: Modal) => void, toast: (m: string) => void) {
+  const act = factureSwipeAction(f)
+  if (act === "blocked") {
+    askConfirm({ title: "Cet avoir ne peut pas être supprimé", text: "Un avoir émis est une pièce comptable à conserver. Pour le corriger, ouvrez la facture d'origine.", onlyOk: true, confirmLabel: "Compris" })
+    return
+  }
+  if (act === "avoir") {
+    askConfirm({
+      title: "Créer un avoir pour cette facture ?",
+      text: "La facture n'est pas supprimée. Un avoir en brouillon sera créé pour l'annuler ou la corriger.",
+      confirmLabel: "Créer un avoir",
+      onConfirm: async () => {
+        const r = await api("/api/devis", { action: "avoir", facture_id: f.id })
+        if (!r.ok || typeof r.facture_id !== "string") { toast(r.error || "Création de l'avoir impossible."); return }
+        await refreshFactures()
+        modal({ kind: "factures", data: { id: r.facture_id } })
+      },
+    })
+    return
+  }
+  askConfirm({
+    title: "Supprimer ce brouillon ?",
+    text: "Ce brouillon n'a pas encore de numéro. Il sera définitivement effacé.",
+    confirmLabel: "Supprimer", danger: true,
+    onConfirm: async () => {
+      const { error } = await supabase.from("factures").delete().eq("id", f.id).is("numero", null)
+      if (error) { toast("Suppression impossible."); return }
+      await refreshFactures()
+      toast("Brouillon supprimé")
+    },
+  })
+}
+
 function useDevisView(active: boolean) {
   const { s, set, modal, q, toast } = useC(), c = A.dev.c
   const ds = [...s.devis].filter(d => match(q, d.client, d.objet, String(d.num))).sort((a, b) => b.num - a.num)
@@ -547,9 +598,9 @@ function useDevisView(active: boolean) {
     set(x => ({ ...x, rels: [{ id: uid(), client: d.client, type: `Relance devis N° ${d.num}`, canal: d.email ? (s.settings.sms && d.phone ? "E-mail + SMS" : "E-mail") : auto ? "SMS" : "Appel", status: "prog", date: auto ? "Demain 9:00" : "À faire", ...(auto && isUuidL(d.id) ? { devisId: d.id, scheduledFor: t.toISOString() } : {}) }, ...x.rels] }))
     toast(auto ? `Relance prévue demain 9:00 · ${d.client}` : `Rappel ajouté : appelez ${d.client} (pas d'e-mail sur le devis)`, () => set(() => snap))
   }
-  const FRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Ouvrir le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${eur(d.amount)}`} r={<div className="flex items-center gap-3"><Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>{d.status === "brouillon" ? <TBtn I={Send} label={`Envoyer le devis ${d.num}`} c={c} onClick={() => openD(d)} /> : queued(d) ? <TBtn I={Check} label="Relance déjà prévue" dis /> : <TBtn I={Repeat2} label={`Relancer ${d.client}`} c={c} onClick={() => relance(d)} />}</div>} />
+  const FRow = (d: Devis, i: number) => <SwipeRow key={d.id} id={d.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(d, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Ouvrir le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${eur(d.amount)}`} r={<div className="flex items-center gap-3"><Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>{d.status === "brouillon" ? <TBtn I={Send} label={`Envoyer le devis ${d.num}`} c={c} onClick={() => openD(d)} /> : queued(d) ? <TBtn I={Check} label="Relance déjà prévue" dis /> : <TBtn I={Repeat2} label={`Relancer ${d.client}`} c={c} onClick={() => relance(d)} />}</div>} /></SwipeRow>
   const exp = () => { const csv = ["N°;Client;Objet;Statut;Montant HT", ...s.devis.map(d => [d.num, d.client, d.objet, ST[d.status][0], d.amount].join(";"))].join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new window.Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = "devis-akno.csv"; a.click(); toast("Export CSV téléchargé") }
-  const DRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Ouvrir le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />
+  const DRow = (d: Devis, i: number) => <SwipeRow key={d.id} id={"all-" + d.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(d, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Ouvrir le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} /></SwipeRow>
   const todo = ds.filter(d => (d.status === "brouillon" && !d.ai) || d.status === "att" || d.status === "env")
   const aval = ds.filter(toValidate), { desk } = useC()
   /* Pop-up : brouillon IA à valider, sinon dernière réponse client (accepté / refusé) — au premier affichage du mode Devis */
@@ -564,10 +615,10 @@ function useDevisView(active: boolean) {
     try { if (sessionStorage.getItem("akno-seen-" + reply.id)) return } catch { }
     const t = setTimeout(() => modal({ kind: "clientReply", data: reply }), 450); return () => clearTimeout(t)
   }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
-  const VRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Regarder le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Circ><Blob c={c} s={20} /></Circ>} t={<span className="flex items-center gap-2"><span className="truncate">{d.client}</span></span>} s={`N° ${d.num} · brouillon généré par Akno`} r={eur(d.amount)} rs={<Chip c={c}>Brouillon — à valider</Chip>} />
+  const VRow = (d: Devis, i: number) => <SwipeRow key={d.id} id={"val-" + d.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(d, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Regarder le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Circ><Blob c={c} s={20} /></Circ>} t={<span className="flex items-center gap-2"><span className="truncate">{d.client}</span></span>} s={`N° ${d.num} · brouillon généré par Akno`} r={eur(d.amount)} rs={<Chip c={c}>Brouillon — à valider</Chip>} /></SwipeRow>
   const replies = ds.filter(d => d.reply || d.status === "sans" || ((d.status === "val" || d.status === "ref") && !!d.repliedAt))
   const replyL = (d: Devis) => d.status === "val" && d.repliedAt ? "Accepté" : d.status === "ref" && d.repliedAt ? "Refusé" : d.status === "sans" ? "Sans réponse" : d.reply ? "Réponse client" : ST[d.status][0]
-  const ReplyRow = (d: Devis, i: number) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={d.reply || `N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={d.status === "val" ? GREEN : d.status === "ref" ? RED : c}>{replyL(d)}</Chip>} />
+  const ReplyRow = (d: Devis, i: number) => <SwipeRow key={d.id} id={"rep-" + d.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(d, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={d.reply || `N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={d.status === "val" ? GREEN : d.status === "ref" ? RED : c}>{replyL(d)}</Chip>} /></SwipeRow>
   const avalS = aval.length > 0 && <Section t={<span className="flex items-center gap-2">À valider<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{aval.length}</span></span>} aside="Devis générés par l'IA"><List>{aval.map(VRow)}</List></Section>
   const replyS = replies.length > 0 && <Section t={<span className="flex items-center gap-2">Réponses clients<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{replies.length}</span></span>} aside="Acceptation, refus ou message"><List>{replies.map(ReplyRow)}</List></Section>
   return { fig: <Num n={cur} u="€" money />, sub: `validés ce mois · ${val.length} devis sur ${sent.length} envoyés`, actions: [
@@ -599,12 +650,13 @@ const F_ST: Record<string, [string, string]> = { brouillon: ["Brouillon", GREY],
 const fLabel = (f: FactureLite) => f.type === "situation" && f.situation_numero ? `Situation n° ${f.situation_numero}` : F_LABEL[f.type] || "Facture"
 /* update63 · contenu du mode Factures de la page unifiée */
 function useFacturesView() {
-  const { modal, setChat, s: { devis: sDev } } = useC(), st = useFacturesLite()
+  const { modal, setChat, toast, s: { devis: sDev } } = useC(), st = useFacturesLite()
   useEffect(() => { void refreshFactures() }, [])
   const rows = st.rows || [], unpaid = rows.filter(isUnpaid), late = unpaid.filter(isLate).length
   const total = unpaid.reduce((a, f) => a + dueOf(f), 0), others = rows.filter(f => !isUnpaid(f)).slice(0, 8)
   const FRow = (f: FactureLite, i: number) => { const [l, c] = isLate(f) ? ["En retard", RED] : F_ST[f.statut] || F_ST.brouillon
-    return <Row key={f.id} first={i === 0} label={`Ouvrir ${f.numero || "brouillon"}`} onClick={() => modal({ kind: "factures", data: { id: f.id } })} lead={<Ic I={Receipt} />} t={`${fLabel(f)} ${f.numero || "(brouillon)"}`} s={f.client_nom || "Client à renseigner"} r={e2(f.type === "avoir" ? -dueOf(f) : dueOf(f))} rs={<Chip c={c}>{l}</Chip>} /> }
+    const act = factureSwipeAction(f)
+      return <SwipeRow key={f.id} id={f.id} first={i === 0} label={act === "avoir" ? "Avoir" : "Supprimer"} tone={act === "avoir" ? "accent" : "danger"} onAction={() => askFactureSwipe(f, modal, toast)}><Row className="!rounded-none" first={i === 0} label={`Ouvrir ${f.numero || "brouillon"}`} onClick={() => modal({ kind: "factures", data: { id: f.id } })} lead={<Ic I={Receipt} />} t={`${fLabel(f)} ${f.numero || "(brouillon)"}`} s={f.client_nom || "Client à renseigner"} r={e2(f.type === "avoir" ? -dueOf(f) : dueOf(f))} rs={<Chip c={c}>{l}</Chip>} /></SwipeRow> }
   return { fig: <Num n={Math.round(total)} u="€" money />,
     sub: st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}${late ? ` · ${late} en retard` : ""}`, actions: [
       { I: Plus, l: "Nouvelle", on: () => modal({ kind: "factures", data: { create: true } }) }, { I: Receipt, l: "Toutes", on: () => modal({ kind: "factures" }) },
@@ -1107,7 +1159,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
   if (m.kind === "callView") { const x = s.calls.find(y => y.id === d.id) || d as Call
     return <Sheet title={x.name} sub={`${x.time} · ${x.topic}`} c={A.rec.c} onClose={close}><CallPlayer call={x} onMic={() => { close(); setChat(true) }} /><div className="text-[15px] leading-relaxed text-white/70">{x.note}</div>{x.addr && <div className="mt-3"><Sub>{x.addr}</Sub></div>}<div className="mt-3"><Sub dot={x.callback ? (x.urgent ? "#FF5F57" : "#FFB340") : "#30D158"}>{x.callback ? (x.urgent ? "À rappeler · urgent" : "À rappeler") : "Traité"}</Sub>{x.callback && x.rappelAt && <div className={`mt-2 ${tx.cap}`}>Moment souhaité · {x.rappelAt}</div>}</div>
       <div className="mt-6 grid gap-2">{x.callback && <Btn primary onClick={() => { set(y => ({ ...y, calls: y.calls.map(z => z.id === x.id ? { ...z, callback: false } : z) })); toast("Marqué comme rappelé"); close() }}><Check size={15} />Marquer rappelé</Btn>}<div className="grid grid-cols-2 gap-2"><Btn onClick={() => modal({ kind: "devis", data: { client: x.name, objet: x.besoin || x.topic } })}><Receipt size={15} strokeWidth={1.5} />Créer un devis</Btn><Btn onClick={() => modal({ kind: "rdv", data: { name: x.name, topic: x.tag || x.topic, addr: x.addr } })}><CalendarDays size={15} strokeWidth={1.5} />Prendre RDV</Btn></div></div></Sheet> }
-  if (m.kind === "rdv") return <Sheet title="Nouveau rendez-vous" c={A.ag.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><div className="grid grid-cols-[1.4fr_1fr_1fr] gap-2"><F l="Date"><input type="date" className={inp} {...v("date")} /></F><F l="Heure"><input type="time" step={900} className={inp} {...v("start")} /></F><F l="Durée (h)"><select className={inp} {...v("dur")}>{["0.5", "1", "1.5", "2", "3", "4"].map(x => <option key={x} value={x}>{x.replace(".", ",")}</option>)}</select></F></div><F l="Adresse"><input className={inp} {...v("addr")} /></F></div>
+  if (m.kind === "rdv") return <Sheet title="Nouveau rendez-vous" c={A.ag.c} onClose={close}><div className="space-y-3" data-rdv-form><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Objet"><input className={inp} {...v("topic")} /></F><F l="Date"><input type="date" className={dt} {...v("date")} /></F><div className="grid grid-cols-2 gap-2"><F l="Heure"><input type="time" step={900} className={dt} {...v("start")} /></F><F l="Durée"><select className={dt + " sel"} {...v("dur")}>{DUR_OPTS.map(([val, lab]) => <option key={val} value={val}>{lab}</option>)}{DUR_OPTS.some(([val]) => val === String(f.dur)) ? null : <option value={f.dur}>{f.dur} h</option>}</select></F></div><F l="Adresse"><input className={inp} {...v("addr")} /></F></div>
     {foot("Créer le RDV", !!f.name.trim() && !!f.date, () => { set(x => ({ ...x, events: [...x.events, { id: uid(), date: f.date, start: toH(f.start), dur: Number(f.dur), name: f.name.trim(), topic: f.topic || "Intervention", addr: f.addr, created: Date.now() }] })); const wd = dd(f.date).getDay(); toast(wd === 0 || wd === 6 ? "RDV créé (week-end : visible sur mobile)" : "RDV créé"); go("ag") }, A.ag.c)}</Sheet>
   if (m.kind === "ev") { const e = s.events.find(y => y.id === d.id) || d as Ev; return <ClientSheet name={e.name} callId={linkedCall(s, e)?.id} eventId={e.id} close={close} /> }
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>Appel</option><option>SMS</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div><p className="px-1 text-[13px] leading-5 text-white/50">C'est un rappel pour vous : Akno ne l'envoie pas tout seul. Les relances de devis envoyés et les demandes d'avis, elles, partent automatiquement.</p></div>
@@ -1145,7 +1197,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     const stopAll = () => { if (!r.devisId) return; set(x => ({ ...x, devis: x.devis.map(dv => dv.id === r.devisId ? { ...dv, remindersOff: true } : dv), rels: x.rels.map(y => y.devisId === r.devisId && y.status === "prog" ? { ...y, status: "pause" } : y) })); toast("Relances de ce devis arrêtées"); close() }
     return <Sheet title={r.client} sub={`${r.type} · ${r.canal}`} c={A.rel.c} onClose={close}><div className="space-y-2"><Sub dot={RS[r.status][1]}>{RS[r.status][0]} · {r.date}</Sub>{!on && <Sub>Agent Relance en pause : envoi manuel désactivé</Sub>}{r.devisId && <Sub>Relance automatique liée au devis</Sub>}</div>
       <div className="mt-6 grid grid-cols-2 gap-2">{r.devisId && (r.status === "prog" || r.status === "pause") ? <Btn className="col-span-2" onClick={stopAll} disabled={!!s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause"}>{s.devis.find(dv => dv.id === r.devisId)?.remindersOff || r.status === "pause" ? "Relances arrêtées" : "Arrêter les relances de ce devis"}</Btn> : (r.status === "prog" || r.status === "pause") ? <><Btn primary disabled={!on} aria-label={`Envoyer ${r.client}`} onClick={() => { relUpd(r.id, "env", `Relance marquée comme faite · ${r.client}`, "Faite"); close() }}><Check size={14} strokeWidth={1.5} />Marquer faite</Btn><Btn onClick={() => { relUpd(r.id, r.status === "pause" ? "prog" : "pause", r.status === "pause" ? "Relance reprise" : "Relance en pause"); close() }}>{r.status === "pause" ? <><Play size={13} strokeWidth={1.5} />Reprendre</> : <><Pause size={13} strokeWidth={1.5} />Mettre en pause</>}</Btn></> : <Btn className="col-span-2" onClick={() => { relUpd(r.id, "prog", "Relance reprogrammée", "Demain 9:00"); close() }}><RotateCcw size={14} strokeWidth={1.5} />Reprogrammer</Btn>}</div></Sheet> }
-  if (m.kind === "devisList") return <Sheet title="Devis" sub={`${s.devis.length} devis`} c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <Row key={x.id} first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisPrev", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} />)}</div></Sheet>
+  if (m.kind === "devisList") return <Sheet title="Devis" sub={`${s.devis.length} devis`} c={A.dev.c} onClose={close}><div className="-mx-5 bg-black/20">{[...s.devis].sort((a, b) => b.num - a.num).map((x, i) => <SwipeRow key={x.id} id={"list-" + x.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(x, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Devis ${x.num}`} onClick={() => modal({ kind: "devisPrev", data: x })} lead={<Av n={x.client} />} t={x.client} s={`N° ${x.num} · ${x.objet}`} r={eur(x.amount)} rs={<Chip c={ST[x.status][1]}>{ST[x.status][0]}</Chip>} /></SwipeRow>)}</div></Sheet>
   if (m.kind === "aiPop") { const dv = s.devis.find(x => x.id === d.id) || d as Devis, n = s.devis.filter(toValidate).length
     if (!toValidate(dv)) return null
     return <Sheet title="Nouveau devis" sub="Brouillon — à valider" c={A.dev.c} onClose={close}>
@@ -1472,6 +1524,7 @@ function AknoApp() {
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />
+    <ConfirmHost />
     <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`, { replace: true }); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(94px+max(var(--sab)-10px,12px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : toastT.info ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/[.12] text-white/85"><Clock size={13} strokeWidth={2.2} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
