@@ -43,17 +43,17 @@ export function IButtonRow({ lead, title, sub, onClick, right, chevron = true, a
 }
 
 /** Interrupteur iOS (bleu Akno), ressort court ; respecte « réduire les animations ». */
-export function ISwitch({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+export function ISwitch({ on, onChange, label, disabled, color = ACC }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; color?: string }) {
   const rm = useReducedMotion()
   return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
-    className="relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 disabled:opacity-50" style={{ background: on ? ACC : "rgba(120,120,128,.32)" }}>
+    className="relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 disabled:opacity-50" style={{ background: on ? color : "rgba(120,120,128,.32)" }}>
     <motion.span aria-hidden className="absolute left-[2px] top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,.25),0_1px_1px_rgba(0,0,0,.16)]" initial={false} animate={{ x: on ? 20 : 0 }} transition={rm ? { duration: 0 } : SPRING} />
   </button>
 }
-export function IToggleRow({ label, sub, on, onChange, disabled }: { label: ReactNode; sub?: ReactNode; on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function IToggleRow({ label, sub, on, onChange, disabled, color }: { label: ReactNode; sub?: ReactNode; on: boolean; onChange: (v: boolean) => void; disabled?: boolean; color?: string }) {
   return <div className="ig-row flex min-h-12 items-center gap-3 py-2 pl-4 pr-3">
     <span className="min-w-0 flex-1"><span className="block text-[15.5px] text-white/90">{label}</span>{sub && <span className="mt-0.5 block text-[12.5px] leading-[17px] text-white/40">{sub}</span>}</span>
-    <ISwitch on={on} onChange={onChange} label={typeof label === "string" ? label : "Option"} disabled={disabled} />
+    <ISwitch on={on} onChange={onChange} label={typeof label === "string" ? label : "Option"} disabled={disabled} color={color} />
   </div>
 }
 

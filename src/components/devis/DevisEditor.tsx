@@ -16,7 +16,7 @@ import { KIND_LABEL, KIND_SHORT, TVA_RATES, UNITS, acompteFrom, computeTotals, f
 import { dropLocal, keepLocal, nextDevisNum, readLocal, saveDevis } from "../../lib/devisSave"
 import type { Devis } from "../../lib/store"
 import type { Prestation } from "../../lib/prestations"
-import { NumField, Seg, Stepper, Menu, MenuItem, MenuSep, Kbd, isMac, TEAL, TEAL_T, field } from "./fields"
+import { NumField, Seg, Stepper, Menu, MenuItem, MenuSep, Kbd, isMac, TEAL, TEAL_T, field, ServiceLineCard } from "./fields"
 import { PrestaForm, PrestaPicker, tauxDef } from "./Prestations"
 import Modeles, { type Modele } from "./Modeles"
 import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Pill, Reveal, ival } from "../form/grouped"
@@ -32,7 +32,7 @@ const KIND_ICON: Record<LineKind, any> = { mo: Clock, fo: Package, fft: Tag }
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` }
 const DEFAULT_COND = "Acompte de 30 % à la signature, solde à la fin des travaux."
 
-export default function DevisEditor({ req, onClose, onSend, clients }: { req: EditorReq; onClose: () => void; onSend: (d: Devis) => void; clients: CtInfo[] }) {
+export default function DevisEditor({ req, onClose, onSend, onCreateFacture, clients }: { req: EditorReq; onClose: () => void; onSend: (d: Devis) => void; onCreateFacture?: (d: Devis) => void | Promise<void>; clients: CtInfo[] }) {
   const { s, desk, toast, put } = useC()
   const tv0 = CO.tvaNA ? 0 : Number(s.settings.tva) || 10
   const taux = tauxDef(s.settings.tarifs?.tauxHoraire)
@@ -127,6 +127,31 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
     const dv = s.devis.find(x => x.id === idRef.current)
     const ser = serialize(docRef.current)
     onSend({ ...(dv || { status: "brouillon", created: Date.now() } as Devis), id: idRef.current, num: numRef.current || 0, client: doc.client, objet: doc.objet || "Travaux", amount: T.ttc, lines: ser.lines, email: doc.email || undefined, phone: doc.phone || undefined, addr: doc.addr || undefined })
+  }
+
+  const readyDoc = () => {
+    if (!doc.client.trim()) { setErr("Indiquez le client."); setSt("error"); return false }
+    if (!doc.items.some(x => x.k !== "sec" && (lineHT(x) > 0 || x.q * x.pu > 0))) { setErr("Ajoutez au moins une ligne chiffrée."); setSt("error"); return false }
+    return true
+  }
+  const snapshot = (): Devis => {
+    const dv = s.devis.find(x => x.id === idRef.current)
+    const ser = serialize(docRef.current)
+    return { ...(dv || { status: "brouillon", created: Date.now() } as Devis), id: idRef.current!, num: numRef.current || 0, client: doc.client, objet: doc.objet || "Travaux", amount: T.ttc, lines: ser.lines, email: doc.email || undefined, phone: doc.phone || undefined, addr: doc.addr || undefined }
+  }
+  const createDevis = async () => {
+    if (!readyDoc()) return
+    const ok = await saveNow()
+    if (!ok || !idRef.current) return
+    toast(numRef.current ? `Devis N° ${numRef.current} créé` : "Devis créé")
+    onClose()
+  }
+  const createFacture = async () => {
+    if (!readyDoc()) return
+    const ok = await saveNow()
+    if (!ok || !idRef.current) return
+    if (onCreateFacture) await onCreateFacture(snapshot())
+    else onClose()
   }
 
   /* ---------- édition ---------- */
@@ -226,7 +251,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
       <h2 className="text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42"><StepT n={3} t="Prestations" />{nLines > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {nLines} ligne{nLines > 1 ? "s" : ""}</span>}</h2>
       <button type="button" onClick={() => setPicker(true)} className="-mb-0.5 flex h-8 items-center gap-1.5 rounded-full pl-1 pr-1 text-[14px] font-medium text-[#7EA6FF] transition-colors hover:text-white"><Search size={14} strokeWidth={2} />Mes prestations{desk && <Kbd>{mk} K</Kbd>}</button>
     </div>
-    {doc.items.length > 0 && lineHead}
+    {/* update82 · en-tête de colonnes remplacé par la carte iOS */}
     {doc.items.length > 0 ? <Reorder.Group axis="y" values={doc.items} onReorder={xs => setDoc(d => ({ ...d, items: xs as EdLine[] }))} className={desk ? "space-y-1.5" : "space-y-2.5"}>
       {doc.items.map((x, i) => <LineRow key={x.id} x={x} desk={desk} focused={focusId === x.id} taux={taux} subtotal={x.k === "sec" ? sub(i) : 0} first={i === 0} last={i === doc.items.length - 1}
         onFocus={() => setFocusId(x.id)} onPatch={p => patch(x.id, p)} onMove={d => move(x.id, d)} onDup={() => dup(x.id)} onRemove={() => remove(x.id)} onSave={() => asPresta(x)} onEnter={() => addKind(x.k)} />)}
@@ -236,7 +261,7 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
         <div className="mt-3 text-[16px] font-medium">Ajoutez ce que vous facturez</div>
         <p className="mx-auto mt-1 max-w-[340px] text-[14px] leading-5 text-white/50">Choisissez une prestation déjà enregistrée, ou écrivez une ligne vous-même.</p>
         <button type="button" onClick={() => setPicker(true)} className="mx-auto mt-4 flex h-12 w-full max-w-[320px] items-center justify-center gap-2 rounded-full px-5 text-[16px] font-semibold text-white" style={{ background: TEAL }}><Search size={17} />Choisir une prestation</button>
-        <button type="button" onClick={() => addKind("fft")} className="mx-auto mt-2 flex h-12 w-full max-w-[320px] items-center justify-center gap-2 rounded-full bg-white/[.08] px-5 text-[16px] font-medium text-white"><Plus size={17} />Écrire une ligne</button>
+        <button type="button" onClick={() => addKind("fft")} className="mx-auto mt-2 flex h-12 w-full max-w-[320px] items-center justify-center gap-2 rounded-full bg-white/[.08] px-5 text-[16px] font-medium text-white"><Plus size={17} />Ajouter un service / une ligne</button>
       </div>}
     {doc.items.length > 0 && <button type="button" onClick={() => setPicker(true)} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-dashed border-white/[.14] text-[15.5px] font-medium text-[#7EA6FF] active:bg-white/[.04]"><Plus size={17} />Ajouter une prestation</button>}
     <div className="mt-3 px-1 text-[13px] text-white/40">Ou une ligne libre :</div>
@@ -286,6 +311,10 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
       <div className="mx-auto grid w-full max-w-[1320px] grid-cols-[minmax(0,1fr)_360px] items-start gap-6 px-6 py-6">
         <div className="min-w-0 space-y-8">{restorePill}{clientCard}{lines}</div>
         <aside className="sticky top-6 space-y-5">{recap}
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" data-create-devis onClick={() => void createDevis()} className="flex h-11 items-center justify-center rounded-full bg-white/[.1] px-3 text-[14.5px] font-semibold text-white">Créer un devis</button>
+            <button type="button" data-create-facture onClick={() => void createFacture()} className="flex h-11 items-center justify-center rounded-full px-3 text-[14.5px] font-semibold text-white" style={{ background: TEAL }}>Créer une facture</button>
+          </div>
           <button type="button" onClick={() => setPreview(true)} className="group block w-full overflow-hidden rounded-[18px] border border-white/[.06] bg-[#0F0F11] p-3 text-left transition-colors hover:border-white/[.14]">
             <div className="pointer-events-none max-h-[150px] overflow-hidden rounded-[8px] opacity-90 [mask-image:linear-gradient(to_bottom,#000_60%,transparent)]"><DevisPaper d={pdoc()} /></div>
             <div className="mt-2 flex items-center justify-between px-1 text-[12.5px] text-white/50"><span>Rendu client</span><span className="text-white/70 group-hover:text-white">Ouvrir l'aperçu</span></div>
@@ -293,18 +322,20 @@ export default function DevisEditor({ req, onClose, onSend, clients }: { req: Ed
         </aside>
       </div>
     </div> : <>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: "calc(92px + var(--sab) + var(--kb, 0px))" }}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: "calc(148px + var(--sab) + var(--kb, 0px))" }}>
         {restorePill}
         <div className="space-y-8">{clientCard}{lines}{recap}</div>
       </div>
-      <div className="kb-hide absolute inset-x-0 bottom-0 z-10 border-t border-white/[.06] bg-[#0B0B0C] px-4 pt-2.5" style={{ paddingBottom: "max(10px, var(--sab))" }}>
+      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/[.06] bg-[#0B0B0C] px-4 pt-2.5" style={{ paddingBottom: "max(10px, var(--sab))" }}>
         <div className="flex items-center gap-2.5">
           <div className="min-w-0 flex-1" aria-label={`Total ${fmtE(T.ttc)} TTC`}>
             <div className="flex gap-2.5 truncate text-[11.5px] tabular-nums text-white/45"><span>HT {fmtE(T.ht)}</span>{!CO.tvaNA && <span>TVA {fmtE(T.tva)}</span>}{T.remise > 0 && <span>remise incluse</span>}</div>
             <div className="flex items-baseline gap-1.5"><motion.span key={T.ttc} initial={{ opacity: .5, y: 2 }} animate={{ opacity: 1, y: 0 }} className="truncate text-[20px] font-semibold tabular-nums tracking-[-0.02em]">{fmtE(T.ttc)}</motion.span><span className="text-[12px] font-medium text-white/45">TTC</span></div>
           </div>
-          <button type="button" onClick={() => setPicker(true)} aria-label="Ajouter une prestation" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/[.08] text-white transition-transform active:scale-95"><Plus size={20} /></button>
-          <button type="button" onClick={() => void send()} className="flex h-11 items-center gap-2 rounded-full px-5 text-[15.5px] font-semibold text-white transition-transform active:scale-[.97]" style={{ background: TEAL }}><Send size={16} />Envoyer</button>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button type="button" data-create-devis onClick={() => void createDevis()} className="flex h-11 items-center justify-center rounded-full bg-white/[.1] px-3 text-[14.5px] font-semibold text-white transition-transform active:scale-[.97]">Créer un devis</button>
+          <button type="button" data-create-facture onClick={() => void createFacture()} className="flex h-11 items-center justify-center rounded-full px-3 text-[14.5px] font-semibold text-white transition-transform active:scale-[.97]" style={{ background: TEAL }}>Créer une facture</button>
         </div>
       </div>
     </>}
@@ -340,7 +371,7 @@ const TotRow = ({ l, v, strong, hint }: { l: string; v: string; strong?: boolean
 
 function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPatch, onMove, onDup, onRemove, onSave, onEnter }: { x: EdLine; desk: boolean; focused: boolean; taux: number | null; subtotal: number; first: boolean; last: boolean; onFocus: () => void; onPatch: (p: Partial<EdLine>) => void; onMove: (d: -1 | 1) => void; onDup: () => void; onRemove: () => void; onSave: () => void; onEnter: () => void }) {
   const controls = useDragControls(), [menu, setMenu] = useState(false), [desc, setDesc] = useState(!!x.d)
-  const total = lineHT(x), disc = lineDisc(x), [remOpen, setRemOpen] = useState(!!x.rl)
+  const [remOpen, setRemOpen] = useState(!!x.rl)
   const setKind = (k: LineKind) => onPatch({ k, u: k === "mo" ? "h" : k === "fft" ? "forfait" : x.u === "h" || x.u === "forfait" ? "u" : x.u, ...(k === "mo" && !x.pu && taux ? { pu: taux } : {}) })
   const handle = <button type="button" data-nodrag aria-label="Déplacer la ligne" onPointerDown={e => { e.preventDefault(); controls.start(e) }} className="flex h-10 w-5 shrink-0 cursor-grab touch-none items-center justify-center text-white/20 transition-colors hover:text-white/60 active:cursor-grabbing"><GripVertical size={16} /></button>
   const menuEl = <Menu open={menu} setOpen={setMenu} trigger={<button type="button" aria-label="Actions de la ligne" aria-haspopup="menu" onClick={() => setMenu(o => !o)} className={`flex h-9 w-9 items-center justify-center rounded-full text-white/40 transition-colors hover:bg-white/[.07] hover:text-white ${menu ? "bg-white/[.07] text-white" : ""}`}><MoreHorizontal size={17} /></button>}>
@@ -353,7 +384,6 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
     {!last && <MenuItem I={ArrowDown} hint="Alt ↓" onClick={() => { onMove(1); setMenu(false) }}>Descendre</MenuItem>}
     <MenuSep /><MenuItem I={Trash2} danger onClick={() => { setMenu(false); onRemove() }}>Supprimer</MenuItem>
   </Menu>
-  const ring = desk ? (focused ? "border-white/[.12] bg-[#17171A]" : "border-transparent bg-[#141416]") : (focused ? "bg-[#18181B] shadow-[inset_0_0_0_1px_rgba(47,107,255,.35)]" : "bg-[#141416]")
   // update63 · mobile : balayer la carte vers la gauche pour révéler « Supprimer »
   const rm = useReducedMotion(), xc = useDragControls(), mx = useMotionValue(0), delOp = useTransform(mx, [-56, -6, 0], [1, 0, 0]), [swiped, setSwiped] = useState(false)
   const snap = (open: boolean) => { setSwiped(open); void animate(mx, open ? -SWIPE : 0, rm ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42 }) }
@@ -368,34 +398,13 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
     </div>
   </Reorder.Item>
 
-  const I = KIND_ICON[x.k]
-  // update73 · remise sur la ligne : % ou €, montant retiré affiché, suppression en un geste
-  const remEl = remOpen && <div data-line-remise className="mt-2.5 flex items-center gap-2 rounded-[12px] bg-white/[.04] py-1.5 pl-3 pr-1.5">
-    <span className="text-[14px] text-white/60">Remise</span>
-    <Seg size="sm" label="Type de remise de la ligne" value={x.rl?.t || "pct"} onChange={t => onPatch({ rl: { t, v: x.rl?.v || 0 } })} opts={[["pct", "%"], ["eur", "€"]]} />
-    <NumField className="w-[84px]" inputClass={desk ? "!h-9" : "!h-10 !border-0 !bg-white/[.06] !text-[16px]"} value={x.rl?.v || null} placeholder="0" max={x.rl?.t === "eur" ? undefined : 100} onChange={n => onPatch({ rl: { t: x.rl?.t || "pct", v: n || 0 } })} ariaLabel="Remise de la ligne" />
-    <span className="ml-auto whitespace-nowrap text-[14px] tabular-nums text-[#7EE2A8]">{disc > 0 ? `− ${fmtE(disc)}` : ""}</span>
-    <button type="button" aria-label="Retirer la remise de la ligne" onClick={() => { setRemOpen(false); onPatch({ rl: undefined }) }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white/40 hover:text-white"><X size={15} /></button>
-  </div>
-  const totEl = (big: boolean) => <motion.div key={total} initial={{ opacity: .35 }} animate={{ opacity: 1 }} className="ml-auto text-right">{!desk && <div className="text-[11.5px] text-white/35">Total HT</div>}{disc > 0 && <div className="text-[12px] tabular-nums text-white/35 line-through">{fmtE(lineGross(x))}</div>}<div className={`${big ? "text-[17px]" : "text-[14.5px]"} font-semibold tabular-nums`}>{fmtE(total)}</div></motion.div>
-  const qtyEl = x.k === "mo" ? <Stepper big={!desk} soft={!desk} value={x.q} onChange={q => onPatch({ q })} step={0.5} suffix="h" ariaLabel="Nombre d'heures" />
-    : x.k === "fft" ? <Stepper big={!desk} soft={!desk} value={x.q} onChange={q => onPatch({ q })} step={1} ariaLabel="Quantité" />
-    : <Stepper big={!desk} soft={!desk} value={x.q} onChange={q => onPatch({ q })} step={x.u === "u" || x.u === "lot" ? 1 : 0.5} ariaLabel="Quantité" />
-  const unitEl = x.k === "mo" ? <div className="flex h-10 items-center justify-center text-[13px] text-white/40">heure</div>
-    : <select aria-label="Unité" value={x.u} onChange={e => onPatch({ u: e.target.value })} className={field + " sel !pl-3 text-left" + (desk ? "" : " !h-10 !border-0 !bg-white/[.06] !text-[16px]")}>{[...new Set([x.u, ...UNITS.filter(u => u !== "h")])].map(u => <option key={u} value={u}>{u}</option>)}</select>
-  const puEl = <NumField value={x.pu} onChange={n => onPatch({ pu: n ?? 0 })} suffix={x.k === "mo" ? "€/h" : "€"} ariaLabel={x.k === "mo" ? "Taux horaire HT" : "Prix unitaire HT"} onEnter={onEnter} inputClass={!desk ? "!h-11 !border-0 !bg-white/[.06] !text-[16px]" : ""} />
-  const tvaEl = <select aria-label="TVA" value={x.tv} onChange={e => onPatch({ tv: Number(e.target.value) })} className={field + " sel !pl-3 text-left" + (desk ? "" : " !h-10 !border-0 !bg-white/[.06] !text-[16px]")}>{TVA_RATES.map(r => <option key={r} value={r}>{fmtN(r)} %</option>)}</select>
-  const label = <div className="min-w-0 flex-1">
-    <input data-f="l" value={x.l} maxLength={280} placeholder={x.k === "mo" ? "Ex. Pose et raccordement" : x.k === "fft" ? "Ex. Mise en service" : "Ex. Mitigeur thermostatique"} onChange={e => onPatch({ l: e.target.value })} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); onEnter() } }} className={`h-10 w-full min-w-0 rounded-[10px] bg-transparent px-1.5 ${desk ? "text-[14.5px]" : "text-[16px]"} font-medium text-white outline-none transition-colors placeholder:font-normal placeholder:text-white/28 hover:bg-white/[.03] focus:bg-white/[.05]`} />
-    {desc && <textarea value={x.d} maxLength={1000} rows={Math.min(6, Math.max(1, x.d.split("\n").reduce((a, l) => a + Math.max(1, Math.ceil(l.length / (desk ? 64 : 38))), 0)))} style={{ fieldSizing: "content" } as any} placeholder="Description (imprimée sous la ligne)" onChange={e => onPatch({ d: e.target.value })} onBlur={() => { if (!x.d.trim()) setDesc(false) }} autoFocus={!x.d} className={`mt-0.5 block w-full resize-none rounded-[10px] bg-transparent px-1.5 py-1 ${desk ? "text-[13px] leading-5" : "text-[16px] leading-[22px]"} text-white/60 outline-none placeholder:text-white/25 hover:bg-white/[.03] focus:bg-white/[.05]`} />}
-    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1.5 pt-0.5 text-[11.5px] text-white/35 [&>span]:whitespace-nowrap"><span className="flex items-center gap-1.5"><I size={11} strokeWidth={1.8} />{KIND_SHORT[x.k]}</span>{x.k === "mo" && <span>· {fmtN(x.q)} h × {fmtN(x.pu)} €/h</span>}{x.pid && <span>· bibliothèque</span>}{x.ca != null && x.pu > 0 && <span>· marge {fmtE(r2((x.pu - x.ca) * x.q))}</span>}</div>
-  </div>
+  // update82 · carte iOS complète (description, coût, unité, qté, remise, taxe, total en direct)
+  const form = <ServiceLineCard x={x} onPatch={p => onPatch(p)} defaultTv={x.tv > 0 ? x.tv : (CO.tvaNA ? 0 : 20)} tvaNA={CO.tvaNA} idPrefix={x.id} />
 
-  if (desk) return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className={`grid items-start gap-2 rounded-[16px] border px-3 py-2 transition-colors ${ring}`} style={{ gridTemplateColumns: COLS(CO.tvaNA) }}>
-    {handle}{label}<div>{qtyEl}</div><div>{unitEl}</div><div>{puEl}</div>{!CO.tvaNA && <div>{tvaEl}</div>}
-    <div className="flex min-h-10 items-center justify-end">{totEl(false)}</div>
-    <div className="flex h-10 items-center justify-end">{menuEl}</div>
-    {remEl && <div className="col-span-full pl-7">{remEl}</div>}
+  if (desk) return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className="relative">
+    <div className={`flex items-start gap-1 rounded-[18px] ${focused ? "ring-1 ring-white/15" : ""}`}>
+      {handle}<div className="min-w-0 flex-1">{form}</div>{menuEl}
+    </div>
   </Reorder.Item>
 
   return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className="relative">
@@ -404,18 +413,8 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
     </motion.div>
     <motion.div drag="x" dragDirectionLock dragListener={false} dragControls={xc} onPointerDown={e => { if (!(e.target as HTMLElement).closest("[data-nodrag]")) xc.start(e) }} dragConstraints={{ left: -SWIPE, right: 0 }} dragElastic={{ left: .12, right: 0 }} dragMomentum={false} style={{ x: mx, touchAction: "pan-y" }}
       onDragEnd={(_, i) => snap(i.offset.x < -44 || i.velocity.x < -350 ? true : false)} onClickCapture={e => { if (swiped) { e.stopPropagation(); e.preventDefault(); snap(false) } }}
-      className={`relative rounded-[18px] p-3 transition-[background-color,box-shadow] ${ring}`}>
-      <div className="flex items-start gap-1">{handle}{label}{menuEl}</div>
-      <div className="mt-2.5 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-        <div><div className="mb-1 px-1 text-[12px] text-white/40">{x.k === "mo" ? "Heures" : "Quantité"}</div>{qtyEl}</div>
-        <div><div className="mb-1 px-1 text-[12px] text-white/40">{x.k === "mo" ? "Taux horaire" : x.k === "fft" ? "Prix du forfait" : "Prix unitaire"}</div>{puEl}</div>
-      </div>
-      <div className="mt-2.5 flex items-center gap-2">
-        {x.k === "fo" && <div className="w-[92px]">{unitEl}</div>}
-        {!CO.tvaNA && <div className="w-[92px]">{tvaEl}</div>}
-        {totEl(true)}
-      </div>
-      {remEl}
+      className="relative">
+      <div className="flex items-start gap-1">{handle}<div data-nodrag className="min-w-0 flex-1">{form}</div>{menuEl}</div>
     </motion.div>
   </Reorder.Item>
 }

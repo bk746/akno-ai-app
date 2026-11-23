@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
 import { CO, accentRgb, contactLine, e2, legalLine, legalName, pct, sirenOf, tvaReduiteFacture } from "./devisDoc"
-import { computeFacture, fmtPct, type FLine, type FType } from "../../api/_lib/factureCalc"
+import { computeFacture, fmtPct, lineHT, type FLine, type FType } from "../../api/_lib/factureCalc"
 
 /* update46 · Facture / acompte / avoir conformes (art. 242 nonies A annexe II du CGI, L441-9 C. com.)
    update61 · situations et solde, retenue de garantie, nouvelles mentions de la réforme (SIREN du client,
@@ -75,7 +75,7 @@ export function makeFacturePdf(f: Facture, o: PdfOpts = {}): jsPDF {
   box(M, "FACTURÉ À", left, bh); box(M + bw + 6, "OPÉRATION", right, bh)
   const zero = zeroTva(f)
   autoTable(pdf, { startY: 48 + bh + 5, margin: { left: M, right: M, bottom: 22 }, head: [["Désignation", "Qté", "Unité", "PU HT", "TVA", "Total HT"]],
-    body: (f.lignes || []).map(x => [x.l, String(x.q).replace(".", ","), x.u || "u", e2(Number(x.pu)), zero ? "—" : pct(Number(x.tv ?? 20)), e2(Number(x.q) * Number(x.pu))]),
+    body: (f.lignes || []).map(x => [x.l, String(x.q).replace(".", ","), x.u || "u", e2(Number(x.pu)), zero ? "—" : pct(Number(x.tv ?? 20)), e2(lineHT(x))]),
     styles: { font: FONT, fontSize: 8.5, textColor: INK, cellPadding: { top: 2.6, bottom: 2.6, left: 2.5, right: 2.5 }, lineColor: [232, 232, 236], lineWidth: { bottom: .2 } as never },
     headStyles: { font: FONT, fillColor: [246, 246, 248], textColor: MUT, fontStyle: "bold", fontSize: 7.5 },
     columnStyles: { 0: { cellWidth: "auto" }, 1: { halign: "right", cellWidth: 13 }, 2: { halign: "center", cellWidth: 14 }, 3: { halign: "right", cellWidth: 25 }, 4: { halign: "right", cellWidth: 15 }, 5: { halign: "right", cellWidth: 27 } } })

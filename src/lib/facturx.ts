@@ -3,7 +3,7 @@
    - PDF/A-3 : polices incorporées, profil de couleur sRGB, métadonnées XMP Factur-X, XML joint (AFRelationship = Data)
    Formats « socle » de la réforme : Factur-X, UBL, CII. La transmission passe par une plateforme agréée (partenaire, à brancher). */
 import { AFRelationship, PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, decodePDFRawStream } from "pdf-lib"
-import { computeFacture, unitCode, type FLine } from "../../api/_lib/factureCalc"
+import { computeFacture, lineHT, unitCode, type FLine } from "../../api/_lib/factureCalc"
 
 export type CiiParty = { name: string; siren?: string; tva?: string; addr?: string; cpVille?: string; email?: string }
 export type CiiInput = {
@@ -46,14 +46,14 @@ export function buildCII(x: CiiInput): string {
   const sellerSiren = digits(x.seller.siren).slice(0, 9), buyerSiren = digits(x.buyer.siren).slice(0, 9)
   const notes: [string, string][] = [["PMT", x.notes.pmt], ["PMD", x.notes.pmd], ["AAB", x.notes.aab], ...(x.notes.other || []).map(s => ["TXD", s] as [string, string])]
   const lines = x.lines.map((l, i) => {
-    const neg = Number(l.pu) < 0, q = neg ? -Number(l.q) : Number(l.q), pu = Math.abs(Number(l.pu)), r = zero ? 0 : Number(l.tv ?? 20), c = cat(r)
+    const net = lineHT(l), neg = net < 0 || Number(l.pu) < 0, q = neg ? -Number(l.q) : Number(l.q), pu = q ? Math.abs(net / q) : Math.abs(Number(l.pu)), r = zero ? 0 : Number(l.tv ?? 20), c = cat(r)
     const [name, ...desc] = String(l.l || "").split("\n")
     return `<ram:IncludedSupplyChainTradeLineItem><ram:AssociatedDocumentLineDocument><ram:LineID>${i + 1}</ram:LineID></ram:AssociatedDocumentLineDocument>`
       + `<ram:SpecifiedTradeProduct><ram:Name>${esc(name.slice(0, 250) || "Prestation")}</ram:Name>${desc.join(" ").trim() ? `<ram:Description>${esc(desc.join(" ").trim().slice(0, 1000))}</ram:Description>` : ""}</ram:SpecifiedTradeProduct>`
       + `<ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice><ram:ChargeAmount>${amt(pu)}</ram:ChargeAmount></ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>`
       + `<ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode="${unitCode(l.u)}">${qtyS(q)}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>`
       + `<ram:SpecifiedLineTradeSettlement><ram:ApplicableTradeTax><ram:TypeCode>VAT</ram:TypeCode><ram:CategoryCode>${c}</ram:CategoryCode><ram:RateApplicablePercent>${r}</ram:RateApplicablePercent></ram:ApplicableTradeTax>`
-      + `<ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>${amt(Math.round(Number(l.q) * Number(l.pu) * 100) / 100)}</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement></ram:IncludedSupplyChainTradeLineItem>`
+      + `<ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>${amt(net)}</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement></ram:IncludedSupplyChainTradeLineItem>`
   }).join("")
   let dueCode = false // CII-SR-462 : un seul DueDateTypeCode (exigibilité) par facture
   const rates = (t.rates.length ? t.rates : [{ r: 0, base: 0, tva: 0 }]).map(r => {

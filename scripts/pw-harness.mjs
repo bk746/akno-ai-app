@@ -22,10 +22,16 @@ export function harness({ cwd = process.cwd(), port = 5199 } = {}) {
   const BASE = `http://localhost:${port}`
   const envTxt = (() => { try { return readFileSync(join(cwd, ".env.local"), "utf8") } catch { return "" } })()
   const SB_URL = (envTxt.match(/^VITE_SUPABASE_URL=(.*)$/m)?.[1] || "https://example.supabase.co").trim().replace(/^"|"$/g, "")
+  const SB_KEY = (envTxt.match(/^VITE_SUPABASE_ANON_KEY=(.*)$/m)?.[1] || "playwright-anon-key").trim().replace(/^"|"$/g, "")
   const REF = new URL(SB_URL).hostname.split(".")[0]
   let vite
   async function start() {
-    vite = spawn(process.execPath, [join(cwd, "node_modules/vite/bin/vite.js"), "--port", String(port), "--strictPort"], { cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, BROWSER: "none" } })
+    const viteEnv = { ...process.env, BROWSER: "none" }
+    if (!/^VITE_SUPABASE_URL=/m.test(envTxt)) {
+      viteEnv.VITE_SUPABASE_URL = SB_URL
+      viteEnv.VITE_SUPABASE_ANON_KEY = SB_KEY
+    }
+    vite = spawn(process.execPath, [join(cwd, "node_modules/vite/bin/vite.js"), "--port", String(port), "--strictPort"], { cwd, stdio: ["ignore", "pipe", "pipe"], env: viteEnv })
     vite.stderr.on("data", d => { if (/error/i.test(String(d))) console.log("  [vite]", String(d).trim().slice(0, 200)) })
     await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error("vite timeout")), 60000); vite.stdout.on("data", d => { if (/ready|Local:/i.test(String(d))) { clearTimeout(t); res() } }) })
   }

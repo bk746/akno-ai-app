@@ -10,7 +10,7 @@ import { CO, e2, missingLegal } from "../../lib/devisDoc"
 import { NATURE, TYPE_LABEL, downloadFacture, downloadFactureXml, factureFile, factureTotals, type FLine, type Facture } from "../../lib/facturePdf"
 import { fmtPct } from "../../../api/_lib/factureCalc"
 import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Reveal, ival, type Contact } from "../form/grouped"
-import { NumField, Stepper } from "../devis/fields"
+import { ServiceLineCard } from "../devis/fields"
 import { LinesCard, NextCard } from "../devis/Chaine"
 import { looksPhone, payLink, sendFactureSms } from "../../lib/chaine"
 import { webOrigin } from "../../lib/native"
@@ -30,6 +30,22 @@ const label = (f: Facture) => f.type === "situation" && f.situation_numero ? `Si
 
 export async function createFactureFromDevis(devisId: string, type: "facture" | "acompte" | "situation" | "solde" = "facture", pourcentage?: number) {
   return api("/api/devis", { action: "facture_from_devis", devis_id: devisId, type, ...(type === "situation" ? { avancement: pourcentage } : { pourcentage }) })
+}
+
+/** update82 · brouillon de facture à partir d'un devis non encore accepté (client + lignes). Pas de migration. */
+export async function createFactureDraft(input: { client_nom: string; client_email?: string; client_telephone?: string; client_adresse?: string; objet?: string; lignes: FLine[] }) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false as const, error: "Non authentifié." }
+  const lignes = (input.lignes || []).filter(x => String(x.l || "").trim() && Number(x.q) > 0)
+  const { data, error } = await supabase.from("factures").insert({
+    artisan_id: user.id, type: "facture", statut: "brouillon",
+    client_nom: input.client_nom, client_email: input.client_email || null, client_telephone: input.client_telephone || null,
+    client_adresse: input.client_adresse || null, objet: input.objet || null, lignes,
+    delai_paiement_jours: Number(CO.delai) || 30, ...(CO.tvaDebits ? { tva_sur_debits: true } : {}),
+  }).select("id").maybeSingle()
+  if (error || !data) return { ok: false as const, error: "Création de la facture impossible." }
+  void refreshFactures()
+  return { ok: true as const, facture_id: data.id as string }
 }
 
 export default function FacturesSheet({ close, openId, startNew, clients = [] }: { close: () => void; openId?: string; startNew?: boolean; clients?: Contact[] }) {
@@ -132,7 +148,7 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
   const setLine = (i: number, p: Partial<FLine>) => set({ lignes: d.lignes.map((x, j) => j === i ? { ...x, ...p } : x) })
   const t = factureTotals(d)
   const saveDraft = async () => {
-    const lignes = d.lignes.filter(x => x.l.trim() && Number(x.q) > 0).map(x => ({ l: x.l.trim(), q: Number(x.q), u: x.u || "u", pu: Number(x.pu) || 0, tv: Number(x.tv ?? 20) }))
+    const lignes = d.lignes.filter(x => x.l.trim() && Number(x.q) > 0).map(x => ({ l: x.l.trim(), q: Number(x.q), u: x.u || "u", pu: Number(x.pu) || 0, tv: Number(x.tv ?? 20), ...(x.rl && Number(x.rl.v) > 0 ? { rl: x.rl } : {}) }))
     const tt = factureTotals({ ...d, lignes })
     const ext = Number(d.retenue_garantie_pct) > 0 || Number(f.retenue_garantie_pct) > 0 ? { retenue_garantie_pct: Math.min(5, Math.max(0, Number(d.retenue_garantie_pct) || 0)) } : {}
     const { error } = await supabase.from("factures").update({ client_nom: d.client_nom, client_email: d.client_email || null, client_telephone: d.client_telephone || null, client_adresse: d.client_adresse || null, adresse_chantier: d.adresse_chantier || null, client_pro: !!d.client_pro, client_siren: d.client_siren?.replace(/\s/g, "") || null, client_tva: d.client_tva || null, objet: d.objet || null, autoliquidation: !!d.autoliquidation, tva_sur_debits: !!d.tva_sur_debits, nature: d.nature || "services", date_execution: d.date_execution || null, lignes, total_ht: tt.ht, total_tva: tt.tva, total_ttc: tt.ttc, ...ext }).eq("id", f.id)
@@ -255,19 +271,11 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
       {ro ? <section><div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations</div><LinesCard lines={d.lignes.map(x => ({ ...x, tv: CO.tvaNA || d.autoliquidation ? 0 : x.tv }))} tvaNA={CO.tvaNA || !!d.autoliquidation} noTotals /></section> : <section>
         <div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations{d.lignes.length > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {d.lignes.length} ligne{d.lignes.length > 1 ? "s" : ""}</span>}</div>
         <div className="space-y-2.5">
-          {d.lignes.map((x, i) => <div key={i} className="ig-card rounded-[18px] bg-[#141416] p-3">
-            <div className="flex items-start gap-1"><textarea rows={1} className="min-h-10 min-w-0 flex-1 resize-none break-words rounded-[10px] bg-transparent px-1.5 py-2 text-[16px] font-medium leading-snug text-white outline-none caret-[#2F6BFF] [field-sizing:content] placeholder:font-normal placeholder:text-white/28 focus:bg-white/[.05] disabled:text-white/80" aria-label="Désignation" placeholder="Désignation" value={x.l} disabled={ro} onChange={e => setLine(i, { l: e.target.value })} />{!ro && <button type="button" aria-label="Supprimer la ligne" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/35 transition-colors hover:text-[#FF9B96] active:bg-white/[.06]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={17} /></button>}</div>
-            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-end gap-2">
-              <div><div className="mb-1 px-1 text-[12px] text-white/40">Quantité</div>{ro ? <div className="flex h-11 items-center px-1 text-[16px] tabular-nums text-white/80">{String(x.q).replace(".", ",")}</div> : <Stepper big soft step={1} value={Number(x.q) || 0} onChange={q => setLine(i, { q })} ariaLabel="Quantité" />}</div>
-              <div><div className="mb-1 px-1 text-[12px] text-white/40">Prix unitaire HT</div>{ro ? <div className="flex h-11 items-center justify-end px-1 text-[16px] tabular-nums text-white/80">{e2(Number(x.pu) || 0)}</div> : <NumField value={Number(x.pu) || 0} onChange={n => setLine(i, { pu: n ?? 0 })} suffix="€" ariaLabel="Prix unitaire HT" inputClass="!h-11 !border-0 !bg-white/[.06] !text-[16px]" />}</div>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <input className="h-10 w-[84px] rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none disabled:text-white/60" aria-label="Unité" value={x.u || "u"} disabled={ro} onChange={e => setLine(i, { u: e.target.value })} />
-              <select className="h-10 w-[84px] appearance-none rounded-[12px] bg-white/[.06] px-2 text-center text-[16px] text-white outline-none [color-scheme:dark] disabled:text-white/60" aria-label="TVA" value={x.tv ?? 20} disabled={ro || CO.tvaNA || !!d.autoliquidation} onChange={e => setLine(i, { tv: Number(e.target.value) })}>{[20, 10, 5.5, 0].map(r => <option key={r} value={r}>{String(r).replace(".", ",")} %</option>)}</select>
-              <div className="ml-auto min-w-0 text-right"><div className="text-[11.5px] text-white/35">Total HT</div><div className="text-[17px] font-semibold tabular-nums">{e2(Math.round((Number(x.q) || 0) * (Number(x.pu) || 0) * 100) / 100)}</div></div>
-            </div>
+          {d.lignes.map((x, i) => <div key={i} className="relative">
+            <ServiceLineCard x={x} ro={ro} defaultTv={Number(x.tv) > 0 ? Number(x.tv) : 20} tvaNA={CO.tvaNA || !!d.autoliquidation} idPrefix={`fa-${i}`} onPatch={p => setLine(i, p)} />
+            {!ro && <button type="button" aria-label="Supprimer la ligne" className="absolute right-1 top-1 flex h-9 w-9 items-center justify-center rounded-full text-white/35 hover:text-[#FF9B96]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={16} /></button>}
           </div>)}
-          {!ro && <button type="button" className="ig-card flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[#141416] text-[15.5px] font-medium text-[#7EA6FF] transition-colors active:bg-white/[.06]" onClick={() => set({ lignes: [...d.lignes, { l: "", q: 1, u: "u", pu: 0, tv: 10 }] })}><Plus size={17} strokeWidth={2.2} />Ajouter une ligne</button>}
+          {!ro && <button type="button" className="ig-card flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[#141416] text-[15.5px] font-medium text-[#7EA6FF] transition-colors active:bg-white/[.06]" onClick={() => set({ lignes: [...d.lignes, { l: "", q: 1, u: "", pu: 0, tv: CO.tvaNA || d.autoliquidation ? 0 : 20 }] })}><Plus size={17} strokeWidth={2.2} />Ajouter une ligne</button>}
         </div>
       </section>}
       {(!CO.tvaNA || (f.type !== "avoir" && f.type !== "acompte")) && <IGroup title="Conditions" id="fa-g-cond">

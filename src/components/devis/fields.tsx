@@ -2,18 +2,20 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Minus, Plus } from "lucide-react"
 import { fmtN, parseN } from "../../lib/devisCalc"
+import { IToggleRow, ival } from "../form/grouped"
+import { fmtE, r2, type LineDisc } from "../../lib/devisCalc"
 
 export const TEAL = "#2F6BFF" // accent Devis (bleu, update54)
 export const TEAL_T = "#7EA6FF" // bleu Devis lisible sur fond noir (texte, focus)
 export const field = "h-10 w-full rounded-[12px] border border-white/[.08] bg-white/[.04] px-3 text-[14px] text-white outline-none transition-colors [color-scheme:dark] placeholder:text-white/30 hover:border-white/[.14] focus:border-[#3FD0C9]/70 focus:bg-white/[.06]"
 
 /** Nombre au format français : « 3,5 », « 1 250 ». Garde la saisie brute pendant la frappe. */
-export function NumField({ value, onChange, suffix, min = 0, max, ariaLabel, className = "", inputClass = "", placeholder, decimals = 2, autoFocus, onEnter, id }: { value: number | null; onChange: (n: number | null) => void; suffix?: string; min?: number; max?: number; ariaLabel: string; className?: string; inputClass?: string; placeholder?: string; decimals?: number; autoFocus?: boolean; onEnter?: () => void; id?: string }) {
+export function NumField({ value, onChange, suffix, min = 0, max, ariaLabel, className = "", inputClass = "", placeholder, decimals = 2, autoFocus, onEnter, id, disabled }: { value: number | null; onChange: (n: number | null) => void; suffix?: string; min?: number; max?: number; ariaLabel: string; className?: string; inputClass?: string; placeholder?: string; decimals?: number; autoFocus?: boolean; onEnter?: () => void; id?: string; disabled?: boolean }) {
   const show = (v: number | null) => v == null || !Number.isFinite(v) ? "" : decimals === 2 && Math.abs(v % 1) > 0 ? v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[\u202f\u00a0]/g, " ") : fmtN(v)
   const [raw, setRaw] = useState(show(value)), [focus, setFocus] = useState(false)
   useEffect(() => { if (!focus) setRaw(show(value)) }, [value, focus])
   return <div className={`relative ${className}`}>
-    <input id={id} autoFocus={autoFocus} inputMode="decimal" aria-label={ariaLabel} placeholder={placeholder} value={raw}
+    <input id={id} autoFocus={autoFocus} disabled={disabled} inputMode="decimal" aria-label={ariaLabel} placeholder={placeholder} value={raw}
       onFocus={e => { setFocus(true); requestAnimationFrame(() => e.target.select()) }}
       onBlur={() => { setFocus(false); setRaw(show(value)) }}
       onKeyDown={e => { if (e.key === "Enter" && onEnter) { e.preventDefault(); onEnter() } }}
@@ -58,3 +60,68 @@ export const MenuSep = () => <div className="my-1 h-px bg-white/[.07]" />
 
 export const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 export const Kbd = ({ children }: { children: ReactNode }) => <kbd className="inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-[6px] border border-white/[.1] bg-white/[.05] px-1.5 font-sans text-[11px] text-white/55">{children}</kbd>
+
+/* update82 · Formulaire iOS « Ajouter un service / une ligne » (carte groupée, total en direct). */
+export type ServiceVal = { l: string; d?: string; q: number; u?: string; pu: number; tv?: number; rl?: LineDisc }
+
+export function lineAmount(x: { q: number; pu: number; rl?: LineDisc }) {
+  const g = r2((Number(x.q) || 0) * (Number(x.pu) || 0))
+  const r = x.rl
+  if (!r || !(r.v > 0) || g <= 0) return g
+  const disc = r.t === "eur" ? r2(Math.min(r.v, g)) : r2(g * Math.min(100, r.v) / 100)
+  return r2(g - disc)
+}
+
+const slabel = "w-[138px] shrink-0 text-[15px] text-white/50"
+const srow = "ig-row flex min-h-12 items-center gap-3 pl-4"
+
+export function ServiceLineCard({ x, onPatch, defaultTv = 20, tvaNA, ro, idPrefix }: {
+  x: ServiceVal; onPatch: (p: Partial<ServiceVal>) => void; defaultTv?: number; tvaNA?: boolean; ro?: boolean; idPrefix: string
+}) {
+  const remOn = !!x.rl
+  const taxed = !tvaNA && (Number(x.tv) || 0) > 0
+  const total = lineAmount(x)
+  const pid = (s: string) => `${idPrefix}-${s}`
+  return (
+    <div data-line-form className="ig overflow-hidden rounded-[18px] bg-[#141416]">
+      <div className={srow}>
+        <label htmlFor={pid("l")} className={slabel}>Description</label>
+        <input id={pid("l")} data-f="l" data-line-desc disabled={ro} value={x.l} maxLength={280} placeholder="Désignation" onChange={e => onPatch({ l: e.target.value })} className={ival} />
+      </div>
+      <div className={srow + " pr-4"}>
+        <label htmlFor={pid("pu")} className={slabel}>Coût unitaire</label>
+        <NumField id={pid("pu")} value={x.pu} onChange={n => onPatch({ pu: n ?? 0 })} suffix="€" ariaLabel="Coût unitaire" disabled={ro} className="ml-auto w-[128px]" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px] disabled:text-white/55" />
+      </div>
+      <div className={srow + " pr-4"}>
+        <label htmlFor={pid("u")} className={slabel}>Unité</label>
+        <input id={pid("u")} data-line-unit disabled={ro} value={x.u || ""} placeholder="heures, jours" onChange={e => onPatch({ u: e.target.value })} className={ival + " text-right"} />
+      </div>
+      <div className={srow + " pr-4"}>
+        <label htmlFor={pid("q")} className={slabel}>Quantité</label>
+        <NumField id={pid("q")} value={x.q} onChange={n => onPatch({ q: n ?? 1 })} ariaLabel="Quantité" disabled={ro} className="ml-auto w-[88px]" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px]" />
+      </div>
+      <div className={srow + " pr-3"}>
+        <label htmlFor={pid("rem-type")} className={slabel}>Remise</label>
+        <select id={pid("rem-type")} data-line-remise-type disabled={ro} aria-label="Remise" value={remOn ? "total" : "none"} onChange={e => onPatch({ rl: e.target.value === "none" ? undefined : { t: x.rl?.t || "pct", v: x.rl?.v || 0 } })} className="h-12 min-w-0 flex-1 appearance-none bg-transparent pr-1 text-right text-[16px] text-white outline-none [color-scheme:dark] disabled:text-white/55">
+          <option value="none">Aucune</option>
+          <option value="total">Remise sur total</option>
+        </select>
+      </div>
+      {remOn && <div className={srow + " pr-4"}>
+        <label htmlFor={pid("rem")} className={slabel}>Montant de la remise</label>
+        <div className="ml-auto flex items-center gap-1">
+          <NumField id={pid("rem")} value={x.rl?.v || null} placeholder="0" max={x.rl?.t === "eur" ? undefined : 100} onChange={n => onPatch({ rl: { t: x.rl?.t || "pct", v: n || 0 } })} ariaLabel="Montant de la remise" disabled={ro} className="w-[72px]" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px]" />
+          <select aria-label="Type de montant de remise" disabled={ro} value={x.rl?.t || "pct"} onChange={e => onPatch({ rl: { t: e.target.value === "eur" ? "eur" : "pct", v: x.rl?.v || 0 } })} className="h-12 bg-transparent text-[15px] text-white/70 outline-none [color-scheme:dark]">
+            <option value="pct">%</option>
+            <option value="eur">€</option>
+          </select>
+        </div>
+      </div>}
+      {!tvaNA && <IToggleRow label="Sujet à taxe" color="#30D158" on={taxed} disabled={ro} onChange={v => onPatch({ tv: v ? defaultTv : 0 })} />}
+      <div className="ig-row flex min-h-12 items-center justify-between pl-4 pr-4">
+        <span className="text-[16px] font-semibold">Total</span>
+        <span data-line-total className="text-[16px] font-semibold tabular-nums">{fmtE(total)}</span>
+      </div>
+    </div>
+  )
+}

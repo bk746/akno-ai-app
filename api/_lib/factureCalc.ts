@@ -3,14 +3,28 @@
    - montant de ligne = arrondi(q × pu, 2) ; total HT = Σ montants de lignes
    - TVA par taux = arrondi(base du taux × taux, 2) ; total TVA = Σ TVA par taux ; TTC = HT + TVA */
 
-export type FLine = { l: string; q: number; u?: string; pu: number; tv?: number }
+export type FLine = { l: string; q: number; u?: string; pu: number; tv?: number; rl?: { t: "pct" | "eur"; v: number } }
 export type FType = "facture" | "acompte" | "situation" | "solde" | "avoir"
 export type Rate = { r: number; base: number; tva: number }
 export type FTotals = { ht: number; rates: Rate[]; tva: number; ttc: number; acompte: number; retenue: number; net: number }
 
 export const r2 = (n: number) => Math.round((Number(n) || 0) * 100 + (n >= 0 ? 1e-9 : -1e-9)) / 100
 export const TVA_OK = [0, 2.1, 5.5, 10, 20]
-export const lineHT = (x: FLine) => r2((Number(x.q) || 0) * (Number(x.pu) || 0))
+const parseRl = (v: unknown): FLine["rl"] | undefined => {
+  if (!v || typeof v !== "object") return
+  const o = v as { t?: unknown; v?: unknown }
+  const n = Number(o.v)
+  if (!(n > 0)) return
+  return { t: o.t === "eur" ? "eur" : "pct", v: n }
+}
+/** Montant HT d'une ligne. `rl` (facultatif, JSON des lignes) : remise % ou €. Sans `rl`, Σ q × pu (y compris remises déjà en lignes pu < 0). */
+export const lineHT = (x: FLine) => {
+  const m = r2((Number(x.q) || 0) * (Number(x.pu) || 0))
+  const r = x.rl
+  if (!r || !(r.v > 0) || m <= 0) return m
+  const disc = r.t === "eur" ? r2(Math.min(r.v, m)) : r2(m * Math.min(100, r.v) / 100)
+  return r2(m - disc)
+}
 
 /** Lignes propres : désignation obligatoire, quantité > 0, remises (pu négatif) autorisées, taux légaux uniquement. */
 export function cleanLines(raw: unknown, max = 200): FLine[] {
@@ -24,7 +38,8 @@ export function cleanLines(raw: unknown, max = 200): FLine[] {
     const d = typeof o.d === "string" ? o.d.trim() : ""
     const q = Number(o.q ?? o.qty ?? o.quantite), pu = Number(o.pu ?? o.prix ?? o.prix_ht), tv = Number(o.tv ?? o.tva ?? o.tva_taux)
     if (!base || !Number.isFinite(q) || q <= 0 || !Number.isFinite(pu)) continue
-    out.push({ l: (d ? `${base}\n${d}` : base).slice(0, 1200), q: Math.round(q * 1000) / 1000, u: String(o.u ?? o.unite ?? "u").trim().slice(0, 12) || "u", pu: r2(pu), tv: TVA_OK.includes(tv) ? tv : 20 })
+    const rl = parseRl(o.rl)
+    out.push({ l: (d ? `${base}\n${d}` : base).slice(0, 1200), q: Math.round(q * 1000) / 1000, u: String(o.u ?? o.unite ?? "u").trim().slice(0, 12) || "u", pu: r2(pu), tv: TVA_OK.includes(tv) ? tv : 20, ...(rl ? { rl } : {}) })
   }
   return out.slice(0, max)
 }
@@ -110,11 +125,15 @@ export function devisToFactureLines(raw: unknown): FLine[] {
     if (!item || typeof item !== "object") continue
     const o = item as Record<string, unknown>
     if (o.k === "sec" || o.k === "meta") continue
+    // update82 · compagnon de remise de ligne (lr:1) déjà porté par `rl` sur la ligne précédente
+    if (o.k === "rem" && o.lr === 1 && out.length && out[out.length - 1].rl) continue
     const base = String(o.l ?? o.designation ?? o.libelle ?? "").trim()
     const d = typeof o.d === "string" ? o.d.trim() : ""
     const q = Number(o.q ?? o.qty ?? o.quantite), pu = Number(o.pu ?? o.prix ?? o.prix_ht), tv = Number(o.tv ?? o.tva ?? o.tva_taux)
     if (!base || !Number.isFinite(q) || q <= 0 || !Number.isFinite(pu) || (pu < 0 && o.k !== "rem")) continue
-    out.push({ l: (d ? `${base}\n${d}` : base).slice(0, 1200), q: r2(q), u: String(o.u ?? o.unite ?? "u").trim().slice(0, 12) || "u", pu: r2(pu), tv: tv === 5.5 || tv === 10 || tv === 20 || tv === 0 ? tv : 20 })
+    const rl = o.k === "rem" ? undefined : parseRl(o.rl)
+    out.push({ l: (d ? `${base}\n${d}` : base).slice(0, 1200), q: r2(q), u: String(o.u ?? o.unite ?? "u").trim().slice(0, 12) || "u", pu: r2(pu), tv: tv === 5.5 || tv === 10 || tv === 20 || tv === 0 ? tv : 20, ...(rl ? { rl } : {}) })
   }
+
   return out.slice(0, 200)
 }

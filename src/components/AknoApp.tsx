@@ -81,14 +81,6 @@ import { devisDeleteReason, factureSwipeAction } from "../lib/docDelete"
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
 const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel", devis: "dev", parametres: "set", factures: "fac", chantiers: "ch", equipe: "eq", clients: "cl" }
-const APP_TAB_PATHS = new Set(Object.keys(SLUG))
-const SESSION_KEY = "akno-app-session"
-/** Au cold start, la WebView rouvre la dernière URL : on ramène l'app connectée sur Réception (liens publics inchangés). */
-const goHomeIfStaleTab = (pathname: string, search: string) => {
-  const seg = (pathname || "").replace(/^\/+/, "").split("/")[0] || ""
-  if (APP_TAB_PATHS.has(seg) && seg !== "reception") return `/reception${search}`
-  return ""
-}
 const slugOf = (p: P) => p === "set" ? "parametres" : p === "fac" ? "factures" : p === "ch" ? "chantiers" : p === "eq" ? "equipe" : p === "cl" ? "clients" : A[p].slug
 /** update62 · titre lisible d'une page (Factures et Chantiers ne sont pas des agents) */
 const pageTitle = (p: P) => p === "set" ? "Paramètres" : p === "fac" ? "Factures" : p === "ch" ? "Chantiers" : p === "eq" ? "Équipe" : p === "cl" ? "Clients" : A[p].tab
@@ -597,9 +589,10 @@ function askFactureSwipe(f: FactureLite, modal: (m: Modal) => void, toast: (m: s
   })
 }
 
-function useDevisView(active: boolean) {
-  const { s, set, modal, q, toast } = useC(), c = A.dev.c
-  const ds = [...s.devis].filter(d => match(q, d.client, d.objet, String(d.num))).sort((a, b) => b.num - a.num)
+function useDevisView(active: boolean, onAll?: () => void) {
+  const { s, set, modal, q, toast, go } = useC(), c = A.dev.c
+  const devisDate = (d: Devis) => d.created || Date.parse(d.at || d.sentAt || d.signedAt || "") || 0
+  const ds = [...s.devis].filter(d => match(q, d.client, d.objet, String(d.num))).sort((a, b) => devisDate(b) - devisDate(a) || b.num - a.num)
   const val = s.devis.filter(d => d.status === "val"), sent = s.devis.filter(d => d.status !== "brouillon")
   const now = new Date(), mk = (k: number) => { const d = new Date(now.getFullYear(), now.getMonth() - 5 + k, 1); return [d.getFullYear(), d.getMonth()] }
   const inM = (d: Devis, k: number) => { if (!d.at) return k === 5; const a = new Date(d.at), [y, mo] = mk(k); return a.getFullYear() === y && a.getMonth() === mo }
@@ -639,15 +632,22 @@ function useDevisView(active: boolean) {
   const ReplyRow = (d: Devis, i: number) => <SwipeRow key={d.id} id={"rep-" + d.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(d, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={d.reply || `N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={d.status === "val" ? GREEN : d.status === "ref" ? RED : c}>{replyL(d)}</Chip>} /></SwipeRow>
   const avalS = aval.length > 0 && <Section t={<span className="flex items-center gap-2">À valider<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{aval.length}</span></span>} aside="Devis générés par l'IA"><List>{aval.map(VRow)}</List></Section>
   const replyS = replies.length > 0 && <Section t={<span className="flex items-center gap-2">Réponses clients<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{replies.length}</span></span>} aside="Acceptation, refus ou message"><List>{replies.map(ReplyRow)}</List></Section>
-  return { fig: <Num n={cur} u="€" money />, sub: `validés ce mois · ${val.length} devis sur ${sent.length} envoyés`, actions: [
-    { I: Plus, l: "Nouveau", on: () => modal({ kind: "devis" }) }, { I: Send, l: "Envoyer", on: send, dis: !pend || pend.status !== "brouillon" },
-    { I: Repeat2, l: "Relancer", on: () => modal({ kind: "rel", data: { name: (s.devis.find(d => d.status === "env") || pend)?.client || "" } }) }, { I: ArrowUp, l: "Exporter", on: exp }] as QAi[], body: <>
-    {avalS && (desk ? <div className="col-span-2">{avalS}</div> : avalS)}
-    {replyS && (desk ? <div className="col-span-2">{replyS}</div> : replyS)}
-    <Col><Section t="À suivre" aside={todo.length ? `${todo.length} devis` : undefined}><List I={Check} empty="Aucun devis en attente.">{todo.map(FRow)}</List></Section>
-      <PrestaCard />
-      <Section t="Montant validé" aside="6 derniers mois"><Chart c={c} label="Total" value={eur(tot)} v={m} l={mL} sel={5} /></Section></Col>
-    <Col><Section t="Tous les devis" more={() => modal({ kind: "devisList" })}><List>{ds.map(DRow)}</List></Section></Col>
+  const recent = ds.slice(0, 5)
+  return { fig: <Num n={cur} u="€" money />, sub: `validés ce mois · ${val.length} devis sur ${sent.length} envoyés`,
+    allTitle: "Tous les devis", all: <List empty="Aucun devis pour l'instant.">{ds.map(DRow)}</List>,
+    actions: [
+      { I: Plus, l: "Nouveau", on: () => modal({ kind: "devis" }) },
+      { I: Package, l: "Prestations", on: () => modal({ kind: "prestations" }) },
+      { I: Repeat2, l: "Relance", on: () => go("rel") },
+    ] as QAi[], body: <>
+    <Col><Section t="Devis récents" aside={ds.length ? `${Math.min(5, ds.length)}` : undefined}><List I={Check} empty="Aucun devis pour l'instant.">{recent.map(DRow)}</List></Section>
+      <button type="button" data-all-devis onClick={() => onAll?.()} className="mt-3 block w-full text-left">
+        <Card className="flex items-center gap-4 p-4 transition-colors hover:bg-white/[.02]">
+          <span className="min-w-0 flex-1"><span className="block text-[16px] font-semibold">Tous les devis</span><span className="block text-[13px] text-white/45">{ds.length ? `${ds.length} devis, les plus récents en premier` : "Ouvrir la liste complète"}</span></span>
+          <Chev />
+        </Card>
+      </button>
+    </Col>
   </> }
 }
 
@@ -667,31 +667,58 @@ const F_LABEL: Record<string, string> = { facture: "Facture", acompte: "Facture 
 const F_ST: Record<string, [string, string]> = { brouillon: ["Brouillon", GREY], emise: ["Émise", AMBER], envoyee: ["Envoyée", AMBER], payee: ["Payée", GREEN], annulee: ["Annulée", GREY] }
 const fLabel = (f: FactureLite) => f.type === "situation" && f.situation_numero ? `Situation n° ${f.situation_numero}` : F_LABEL[f.type] || "Facture"
 /* update63 · contenu du mode Factures de la page unifiée */
-function useFacturesView() {
-  const { modal, setChat, toast, s: { devis: sDev } } = useC(), st = useFacturesLite()
+function useFacturesView(onAll?: () => void) {
+  const { modal, toast, go } = useC(), st = useFacturesLite()
   useEffect(() => { void refreshFactures() }, [])
   const rows = st.rows || [], unpaid = rows.filter(isUnpaid), late = unpaid.filter(isLate).length
-  const total = unpaid.reduce((a, f) => a + dueOf(f), 0), others = rows.filter(f => !isUnpaid(f)).slice(0, 8)
+  const total = unpaid.reduce((a, f) => a + dueOf(f), 0)
+  const facDate = (f: FactureLite) => Date.parse(f.date_emission || f.created_at || "") || 0
+  const sorted = [...rows].sort((a, b) => facDate(b) - facDate(a))
+  const recent = sorted.slice(0, 5)
   const FRow = (f: FactureLite, i: number) => { const [l, c] = isLate(f) ? ["En retard", RED] : F_ST[f.statut] || F_ST.brouillon
     const act = factureSwipeAction(f)
       return <SwipeRow key={f.id} id={f.id} first={i === 0} label={act === "avoir" ? "Avoir" : "Supprimer"} tone={act === "avoir" ? "accent" : "danger"} onAction={() => askFactureSwipe(f, modal, toast)}><Row className="!rounded-none" first={i === 0} label={`Ouvrir ${f.numero || "brouillon"}`} onClick={() => modal({ kind: "factures", data: { id: f.id } })} lead={<Ic I={Receipt} />} t={`${fLabel(f)} ${f.numero || "(brouillon)"}`} s={f.client_nom || "Client à renseigner"} r={e2(f.type === "avoir" ? -dueOf(f) : dueOf(f))} rs={<Chip c={c}>{l}</Chip>} /></SwipeRow> }
   return { fig: <Num n={Math.round(total)} u="€" money />,
-    sub: st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}${late ? ` · ${late} en retard` : ""}`, actions: [
-      { I: Plus, l: "Nouvelle", on: () => modal({ kind: "factures", data: { create: true } }) }, { I: Receipt, l: "Toutes", on: () => modal({ kind: "factures" }) },
-      { I: Sparkles, l: "Assistant", on: () => setChat(true) }] as QAi[], body: <>
-    <Col><Section t="Suivi" more={() => modal({ kind: "pilotage" })} moreL="Détails et export"><Tiles k={pilotage(sDev.map(d => ({ status: d.status, amount: d.amount, at: d.at, sentAt: d.sentAt })), rows as never, new Date().getFullYear())} /></Section></Col>
-    <Col><Section t="À encaisser" aside={unpaid.length ? e2(total) : undefined}><List I={Check} empty={st.error ? "Factures indisponibles pour le moment." : "Aucune facture en attente de paiement."}>{unpaid.map(FRow)}</List></Section></Col>
-    <Col><Section t="Récentes" more={rows.length ? () => modal({ kind: "factures" }) : undefined}><List empty="Aucune facture pour l'instant.">{others.map(FRow)}</List></Section></Col>
+    sub: st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}${late ? ` · ${late} en retard` : ""}`,
+    allTitle: "Toutes les factures", all: <List empty={st.error ? "Factures indisponibles pour le moment." : "Aucune facture pour l'instant."}>{sorted.map(FRow)}</List>,
+    actions: [
+      { I: Plus, l: "Nouveau", on: () => modal({ kind: "factures", data: { create: true } }) },
+      { I: Package, l: "Prestations", on: () => modal({ kind: "prestations" }) },
+      { I: Repeat2, l: "Relance", on: () => go("rel") },
+    ] as QAi[], body: <>
+    <Col><Section t="Factures récentes" aside={sorted.length ? `${Math.min(5, sorted.length)}` : undefined}><List I={Check} empty={st.error ? "Factures indisponibles pour le moment." : "Aucune facture pour l'instant."}>{recent.map(FRow)}</List></Section>
+      <button type="button" data-all-factures onClick={() => onAll?.()} className="mt-3 block w-full text-left">
+        <Card className="flex items-center gap-4 p-4 transition-colors hover:bg-white/[.02]">
+          <span className="min-w-0 flex-1"><span className="block text-[16px] font-semibold">Toutes les factures</span><span className="block text-[13px] text-white/45">{sorted.length ? `${sorted.length} facture${sorted.length > 1 ? "s" : ""}, les plus récentes en premier` : "Ouvrir la liste complète"}</span></span>
+          <Chev />
+        </Card>
+      </button>
+    </Col>
   </> }
 }
 /* update63 · Page unifiée Devis | Factures : un seul bot bleu, le sélecteur ne change que le contenu dessous */
+function DocAllPage({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
+  return <div data-doc-list className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-12 shrink-0 items-center gap-1 px-2">
+      <button type="button" data-doc-list-back aria-label="Retour" onClick={onBack} className="flex h-10 w-10 items-center justify-center rounded-full text-white/80 hover:bg-white/[.07]"><ChevronLeft size={22} /></button>
+      <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold tracking-[-0.02em]">{title}</h1>
+    </div>
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8">{children}</div>
+  </div>
+}
 function DevFac() {
   // update69 : le mode change localement au tap (pilule et contenu partent ensemble) ; l'adresse suit juste après l'animation
   const { page } = useC(), shownSlot = useContext(SlotActive), own = shownSlot && (page === "dev" || page === "fac")
   const [mode, setMode] = useState<"dev" | "fac">(page === "fac" ? "fac" : "dev")
+  const [list, setList] = useState<"dev" | "fac" | null>(null)
   useEffect(() => { if (own) setMode(page === "fac" ? "fac" : "dev") }, [page, own])
-  const dv = useDevisView(own && mode === "dev"), fv = useFacturesView(), v = mode === "dev" ? dv : fv, o = mode === "dev" ? fv : dv
+  useEffect(() => { setList(null) }, [mode])
+  const dv = useDevisView(own && mode === "dev", () => setList("dev")), fv = useFacturesView(() => setList("fac")), v = mode === "dev" ? dv : fv, o = mode === "dev" ? fv : dv
   useEffect(() => { if (own) rememberDocMode(mode) }, [mode, own])
+  if (list) {
+    const cur = list === "dev" ? dv : fv
+    return <DocAllPage title={cur.allTitle} onBack={() => setList(null)}>{cur.all}</DocAllPage>
+  }
   return <Shell k="dev" fig={v.fig} sub={v.sub} actions={v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alt={{ key: mode === "dev" ? "fac" : "dev", actions: o.actions, children: o.body }}>{v.body}</Shell>
 }
 function DocSwitch({ mode, onPick }: { mode: "dev" | "fac"; onPick?: (m: "dev" | "fac") => void }) {
@@ -1497,19 +1524,6 @@ function AknoApp() {
   // update48 · page d'arrivée : sans l'option Réceptionniste IA, on arrive sur l'Agenda (et non sur /reception).
   const rr = useRights(), landed = useRef(false), role = useAppRole()
   const isEmploye = role?.kind === "employe"
-  const homeBoot = useRef(false)
-  useEffect(() => {
-    if (homeBoot.current) return
-    homeBoot.current = true
-    let fresh = false
-    try {
-      fresh = !sessionStorage.getItem(SESSION_KEY)
-      sessionStorage.setItem(SESSION_KEY, "1")
-    } catch { fresh = true }
-    if (!fresh) return
-    const home = goHomeIfStaleTab(pathname, location.search)
-    if (home) navigate(home, { replace: true })
-  }, [navigate, pathname])
   useEffect(() => {
     if (landed.current || !rr.ready) return
     landed.current = true
@@ -1586,7 +1600,14 @@ function AknoApp() {
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} page={page} desk loading={loading} /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
       : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
-    <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} />}</AnimatePresence>
+    <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} onCreateFacture={async dv => {
+      setEd(null)
+      const { createFactureDraft } = await import("./sheets/FacturesSheet")
+      const { devisToFactureLines } = await import("../../api/_lib/factureCalc")
+      const r = await createFactureDraft({ client_nom: dv.client, client_email: dv.email, client_telephone: dv.phone, client_adresse: dv.addr, objet: dv.objet, lignes: devisToFactureLines(dv.lines || []) })
+      if (!r.ok) { setToastT({ t: r.error || "Création de la facture impossible.", k: Date.now(), err: true }); return }
+      setM({ kind: "factures", data: { id: r.facture_id } })
+    }} />}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />

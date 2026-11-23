@@ -12,6 +12,7 @@ import { initMonitoring } from "./lib/monitoring"
 import { initMobile } from "./lib/mobile"
 import { initNative } from "./lib/native"
 import { applyStatusBar } from "./lib/statusBar"
+import { Capacitor } from "@capacitor/core"
 
 const Legal = lazy(() => import("./components/Legal"))
 const DossierPublic = lazy(() => import("./components/DossierPublic"))
@@ -24,6 +25,13 @@ initNative() // update70 · app iOS / Android (Capacitor)
 void applyStatusBar(location.pathname.startsWith("/payer") || location.pathname.startsWith("/dossier") || location.pathname.startsWith("/reserver") || location.pathname.startsWith("/rejoindre") ? "dark" : "light")
 
 const PAGES = ["reception", "agenda", "relance", "devis", "parametres", "factures", "chantiers", "equipe", "clients"] // update62 : onglets Factures et Chantiers
+
+/** update82 · au démarrage de l'app, toujours arriver sur Réception (pas de restauration de la dernière page). Liens publics et signature inchangés. */
+const PUBLIC_START = /^\/(accept|reserver|rejoindre|dossier|payer|cgv|mentions-legales|confidentialite|dpa|suppression-compte)(\/|$)/
+if (Capacitor.isNativePlatform() && location.pathname !== "/inscription" && location.pathname !== "/reception" && location.pathname !== "/" && !PUBLIC_START.test(location.pathname)) {
+  history.replaceState(null, "", "/reception")
+}
+
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

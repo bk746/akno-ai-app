@@ -6,6 +6,7 @@ import type { ReactNode } from "react"
 import { Check } from "lucide-react"
 import { STEPS } from "../../lib/chaine"
 import { e2 } from "../../lib/devisDoc"
+import { lineHT } from "../../../api/_lib/factureCalc"
 
 export function Frise({ done, current, sub, c }: { done: boolean[]; current: number; sub?: string[]; c: string }) {
   return <ol data-frise aria-label="Avancement" className="mb-4 grid grid-cols-6 gap-0 rounded-[20px] bg-white/[.04] px-1 py-3">
@@ -33,13 +34,13 @@ export function NextCard({ title, text, c, children, tone }: { title: string; te
   </section>
 }
 
-type L = { l: string; d?: string; q: number; pu: number; u?: string; tv?: number; k?: string }
+type L = { l: string; d?: string; q: number; pu: number; u?: string; tv?: number; k?: string; rl?: { t: "pct" | "eur"; v: number } }
 /** Lignes + totaux, lisibles sur téléphone. `tvaNA` : franchise en base (pas de TVA). */
 export function LinesCard({ lines, tv = 20, tvaNA, head, deduit = 0, label = "Total TTC", noTotals }: { lines: L[]; tv?: number; tvaNA?: boolean; head?: ReactNode; deduit?: number; label?: string; noTotals?: boolean }) {
   const items = lines.filter(x => x.k !== "meta")
   const rates = new Map<number, number>()
   let ht = 0
-  for (const x of items) { if (x.k === "sec") continue; const v = Number(x.q) * Number(x.pu); ht += v; const r = Number(x.tv ?? tv); rates.set(r, (rates.get(r) || 0) + v) }
+  for (const x of items) { if (x.k === "sec") continue; const v = lineHT(x); ht += v; const r = Number(x.tv ?? tv); rates.set(r, (rates.get(r) || 0) + v) }
   const tvaBy = [...rates.entries()].filter(([, b]) => b).sort((a, b) => a[0] - b[0]).map(([r, b]) => [r, Math.round(b * r) / 100] as const)
   const tva = tvaNA ? 0 : tvaBy.reduce((a, [, v]) => a + v, 0), ttc = Math.round((ht + tva) * 100) / 100
   const num = (n: number) => String(Math.round(n * 100) / 100).replace(".", ",")
@@ -54,7 +55,7 @@ export function LinesCard({ lines, tv = 20, tvaNA, head, deduit = 0, label = "To
             {x.d && <div className="mt-0.5 whitespace-pre-line break-words text-[13px] leading-snug text-white/50">{x.d}</div>}
             <div className="mt-1 text-[13px] tabular-nums text-white/50">{num(x.q)} {x.u && x.u !== "u" ? x.u : ""} × {e2(Number(x.pu))}{!tvaNA ? ` · TVA ${String(x.tv ?? tv).replace(".", ",")} %` : ""}</div>
           </div>
-          <div className="shrink-0 pt-px text-[15px] font-medium tabular-nums text-white">{e2(Math.round(Number(x.q) * Number(x.pu) * 100) / 100)}</div>
+          <div className="shrink-0 pt-px text-[15px] font-medium tabular-nums text-white">{e2(lineHT(x))}</div>
         </li>)}
     </ul>
     {!noTotals && <div className="space-y-1 border-t border-white/[.08] px-4 py-3.5 text-[14px] tabular-nums">
