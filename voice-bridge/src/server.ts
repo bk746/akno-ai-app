@@ -7,6 +7,7 @@
 import http from "node:http"
 import { WebSocketServer, WebSocket } from "ws"
 import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, companyName, type SlotHint, type VoiceProfile } from "../../src/lib/voice/script"
+import { DEFAULT_VOICE, normalizeConfig } from "../../src/lib/voice/receptionist"
 import { debriefFromTranscript } from "../../src/lib/voice/callDebrief"
 import { CallRecorder } from "./audio"
 import { verifyToken } from "./token"
@@ -126,6 +127,7 @@ function handleCall(tw: WebSocket) {
   let ringT0 = 0
   let firstAudioLogged = false
   let slotsHintText = ""
+  let voiceReverted = false
 
   const latency = (tag: string) => {
     if (!ringT0) return
@@ -248,6 +250,20 @@ function handleCall(tw: WebSocket) {
     toXai({ type: "response.create" })
   }
 
+  const fallbackBuiltinVoice = (detail: unknown) => {
+    if (voiceReverted) return
+    const cur = normalizeConfig(profile.reception).voice
+    if (cur === DEFAULT_VOICE) return
+    const msg = typeof detail === "string" ? detail : JSON.stringify(detail || "").slice(0, 280)
+    if (!/(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i.test(msg)) return
+    voiceReverted = true
+    log("[voice] repli voix intégrée", String(cur).slice(0, 12), "→", DEFAULT_VOICE)
+    profile = { ...profile, reception: { ...normalizeConfig(profile.reception), voice: DEFAULT_VOICE } }
+    if (closed || !xai || xai.readyState !== WebSocket.OPEN) return
+    if (ready) patchSession()
+    else toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
+  }
+
   function onXai(raw: WebSocket.RawData) {
     let ev: Json
     try { ev = JSON.parse(raw.toString()) } catch { return }
@@ -288,7 +304,11 @@ function handleCall(tw: WebSocket) {
     }
     if (type === "response.done" || type === "response.output_audio.done") { greeting = false; return }
     if (type === "response.function_call_arguments.done") { void handleTool(ev); return }
-    if (type === "error") log("[xai] error", JSON.stringify(ev.error || ev).slice(0, 300))
+    if (type === "error") {
+      const snippet = JSON.stringify(ev.error || ev).slice(0, 300)
+      log("[xai] error", snippet)
+      fallbackBuiltinVoice(snippet)
+    }
   }
 
   const patchSession = () => {

@@ -12,6 +12,7 @@ import { sendAptSms, onArriveSmsText, companyOf as companyOfApt, artisanSmsOn } 
 import { deleteAccount } from "./_lib/deleteAccount.js"
 import { connectOnboard, connectRefresh } from "./_lib/chain.js"
 import { bundlePerArtisan, FALLBACK_MSG, provisionArtisanNumber, submitRegulatory, twilioNumbers } from "./_lib/phoneProvision.js"
+import { isVoiceId } from "../src/lib/voice/receptionist.js"
 
 /* update45 · compte artisan : abonnement Stripe, réglages sensibles (clé Cal.com), recherche SIRET,
    acceptation des CGV, état d'usage. Une seule fonction Vercel pour rester sous la limite du plan. */
@@ -287,14 +288,13 @@ async function siretLookup(body: Json): Promise<ApiResult> {
 /* update57 · « Ma réceptionniste » : aperçu d'une voix Grok (API Text to Speech xAI, POST /v1/tts, même liste de voix
    que le temps réel — https://docs.x.ai/developers/model-capabilities/audio/text-to-speech). Réservé à l'option
    Réceptionniste, 40 aperçus / jour / artisan (~0,004 $ l'aperçu : 15 $ / 1 M caractères). Rien n'est stocké. */
-const TTS_VOICES = new Set(["altair", "ara", "atlas", "aurora", "carina", "castor", "celeste", "cosmo", "eve", "helios", "helix", "iris", "kepler", "leo", "liora", "lumen", "luna", "lux", "naksh", "orion", "perseus", "rex", "rigel", "sal", "sirius", "ursa", "zagan", "zenith"])
 async function voicePreview(sb: import("@supabase/supabase-js").SupabaseClient, userId: string, body: Json): Promise<ApiResult> {
   const key = env("XAI_API_KEY")
   if (!key) return { status: 503, body: { error: "La clé XAI_API_KEY n'est pas configurée sur le serveur." } }
   const ent = await loadEntitlements(sb, userId)
   if (!can(ent, "reception")) return { status: 402, body: { error: upgradeError("reception", ent), code: "upgrade" } }
   const voice = String(body.voice || "").toLowerCase()
-  if (!TTS_VOICES.has(voice)) return { status: 400, body: { error: "Voix inconnue." } }
+  if (!isVoiceId(voice)) return { status: 400, body: { error: "Voix inconnue." } }
   const text = String(body.text || "").replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 320)
   if (text.length < 4) return { status: 400, body: { error: "Texte d'aperçu manquant." } }
   const phone = body.quality === "phone"

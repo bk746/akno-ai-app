@@ -1,7 +1,7 @@
 /* update57 · Tests du configurateur « Ma réceptionniste » → prompt et session Grok Voice : npm run test:receptionist
    (aucun appel réseau). */
 import { buildInstructions, buildSessionConfig, mergeProfile, welcomeLine, VOICE_ID } from "../src/lib/voice/script"
-import { DEFAULT_VOICE, VOICES, formatConfigForPrompt, formatHoraires, metierActivite, normalizeConfig, replaceMap, serializeConfig } from "../src/lib/voice/receptionist"
+import { CUSTOM_VOICE_KERYAN, DEFAULT_VOICE, VOICES, formatConfigForPrompt, formatHoraires, isVoiceId, metierActivite, normalizeConfig, replaceMap, serializeConfig } from "../src/lib/voice/receptionist"
 
 let ok = 0, ko = 0
 const T = (name: string, pass: boolean) => { pass ? ok++ : ko++; console.log(`${pass ? "✔" : "✘"} ${name}`) }
@@ -9,9 +9,11 @@ const T = (name: string, pass: boolean) => { pass ? ok++ : ko++; console.log(`${
 const base = { company: "Plomberie Bouzerda", city: "Lyon", email: "contact@bouzerda.fr", metier: "Plombier" }
 
 // 1) Catalogue des voix (doc xAI : 28 voix intégrées)
-T("28 voix, identifiants uniques", VOICES.length === 28 && new Set(VOICES.map(v => v.id)).size === 28)
+T("29 voix, identifiants uniques", VOICES.length === 29 && new Set(VOICES.map(v => v.id)).size === 29)
+T("voix custom Keryan en première", VOICES[0].id === CUSTOM_VOICE_KERYAN && VOICES[0].name === "Ma voix (Keryan)")
+T("voix custom autorisée (TTS + session)", isVoiceId(CUSTOM_VOICE_KERYAN) && normalizeConfig({ voice: CUSTOM_VOICE_KERYAN }).voice === CUSTOM_VOICE_KERYAN)
 T("voix par défaut = ara (féminine)", DEFAULT_VOICE === "ara" && VOICE_ID === "ara" && VOICES.find(v => v.id === "ara")?.gender === "female")
-T("9 voix féminines / 19 masculines (GET /v1/tts/voices)", VOICES.filter(v => v.gender === "female").length === 9 && VOICES.filter(v => v.gender === "male").length === 19)
+T("9 voix féminines / 20 masculines (intégrées + custom)", VOICES.filter(v => v.gender === "female").length === 9 && VOICES.filter(v => v.gender === "male").length === 20)
 
 // 2) Zéro configuration : fonctionne, prompt sans bloc artisan
 const p0 = mergeProfile(base)

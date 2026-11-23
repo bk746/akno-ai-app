@@ -79,7 +79,9 @@ function hasEmergencyPhone(raw) {
 }
 
 // ../src/lib/voice/receptionist.ts
+var CUSTOM_VOICE_KERYAN = "3ixfadarbuwy";
 var VOICES = [
+  { id: CUSTOM_VOICE_KERYAN, name: "Ma voix (Keryan)", gender: "male", tone: "Voix personnalis\xE9e", use: "R\xE9ceptionniste", reco: true },
   { id: "celeste", name: "Celeste", gender: "female", tone: "Empathique, assur\xE9e, rassurante", use: "Accueil, assistance", reco: true },
   { id: "aurora", name: "Aurora", gender: "female", tone: "Sereine, pos\xE9e, rayonnante", use: "Accueil, assistance", reco: true },
   { id: "iris", name: "Iris", gender: "female", tone: "Aimable, enjou\xE9e, d'un charme naturel", use: "Commercial, accueil", reco: true },
@@ -110,7 +112,8 @@ var VOICES = [
   { id: "naksh", name: "Naksh", gender: "male", tone: "Chaleureux, r\xE9fl\xE9chi", use: "Assistant, support", accent: "indien" }
 ];
 var DEFAULT_VOICE = "ara";
-var VOICE_IDS = new Set(VOICES.map((v) => v.id));
+var ALLOWED_VOICE_IDS = new Set(VOICES.map((v) => v.id));
+var VOICE_IDS = ALLOWED_VOICE_IDS;
 var isVoiceId = (v) => typeof v === "string" && VOICE_IDS.has(v.toLowerCase());
 var DEFAULT_PICKUP = "fallback";
 var LIMITS = { presentation: 600, services: 20, nom: 80, prix: 40, duree: 40, zone: 200, disponibilites: 300, urgences: 500, interdits: 500, faq: 12, q: 160, r: 400, consignes: 1200, prononciations: 10, mot: 60, dit: 80 };
@@ -806,6 +809,7 @@ function handleCall(tw) {
   let ringT0 = 0;
   let firstAudioLogged = false;
   let slotsHintText = "";
+  let voiceReverted = false;
   const latency = (tag) => {
     if (!ringT0) return;
     log("[latency]", tag, `${Date.now() - ringT0}ms`, "call", callSid ? callSid.slice(-8) : "?");
@@ -926,6 +930,19 @@ function handleCall(tw) {
     toXai({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(result) } });
     toXai({ type: "response.create" });
   }
+  const fallbackBuiltinVoice = (detail) => {
+    if (voiceReverted) return;
+    const cur = normalizeConfig(profile.reception).voice;
+    if (cur === DEFAULT_VOICE) return;
+    const msg = typeof detail === "string" ? detail : JSON.stringify(detail || "").slice(0, 280);
+    if (!/(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i.test(msg)) return;
+    voiceReverted = true;
+    log("[voice] repli voix int\xE9gr\xE9e", String(cur).slice(0, 12), "\u2192", DEFAULT_VOICE);
+    profile = { ...profile, reception: { ...normalizeConfig(profile.reception), voice: DEFAULT_VOICE } };
+    if (closed || !xai || xai.readyState !== WebSocket.OPEN) return;
+    if (ready) patchSession();
+    else toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
+  };
   function onXai(raw) {
     let ev;
     try {
@@ -980,7 +997,11 @@ function handleCall(tw) {
       void handleTool(ev);
       return;
     }
-    if (type === "error") log("[xai] error", JSON.stringify(ev.error || ev).slice(0, 300));
+    if (type === "error") {
+      const snippet = JSON.stringify(ev.error || ev).slice(0, 300);
+      log("[xai] error", snippet);
+      fallbackBuiltinVoice(snippet);
+    }
   }
   const patchSession = () => {
     if (closed || !xai || xai.readyState !== WebSocket.OPEN || !ready) return;

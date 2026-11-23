@@ -6,10 +6,14 @@
 export type VoiceGender = "female" | "male"
 export type VoiceInfo = { id: string; name: string; gender: VoiceGender; tone: string; use: string; accent?: string; reco?: boolean }
 
+/** Voix clonée xAI (custom voice) — absente de GET /v1/tts/voices, id connu côté compte xAI. */
+export const CUSTOM_VOICE_KERYAN = "3ixfadarbuwy"
+
 /** Les 28 voix intégrées de Grok Voice (même liste pour le temps réel et la synthèse vocale).
  *  Source : https://docs.x.ai/developers/model-capabilities/audio/voice (tableau « Voices ») + GET /v1/tts/voices (genre).
  *  Descriptions traduites de la doc xAI ; l'accent indiqué est celui que xAI décrit (en anglais). */
 export const VOICES: VoiceInfo[] = [
+  { id: CUSTOM_VOICE_KERYAN, name: "Ma voix (Keryan)", gender: "male", tone: "Voix personnalisée", use: "Réceptionniste", reco: true },
   { id: "celeste", name: "Celeste", gender: "female", tone: "Empathique, assurée, rassurante", use: "Accueil, assistance", reco: true },
   { id: "aurora", name: "Aurora", gender: "female", tone: "Sereine, posée, rayonnante", use: "Accueil, assistance", reco: true },
   { id: "iris", name: "Iris", gender: "female", tone: "Aimable, enjouée, d'un charme naturel", use: "Commercial, accueil", reco: true },
@@ -42,7 +46,8 @@ export const VOICES: VoiceInfo[] = [
 
 /** Voix par défaut si l'artisan n'en a pas choisi : « ara » (chaleureuse, polyvalente — moins « robot » que les voix trop placées). */
 export const DEFAULT_VOICE = "ara"
-const VOICE_IDS = new Set(VOICES.map(v => v.id))
+export const ALLOWED_VOICE_IDS = new Set(VOICES.map(v => v.id))
+const VOICE_IDS = ALLOWED_VOICE_IDS
 export const isVoiceId = (v: unknown): v is string => typeof v === "string" && VOICE_IDS.has(v.toLowerCase())
 export const voiceInfo = (id?: string) => VOICES.find(v => v.id === (id || "").toLowerCase()) || VOICES.find(v => v.id === DEFAULT_VOICE)!
 
