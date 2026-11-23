@@ -449,7 +449,8 @@ function LineRow({ x, n, desk, focused, taux, tv0, subtotal, first, last, offerS
   const [remOpen, setRemOpen] = useState(!!x.rl)
   const setKind = (k: LineKind | "sec") => onPatch(k === "sec" ? { k: "sec", u: "", pu: 0, q: 0 } : { k, u: k === "mo" ? "h" : k === "fft" ? "forfait" : x.u === "h" || x.u === "forfait" ? "u" : x.u, q: x.k === "sec" ? 1 : x.q, ...(k === "mo" && !x.pu && taux ? { pu: taux } : {}) })
   const handle = <button type="button" data-nodrag aria-label="Déplacer la ligne" onPointerDown={e => { e.preventDefault(); controls.start(e) }} className="flex h-10 w-5 shrink-0 cursor-grab touch-none items-center justify-center text-white/20 transition-colors hover:text-white/60 active:cursor-grabbing"><GripVertical size={16} /></button>
-  const menuEl = <Menu open={menu} setOpen={setMenu} trigger={<button type="button" aria-label="Actions de la ligne" aria-haspopup="menu" onClick={() => setMenu(o => !o)} className={`flex h-9 w-9 items-center justify-center rounded-full text-white/40 transition-colors hover:bg-white/[.07] hover:text-white ${menu ? "bg-white/[.07] text-white" : ""}`}><MoreHorizontal size={17} /></button>}>
+  const lineTrash = <button type="button" aria-label="Supprimer la ligne" onClick={() => onRemove()} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white/35 transition-colors hover:bg-white/[.07] hover:text-white/70"><Trash2 size={15} strokeWidth={1.75} /></button>
+  const menuEl = <div className="flex shrink-0 items-center">{lineTrash}<Menu open={menu} setOpen={setMenu} trigger={<button type="button" aria-label="Actions de la ligne" aria-haspopup="menu" onClick={() => setMenu(o => !o)} className={`flex h-9 w-9 items-center justify-center rounded-full text-white/40 transition-colors hover:bg-white/[.07] hover:text-white ${menu ? "bg-white/[.07] text-white" : ""}`}><MoreHorizontal size={17} /></button>}>
     <>{([["mo", "À l'heure"], ["fo", "Fourniture"], ["fft", "Forfait"], ["sec", "Titre de partie"]] as [LineKind | "sec", string][]).map(([k, l]) => { const I = k === "sec" ? Layers : KIND_ICON[k]; return <MenuItem key={k} I={I} onClick={() => { setKind(k); setMenu(false) }} hint={x.k === k ? "✓" : undefined}>{l}</MenuItem> })}<MenuSep />
       {x.k !== "sec" && !desc && <MenuItem I={AlignLeft} onClick={() => { setDesc(true); setMenu(false) }}>Ajouter une description</MenuItem>}
       {x.k !== "sec" && !remOpen && <MenuItem I={Percent} onClick={() => { setRemOpen(true); if (!x.rl) onPatch({ rl: { t: "pct", v: 0 } }); setMenu(false) }}>Faire une remise sur cette ligne</MenuItem>}
@@ -457,8 +458,8 @@ function LineRow({ x, n, desk, focused, taux, tv0, subtotal, first, last, offerS
     <MenuItem I={Copy} onClick={() => { onDup(); setMenu(false) }}>Dupliquer</MenuItem>
     {!first && <MenuItem I={ArrowUp} hint="Alt ↑" onClick={() => { onMove(-1); setMenu(false) }}>Monter</MenuItem>}
     {!last && <MenuItem I={ArrowDown} hint="Alt ↓" onClick={() => { onMove(1); setMenu(false) }}>Descendre</MenuItem>}
-    <MenuSep /><MenuItem I={Trash2} danger onClick={() => { setMenu(false); onRemove() }}>Supprimer</MenuItem>
-  </Menu>
+    <MenuSep /><MenuItem I={Trash2} danger onClick={() => { setMenu(false); onRemove() }}>Supprimer la ligne</MenuItem>
+  </Menu></div>
   // update63 · mobile : balayer la carte vers la gauche pour révéler « Supprimer »
   const rm = useReducedMotion(), xc = useDragControls(), mx = useMotionValue(0), delOp = useTransform(mx, [-56, -6, 0], [1, 0, 0]), [swiped, setSwiped] = useState(false)
   const snap = (open: boolean) => { setSwiped(open); void animate(mx, open ? -SWIPE : 0, rm ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42 }) }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { BellRing, Download, FileCode2, FileText, Plus, Receipt, Send, ShieldCheck, Trash2 } from "lucide-react"
+import { BellRing, Download, FileCode2, FileText, MoreHorizontal, Plus, Receipt, Send, ShieldCheck, Trash2 } from "lucide-react"
 import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, SheetSkeleton, Tg, inp, tx, useC } from "../ui"
 import { SwipeRow, askConfirm } from "../form/SwipeRow"
 import { factureSwipeAction } from "../../lib/docDelete"
@@ -10,7 +10,7 @@ import { CO, e2, missingLegal } from "../../lib/devisDoc"
 import { NATURE, TYPE_LABEL, downloadFacture, downloadFactureXml, factureFile, factureTotals, type FLine, type Facture } from "../../lib/facturePdf"
 import { fmtPct } from "../../../api/_lib/factureCalc"
 import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Reveal, ival, type Contact } from "../form/grouped"
-import { ServiceLineCard } from "../devis/fields"
+import { Menu, MenuItem, ServiceLineCard } from "../devis/fields"
 import { LinesCard, NextCard } from "../devis/Chaine"
 import { looksPhone, payLink, sendFactureSms } from "../../lib/chaine"
 import { webOrigin } from "../../lib/native"
@@ -140,6 +140,17 @@ export default function FacturesSheet({ close, openId, startNew, clients = [] }:
 }
 const FRow = ({ l, v, strong }: { l: string; v: string; strong?: boolean }) => <div className={`ig-row flex min-h-11 items-center justify-between gap-3 py-2 pl-4 pr-4 ${strong ? "text-[16px] font-semibold" : "text-[15px]"}`}><span className={strong ? "text-white" : "text-white/55"}>{l}</span><span className={`tabular-nums ${strong ? "text-white" : "text-white/85"}`}>{v}</span></div>
 
+function FactureLineHead({ onRemove }: { onRemove: () => void }) {
+  const [menu, setMenu] = useState(false)
+  const rm = () => { setMenu(false); onRemove() }
+  return <div className="flex shrink-0 items-center">
+    <button type="button" aria-label="Supprimer la ligne" onClick={rm} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white/35 transition-colors hover:bg-white/[.07] hover:text-white/70"><Trash2 size={15} strokeWidth={1.75} /></button>
+    <Menu open={menu} setOpen={setMenu} trigger={<button type="button" aria-label="Actions de la ligne" aria-haspopup="menu" onClick={() => setMenu(o => !o)} className={`flex h-9 w-9 items-center justify-center rounded-full text-white/40 transition-colors hover:bg-white/[.07] hover:text-white ${menu ? "bg-white/[.07] text-white" : ""}`}><MoreHorizontal size={17} /></button>}>
+      <MenuItem I={Trash2} danger onClick={rm}>Supprimer la ligne</MenuItem>
+    </Menu>
+  </div>
+}
+
 function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Facture; rels: Rel[]; close: () => void; reload: () => Promise<void>; openOther: (id: string) => void; clients: Contact[] }) {
   const { toast, desk } = useC()
   const issued = f.statut === "emise" || f.statut === "envoyee" || f.statut === "payee" || f.statut === "annulee"
@@ -151,6 +162,7 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
   useEffect(() => { setD(f) }, [f])
   const set = (p: Partial<Facture>) => { setD({ ...d, ...p }); setErr("") }
   const setLine = (i: number, p: Partial<FLine>) => set({ lignes: d.lignes.map((x, j) => j === i ? { ...x, ...p } : x) })
+  const removeLine = (i: number) => { const snap = d.lignes; set({ lignes: snap.filter((_, j) => j !== i) }); toast("Ligne supprimée", () => set({ lignes: snap })) }
   const t = factureTotals(d)
   const saveDraft = async () => {
     const lignes = d.lignes.filter(x => x.l.trim() && Number(x.q) > 0).map(x => ({ l: x.l.trim(), q: Number(x.q), u: x.u || "u", pu: Number(x.pu) || 0, tv: Number(x.tv ?? 20), ...(x.rl && Number(x.rl.v) > 0 ? { rl: x.rl } : {}) }))
@@ -277,7 +289,7 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
         <div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations{d.lignes.length > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {d.lignes.length} ligne{d.lignes.length > 1 ? "s" : ""}</span>}</div>
         <div className="space-y-2.5">
           {d.lignes.map((x, i) => <ServiceLineCard key={i} x={x} ro={ro} defaultTv={Number(x.tv) > 0 ? Number(x.tv) : 20} tvaNA={CO.tvaNA || !!d.autoliquidation} idPrefix={`fa-${i}`} index={i + 1} onPatch={p => setLine(i, p)}
-            menu={!ro ? <button type="button" aria-label="Supprimer la ligne" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/35 hover:text-[#FF9B96]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={16} /></button> : undefined} />)}
+            menu={!ro ? <FactureLineHead onRemove={() => removeLine(i)} /> : undefined} />)}
           {!ro && <button type="button" className="ig-card flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[#141416] text-[15.5px] font-medium text-[#7EA6FF] transition-colors active:bg-white/[.06]" onClick={() => set({ lignes: [...d.lignes, { l: "", q: 1, u: "", pu: 0, tv: CO.tvaNA || d.autoliquidation ? 0 : 20 }] })}><Plus size={17} strokeWidth={2.2} />Ajouter une ligne</button>}
         </div>
       </section>}
