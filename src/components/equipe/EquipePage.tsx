@@ -17,11 +17,11 @@ import ModalSheet from "../sheet/ModalSheet"
 
 const NAV = "var(--page-bottom)"
 const PUSH = { type: "spring" as const, stiffness: 420, damping: 40, mass: .9 }
-const card = "rounded-[16px] bg-white/[.07]"
+const card = "rounded-[22px] bg-[#141416]"
 
 const PendingAv = ({ e, size = 36 }: { e: Employe; size?: number }) => <span aria-hidden className="flex shrink-0 items-center justify-center rounded-full bg-white/[.08] font-semibold text-white/75 ring-1 ring-inset ring-white/15" style={{ width: size, height: size, fontSize: size * .36 }}>{initialsOf(e)}</span>
 const Dot = ({ c }: { c: string }) => <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: c }} />
-const Head = ({ t, n, r }: { t: string; n?: number; r?: ReactNode }) => <div className="mb-2 mt-6 flex items-baseline justify-between px-1"><h2 className="text-[16px] font-semibold tracking-[-0.01em]">{t}</h2>{r ?? (n != null && <span className="text-[14px] tabular-nums text-white/45">{n}</span>)}</div>
+const Head = ({ t, n, r }: { t: string; n?: number; r?: ReactNode }) => <div className="mb-2 mt-6 flex items-baseline justify-between px-1"><h2 className="text-[17px] font-semibold tracking-[-0.02em] text-white">{t}</h2>{r ?? (n != null && <span className="text-[15px] font-medium tabular-nums text-white/45">{n}</span>)}</div>
 
 export default function EquipePage({ head }: { head?: ReactNode }) {
   const { desk, go, toast } = useC(), st = useChantiers(), reduce = useReducedMotion()
@@ -55,9 +55,9 @@ export default function EquipePage({ head }: { head?: ReactNode }) {
     return <motion.div layout="position" key={e.id} className="eq-sep eq-sep-av">
       <button type="button" onClick={() => open(e.id)} aria-label={`${shortName(e)}, ${e.role || "membre"}`} className="flex w-full items-center gap-3 py-[9px] pl-3.5 pr-3 text-left transition-colors active:bg-white/[.05]">
         {pending ? <PendingAv e={e} /> : <EmpAvatar e={e} size={36} />}
-        <span className="min-w-0 flex-1"><span className="block truncate text-[16px] font-medium leading-tight">{shortName(e)}</span>
+        <span className="min-w-0 flex-1"><span className="block truncate text-[16px] font-semibold leading-tight tracking-[-0.02em]">{shortName(e)}</span>
           <span className="mt-0.5 block truncate text-[13.5px] text-white/50">{pending ? `${e.role || "Membre"} · ${invitedAgo(e.invited_at)}` : e.role || "Métier à préciser"}</span></span>
-        {pending ? <span className="w-[86px]" /> : site && <span className="flex min-w-0 max-w-[46%] items-center gap-1.5 text-[13.5px] text-white/65"><Dot c={site.color} /><span className="truncate">{site.text}</span></span>}
+        {pending ? <span className="w-[86px]" /> : site && <span className="flex min-w-0 max-w-[46%] items-center gap-1.5 text-[13.5px] font-medium text-white/45"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/35" /><span className="truncate">{site.text}</span></span>}
         {!pending && <ChevronRight size={17} className="shrink-0 text-white/25" />}
       </button>
       {pending && <motion.button type="button" whileTap={{ scale: .94 }} disabled={relBusy === e.id} onClick={() => void relancer(e)} className="absolute right-3 top-1/2 flex h-8 -translate-y-1/2 items-center rounded-full bg-white/[.12] px-3.5 text-[13.5px] font-semibold text-white disabled:opacity-60">
@@ -130,7 +130,7 @@ function Fiche({ e, today, onBack, onEdit, onSite, onRelancer, relBusy, ext }: {
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-[28px] font-bold leading-tight tracking-[-0.025em]">{shortName(e)}</h1>
         <p className="mt-0.5 truncate text-[15px] text-white/50">{[e.role || "Membre", sinceLabel(e)].filter(Boolean).join(" · ")}</p>
-        <span className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-full bg-white/[.09] px-3 text-[13.5px] font-medium"><Dot c={badge[1]} />{badge[0]}</span>
+        <span className="mt-2 block text-[13.5px] font-medium text-white/45">{badge[0]}</span>
       </div>
     </div>
     <div className="mt-6 grid grid-cols-3 gap-2.5">

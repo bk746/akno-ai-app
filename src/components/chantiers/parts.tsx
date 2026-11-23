@@ -6,13 +6,11 @@ import { STATUS_COLOR, STATUS_LABEL, dayIndex, durationDays, effectiveStatus, en
 import { empName, patchChantier, photoUrl, usePhotoTick, type Chantier, type Employe } from "../../lib/chantiers"
 import { itineraryUrl } from "../../lib/geo"
 
-const HUES = ["#5E5CE6", "#30B0C7", "#FF9F0A", "#34C759", "#FF375F", "#64D2FF", "#BF5AF2", "#AC8E68"]
-const hue = (s: string) => HUES[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length]
 const ini = (e: Employe) => `${e.first_name[0] || ""}${e.last_name?.[0] || ""}`.toUpperCase()
 export function EmpAvatar({ e, size = 36, ring }: { e: Employe; size?: number; ring?: boolean }) {
   usePhotoTick()
   const url = photoUrl(e.photo_path)
-  return <span aria-hidden className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white ${ring ? "ring-2 ring-[#232326]" : ""}`} style={{ width: size, height: size, fontSize: size * .38, background: url ? "#2a2a2d" : `linear-gradient(180deg, ${hue(empName(e))}, ${hue(empName(e))}cc)` }}>
+  return <span aria-hidden className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white ${ring ? "ring-2 ring-[#232326]" : ""}`} style={{ width: size, height: size, fontSize: size * .38, background: "#2C2C2E" }}>
     {url ? <img src={url} alt="" className="h-full w-full object-cover" draggable={false} /> : ini(e)}
   </span>
 }
@@ -24,9 +22,9 @@ export function AvatarStack({ team, max = 3, size = 26 }: { team: Employe[]; max
     {more > 0 && <span className="flex items-center justify-center rounded-full bg-[#3A3A3D] text-[11px] font-semibold text-white ring-2 ring-[#232326]" style={{ width: size, height: size, marginLeft: -size * .3, zIndex: 11 }}>+{more}</span>}
   </span>
 }
-export const StatusHead = ({ c, long }: { c: Chantier; long?: boolean }) => { const st = effectiveStatus(c); return <div className="flex min-w-0 items-center gap-1.5 text-[13px]">
-  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLOR[st] }} /><span className="font-medium text-white/90">{isLateCh(c) ? "En retard" : STATUS_LABEL[st]}</span>
-  <span className="text-white/30">·</span><span className="truncate text-white/55">{long ? rangeLong(c) : rangeLabel(c)}</span></div> }
+export const StatusHead = ({ c, long }: { c: Chantier; long?: boolean }) => { const st = effectiveStatus(c), late = isLateCh(c); return <div className="flex min-w-0 items-center gap-1.5 text-[13px]">
+  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: late ? "#FF5F57" : "rgba(255,255,255,.35)" }} /><span className={`font-medium ${late ? "text-[#FF5F57]" : "text-white/55"}`}>{late ? "En retard" : STATUS_LABEL[st]}</span>
+  <span className="text-white/30">·</span><span className="truncate text-white/45">{long ? rangeLong(c) : rangeLabel(c)}</span></div> }
 export const Bar = ({ pct, c = "#fff" }: { pct: number; c?: string }) => <div className="h-[5px] flex-1 overflow-hidden rounded-full bg-white/[.14]"><motion.div className="h-full rounded-full" style={{ background: c }} initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ type: "spring", stiffness: 140, damping: 24 }} /></div>
 const DashBar = () => <div aria-hidden className="h-[3px] flex-1 rounded-full" style={{ backgroundImage: "linear-gradient(to right, rgba(255,255,255,.28) 50%, transparent 50%)", backgroundSize: "9px 3px" }} />
 
@@ -39,7 +37,7 @@ export const RoundBtn = ({ href, label, children, onClick }: { href?: string; la
 export function ChCard({ c, team, onOpen, active, handle = true }: { c: Chantier; team: Employe[]; onOpen: () => void; active?: boolean; handle?: boolean }) {
   const st = effectiveStatus(c), pct = progressPct(c), hasPos = c.lat != null && c.lng != null
   return <div role="button" tabIndex={0} aria-label={`${c.title}, ${STATUS_LABEL[st]}. Ouvrir la fiche`} onClick={onOpen} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}
-    className={`relative block w-full cursor-pointer select-none rounded-[22px] border border-white/[.08] bg-[#1C1C1E]/88 px-4 pb-4 pt-3 text-left shadow-[0_18px_40px_-12px_rgba(0,0,0,.7)] backdrop-blur-2xl backdrop-saturate-150 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/40 ${active ? "border-white/[.14]" : ""}`}>
+    className={`relative block w-full cursor-pointer select-none rounded-[22px] bg-[#141416] px-4 pb-4 pt-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/40 ${active ? "ring-1 ring-white/15" : ""}`}>
     {handle ? <div aria-hidden className="mx-auto mb-2 h-[4px] w-9 rounded-full bg-white/20" /> : <div className="h-1" />}
     <div className="flex items-start gap-3">
       <div className="min-w-0 flex-1"><StatusHead c={c} /><div className="mt-1 truncate text-[19px] font-semibold tracking-[-0.02em] text-white">{c.title}</div></div>
@@ -51,7 +49,7 @@ export function ChCard({ c, team, onOpen, active, handle = true }: { c: Chantier
           : <><Bar pct={100} c="rgba(255,255,255,.5)" /><span className="shrink-0 text-[13.5px] text-white/60">Terminé</span></>}
       {team.length > 0 && <span className="ml-1 shrink-0"><AvatarStack team={team} /></span>}
     </div>
-    {!hasPos && <div className="mt-2 flex items-center gap-1 text-[12px] text-[#FFB340]"><MapPin size={12} />Adresse à placer sur la carte</div>}
+    {!hasPos && <div className="mt-2 flex items-center gap-1 text-[12px] text-white/45"><MapPin size={12} />Adresse à placer sur la carte</div>}
   </div>
 }
 
@@ -81,7 +79,7 @@ export function ChDetail({ c, team, onClose, onEdit, desk }: { c: Chantier; team
       <div className="flex items-center justify-between text-[14.5px]"><span className="text-white/55">Avancement</span><span className="font-semibold tabular-nums">{pct} %</span></div>
       <div className="mt-2.5 flex"><Bar pct={pct} /></div>
       <div className="mt-2.5 flex items-center justify-between text-[12.5px] text-white/45">
-        <span>{st === "upcoming" ? `Début ${untilLabel(c).toLowerCase()}` : st === "done" ? "Chantier terminé" : total ? `Jour ${day} sur ${total}` : "Dates à fixer"}</span><span>{isLateCh(c) ? <span className="text-[#FFB340]">Fin dépassée · {endLabel(c).replace("Fin prévue le ", "")}</span> : endLabel(c)}</span></div>
+        <span>{st === "upcoming" ? `Début ${untilLabel(c).toLowerCase()}` : st === "done" ? "Chantier terminé" : total ? `Jour ${day} sur ${total}` : "Dates à fixer"}</span><span>{isLateCh(c) ? <span className="text-[#FF5F57]">Fin dépassée · {endLabel(c).replace("Fin prévue le ", "")}</span> : endLabel(c)}</span></div>
     </div>
     <div className="mt-6 flex items-baseline justify-between px-0.5"><h3 className="text-[17px] font-semibold tracking-[-0.01em]">Équipe</h3><span className="text-[13px] text-white/45">{team.length} personne{team.length > 1 ? "s" : ""}</span></div>
     <div className="mt-2.5 overflow-hidden rounded-[18px] bg-white/[.06]">

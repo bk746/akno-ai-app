@@ -19,13 +19,13 @@ import { FILTERS, KIND_LABEL, addrLines, buildDirectory, caTotal, chantiersCount
 
 const NAV = "var(--page-bottom)"
 const PUSH = { type: "spring" as const, stiffness: 420, damping: 40, mass: .9 }
-const card = "rounded-[16px] bg-white/[.07]"
+const card = "rounded-[22px] bg-[#141416]"
 const MOL = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
 export const eur0 = (n: number) => `${Math.round(n).toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, " ")} €`
-const Head = ({ t, n, r }: { t: string; n?: number; r?: ReactNode }) => <div className="mb-2 mt-6 flex items-center justify-between px-1"><h2 className="text-[16px] font-semibold tracking-[-0.01em]">{t}</h2>{r ?? (n != null && <span className="text-[14px] tabular-nums text-white/45">{n}</span>)}</div>
+const Head = ({ t, n, r }: { t: string; n?: number; r?: ReactNode }) => <div className="mb-2 mt-6 flex items-center justify-between px-1"><h2 className="text-[17px] font-semibold tracking-[-0.02em] text-white">{t}</h2>{r ?? (n != null && <span className="text-[15px] font-medium tabular-nums text-white/45">{n}</span>)}</div>
 const Dot = ({ c }: { c: string }) => <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: c }} />
 export const ClientAv = ({ c, size = 36 }: { c: Pick<Client, "name" | "kind">; size?: number }) => <span aria-hidden className={`flex shrink-0 select-none items-center justify-center font-semibold text-white/90 ring-1 ring-inset ring-white/[.08] ${c.kind === "particulier" ? "rounded-full" : "rounded-[30%]"}`}
-  style={{ width: size, height: size, fontSize: size * .36, background: "linear-gradient(180deg,#4A4A4F 0%,#2E2E32 100%)" }}>{initials(c.name)}</span>
+  style={{ width: size, height: size, fontSize: size * .36, background: "#2C2C2E" }}>{initials(c.name)}</span>
 
 /** Carnet calculé à partir des données déjà chargées par l'app (appels, devis, RDV) + fiches, factures et chantiers. */
 export function useDirectory() {
@@ -80,8 +80,8 @@ export default function ClientsPage({ head }: { head?: ReactNode }) {
     return <motion.div layout="position" key={c.key} className="eq-sep eq-sep-cl">
       <button type="button" onClick={() => open(c.key)} aria-label={`${c.name}${st ? `, ${st.label}` : ""}`} className="flex w-full items-center gap-3 py-[9px] pl-3.5 pr-3 text-left transition-colors active:bg-white/[.05]">
         <ClientAv c={c} size={38} />
-        <span className="min-w-0 flex-1"><span className="block truncate text-[16px] font-medium leading-tight">{c.name}</span><span className="mt-0.5 block truncate text-[13.5px] text-white/50">{sub}</span></span>
-        {st && <span className={`flex shrink-0 items-center gap-1.5 text-[13.5px] ${st.tone === "late" ? "text-white/85" : st.color ? "text-white/70" : "text-white/45"}`}>{st.color && <Dot c={st.color} />}{st.label}</span>}
+        <span className="min-w-0 flex-1"><span className="block truncate text-[16px] font-semibold leading-tight tracking-[-0.02em]">{c.name}</span><span className="mt-0.5 block truncate text-[13.5px] text-white/50">{sub}</span></span>
+        {st && <span className={`flex shrink-0 items-center gap-1.5 text-[13.5px] font-medium ${st.tone === "late" ? "text-[#FF5F57]" : "text-white/45"}`}>{st.tone === "late" && <Dot c="#FF5F57" />}{st.label}</span>}
         <ChevronRight size={17} className="shrink-0 text-white/25" />
       </button>
     </motion.div>

@@ -53,7 +53,7 @@ export default function TeamView({ date, evs, onEv, onAssign, onSlot }: {
                   onClick={x => { x.stopPropagation(); onEv(e) }}
                   aria-label={`${e.name} · ${kindLabel(e.kind, e.absenceKind)} · ${hh(e.start)}`}
                   className="absolute left-0.5 right-0.5 overflow-hidden rounded-[8px] px-1.5 py-1 text-left"
-                  style={{ top: (e.start - H0) * HH + 1, height: Math.max(20, e.dur * HH - 3), background: `${col}28`, boxShadow: `inset 3px 0 0 ${bad ? "#FF453A" : col}` }}>
+                  style={{ top: (e.start - H0) * HH + 1, height: Math.max(20, e.dur * HH - 3), background: `${col}14`, boxShadow: `inset 2px 0 0 ${bad ? "#FF5F57" : col}` }}>
                   <div className="truncate text-[11px] font-semibold leading-tight" style={{ color: col }}>{e.name}</div>
                   {e.dur * HH > 28 && <div className="truncate text-[10px] text-white/55">{kindLabel(e.kind, e.absenceKind)}{e.travelMin ? ` · ${e.travelMin} min` : ""}</div>}
                 </button>

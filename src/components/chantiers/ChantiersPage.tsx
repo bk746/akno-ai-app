@@ -161,7 +161,7 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
 
   const filterPill = <div className="relative">
     <motion.button type="button" whileTap={{ scale: .96 }} aria-haspopup="listbox" aria-expanded={fOpen} onClick={() => setFOpen(v => !v)} className={`pointer-events-auto flex h-10 items-center gap-1.5 rounded-full px-4 text-[14.5px] font-semibold text-white ${glass}`}>
-      {filter === "all" ? <><span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLOR.in_progress }} />{st.ready && !st.missing ? countLabel(counts) : "Chantiers"}</> : <><span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLOR[filter as ChStatus] }} />{FILTERS.find(f => f[0] === filter)![1]} · {counts[filter as ChStatus]}</>}
+      {filter === "all" ? <><span className="h-1.5 w-1.5 rounded-full bg-white/50" />{st.ready && !st.missing ? countLabel(counts) : "Chantiers"}</> : <><span className="h-1.5 w-1.5 rounded-full bg-white/50" />{FILTERS.find(f => f[0] === filter)![1]} · {counts[filter as ChStatus]}</>}
       <ChevronDown size={16} strokeWidth={2.4} className={`text-white/60 transition-transform ${fOpen ? "rotate-180" : ""}`} />
     </motion.button>
     <AnimatePresence>{fOpen && <motion.div role="listbox" aria-label="Filtrer les chantiers" initial={{ opacity: 0, y: -6, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: .97 }} transition={{ type: "spring", stiffness: 520, damping: 34 }}
