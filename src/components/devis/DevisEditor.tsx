@@ -85,7 +85,8 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
   function serialize(d: Doc) { return { client: d.client, email: d.email, phone: d.phone, addr: d.addr, objet: d.objet, lines: toStored(d.items, d.meta) } }
 
   /* ---------- enregistrement ---------- */
-  const saveErr = useRef("")
+  // quiet : enregistrement lancé par « Créer un devis / une facture » — l'erreur est dite par le toast rouge, pas en plus par le bandeau
+  const saveErr = useRef(""), quiet = useRef(false), [errQuiet, setErrQuiet] = useState(false)
   const saveNow = useCallback(async (): Promise<boolean> => {
     if (saving.current) { again.current = true; return saving.current }
     const run = (async () => {
@@ -98,7 +99,7 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
       const t = computeTotals(d.items, d.meta, { tvaNA: CO.tvaNA })
       const rates = t.rates.map(x => x.r)
       const r = await saveDevis(idRef.current, { parentId: req.prefill?.parentId, num: n, client: d.client, email: d.email, phone: d.phone, addr: d.addr, objet: d.objet || d.items.find(x => x.k !== "sec" && x.l.trim())?.l || "Travaux", lines: ser.lines, ht: t.ht, ttc: t.ttc, tva: rates.length === 1 ? rates[0] : rates.includes(tv0) ? tv0 : rates[rates.length - 1] ?? tv0 })
-      if (!r.ok) { setSt("error"); setErr(r.error); saveErr.current = r.error || ""; keepLocal(idRef.current || "new", d); return false }
+      if (!r.ok) { setSt("error"); setErr(r.error); setErrQuiet(quiet.current); saveErr.current = r.error || ""; keepLocal(idRef.current || "new", d); return false }
       lastJson.current = json
       if (!idRef.current) { dropLocal("new") }
       dropLocal(r.devis.id)
@@ -150,8 +151,8 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
     onClose()
   }
   const send = async () => {
-    if (!doc.client.trim()) { setErr("Indiquez le client avant d'envoyer."); setSt("error"); return }
-    if (!doc.items.some(x => x.k !== "sec" && x.q * x.pu > 0)) { setErr("Ajoutez au moins une ligne chiffrée avant d'envoyer."); setSt("error"); return }
+    if (!doc.client.trim()) { setErr("Indiquez le client avant d'envoyer."); setErrQuiet(false); setSt("error"); return }
+    if (!doc.items.some(x => x.k !== "sec" && x.q * x.pu > 0)) { setErr("Ajoutez au moins une ligne chiffrée avant d'envoyer."); setErrQuiet(false); setSt("error"); return }
     const ok = await saveNow()
     if (!ok || !idRef.current) return
     const dv = s.devis.find(x => x.id === idRef.current)
@@ -164,7 +165,7 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
   const [busy, setBusy] = useState<null | "devis" | "facture">(null), busyRef = useRef(false)
   const fail = (msg: string) => { if (flash) flash(msg, "err"); else toast(msg) }
   const readyDoc = () => {
-    const bad = (msg: string) => { setErr(msg); setSt("error"); fail(msg); return false }
+    const bad = (msg: string) => { fail(msg); return false } // toast rouge seul (plus de bandeau en double)
     if (!doc.client.trim()) return bad("Indiquez le client.")
     if (!doc.items.some(x => x.k !== "sec" && (lineHT(x) > 0 || x.q * x.pu > 0))) return bad("Ajoutez au moins une ligne chiffrée.")
     return true
@@ -172,8 +173,9 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
   const begin = (k: "devis" | "facture") => { if (busyRef.current || !readyDoc()) return false; busyRef.current = true; setBusy(k); return true }
   const end = () => { busyRef.current = false; setBusy(null) }
   const saved = async () => {
-    saveErr.current = ""
+    saveErr.current = ""; quiet.current = true
     const ok = await saveNow().catch(() => false)
+    quiet.current = false
     if (ok && idRef.current) return true
     fail(saveErr.current || "Enregistrement impossible. Vérifiez la connexion et réessayez.")
     return false
@@ -343,7 +345,7 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
 
   const body = <>
     {header}
-    {st === "error" && err && <div role="alert" className="flex shrink-0 items-center gap-3 border-b border-[#FF453A]/20 bg-[#FF453A]/10 px-4 py-2.5 text-[13px] text-[#FFB4AF] lg:px-6"><AlertCircle size={15} className="shrink-0" /><span className="flex-1">{err}</span><button type="button" onClick={() => void saveNow()} className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-[12.5px] font-semibold text-white hover:bg-white/15">Réessayer</button></div>}
+    {st === "error" && err && !errQuiet && <div role="alert" className="flex shrink-0 items-center gap-3 border-b border-[#FF453A]/20 bg-[#FF453A]/10 px-4 py-2.5 text-[13px] text-[#FFB4AF] lg:px-6"><AlertCircle size={15} className="shrink-0" /><span className="flex-1">{err}</span><button type="button" onClick={() => void saveNow()} className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-[12.5px] font-semibold text-white hover:bg-white/15">Réessayer</button></div>}
     {desk ? <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto grid w-full max-w-[1320px] grid-cols-[minmax(0,1fr)_360px] items-start gap-6 px-6 py-6">
         <div className="min-w-0 space-y-8">{restorePill}{clientCard}{lines}</div>

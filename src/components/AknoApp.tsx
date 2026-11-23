@@ -1644,7 +1644,7 @@ function AknoApp() {
       : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <Suspense fallback={null}><DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={(dv: Devis) => { setEd(null); setM({ kind: "devisPrev", data: dv }) }}
       // Création confirmée : toast du haut + retour haptique léger, puis le document créé s'ouvre.
-      onCreated={(dv: Devis) => { setEd(null); flash(dv.num ? `Devis D-${dv.num} créé` : "Devis créé"); void hapticSuccess(); setM({ kind: "devisPrev", data: dv }) }}
+      onCreated={(dv: Devis) => { setEd(null); flash(dv.num ? `Devis N° ${dv.num} créé` : "Devis créé"); void hapticSuccess(); setM({ kind: "devisPrev", data: dv }) }}
       onCreateFacture={async (dv: Devis) => {
       // L'éditeur reste ouvert (et rempli) tant que la facture n'existe pas : en cas d'erreur, rien n'est perdu.
       const { createFactureDraft } = await import("./sheets/FacturesSheet")

@@ -188,8 +188,8 @@ async function main() {
     // validation : toast rouge, formulaire gardé
     await page.click("[data-create-devis]")
     await page.waitForSelector(TOAST, { timeout: 4000 })
-    const v = await page.evaluate(TOAST => { const t = document.querySelector(TOAST); return { txt: t.textContent.trim(), kind: t.getAttribute("data-kind"), top: Math.round(t.getBoundingClientRect().top) } }, TOAST)
-    check("sans ligne chiffrée : toast rouge en haut, éditeur gardé", v.kind === "err" && /ligne chiffrée/.test(v.txt) && v.top < 140 && await page.locator("[data-create-devis]").count() === 1, JSON.stringify(v))
+    const v = await page.evaluate(TOAST => { const t = document.querySelector(TOAST); return { txt: t.textContent.trim(), kind: t.getAttribute("data-kind"), top: Math.round(t.getBoundingClientRect().top), banners: document.querySelectorAll('[role=dialog][aria-label="Nouveau devis"] [role=alert]').length } }, TOAST)
+    check("sans ligne chiffrée : toast rouge en haut, éditeur gardé, pas de bandeau en double", v.banners === 0 && v.kind === "err" && /ligne chiffrée/.test(v.txt) && v.top < 140 && await page.locator("[data-create-devis]").count() === 1, JSON.stringify(v))
     await page.locator("[data-add-presta-input]").fill("Forfait dépannage"); await page.locator("[data-add-presta-input]").press("Enter")
     await page.waitForSelector("[data-line-form]", { timeout: 8000 })
     const pu = page.locator("[data-line-form]").first().locator("input[aria-label='Coût unitaire']")
@@ -200,9 +200,9 @@ async function main() {
     net.failDevis = true
     await page.click("[data-create-devis]")
     await page.waitForFunction(TOAST => document.querySelector(TOAST)?.getAttribute("data-kind") === "err" && !/ligne chiffrée/.test(document.querySelector(TOAST).textContent), TOAST, { timeout: 6000 }).catch(() => {})
-    const e1 = await page.evaluate(TOAST => { const t = document.querySelector(TOAST), b = document.querySelector("[data-create-devis]"); return { txt: t?.textContent.trim(), kind: t?.getAttribute("data-kind"), editor: !!b, disabled: b?.disabled, objet: document.querySelector("#dv-objet")?.value, client: !!document.querySelector('[aria-label*="Julie Bernard"]'), lines: document.querySelectorAll("[data-line-form]").length, color: t ? getComputedStyle(t).color : "" } }, TOAST)
+    const e1 = await page.evaluate(TOAST => { const t = document.querySelector(TOAST), b = document.querySelector("[data-create-devis]"); return { txt: t?.textContent.trim(), kind: t?.getAttribute("data-kind"), editor: !!b, disabled: b?.disabled, objet: document.querySelector("#dv-objet")?.value, client: !!document.querySelector('[aria-label*="Julie Bernard"]'), lines: document.querySelectorAll("[data-line-form]").length, color: t ? getComputedStyle(t).color : "", banners: document.querySelectorAll('[role=dialog][aria-label="Nouveau devis"] [role=alert]').length } }, TOAST)
     await page.screenshot({ path: join(SHOTS, "kb-toast-erreur.png") })
-    check("erreur à la création : toast rouge avec le message", e1.kind === "err" && (e1.txt || "").length > 8, JSON.stringify(e1))
+    check("erreur à la création : toast rouge avec le message, sans bandeau en double", e1.kind === "err" && (e1.txt || "").length > 8 && e1.banners === 0, JSON.stringify(e1))
     check("erreur à la création : formulaire toujours rempli, bouton réactivé", e1.editor && e1.disabled === false && e1.objet === "Rénovation salle de bain — étage" && e1.client && e1.lines === 1, JSON.stringify(e1))
     net.failDevis = false
     // succès : bouton en chargement, double envoi bloqué, toast en haut, document ouvert
@@ -222,9 +222,9 @@ async function main() {
     await page.screenshot({ path: join(SHOTS, "kb-toast-devis.png") })
     const opened = await page.evaluate(() => ({ editor: !!document.querySelector("[data-create-devis]"), dialogs: [...document.querySelectorAll("[role=dialog]")].map(d => (d.getAttribute("aria-label") || "") + " | " + d.innerText.replace(/\s+/g, " ").slice(0, 400)) }))
     const posts = writes.filter(w => w.table === "devis").length - w0
-    check("succès : toast en haut « Devis D-XXXX créé » avec coche, au-dessus de tout", /^Devis D-\d+ créé$/.test(s1.txt) && s1.top < 140 && s1.check && s1.onTop && Math.abs(s1.cx - W / 2) <= 2, JSON.stringify(s1))
+    check("succès : toast en haut « Devis N° XXXX créé » avec coche, au-dessus de tout", /^Devis N° \d+ créé$/.test(s1.txt) && s1.top < 140 && s1.check && s1.onTop && Math.abs(s1.cx - W / 2) <= 2, JSON.stringify(s1))
     check("succès : double envoi bloqué (une seule écriture)", posts === 1, `écritures devis=${posts}`)
-    check("succès : éditeur fermé, le devis créé s'ouvre", !opened.editor && opened.dialogs.some(d => d.includes(`Devis N° ${(s1.txt.match(/D-(\d+)/) || [])[1]}`) && /165,00/.test(d)), JSON.stringify(opened).slice(0, 300))
+    check("succès : éditeur fermé, le devis créé s'ouvre", !opened.editor && opened.dialogs.some(d => d.includes(`Devis N° ${(s1.txt.match(/N° (\d+)/) || [])[1]}`) && /165,00/.test(d)), JSON.stringify(opened).slice(0, 300))
     await page.waitForFunction(TOAST => !document.querySelector(TOAST), TOAST, { timeout: 6000 }).catch(() => {})
     const life = Date.now() - tShown
     check("toast affiché environ 2,5 s", life > 2000 && life < 3600 && await page.locator(TOAST).count() === 0, `durée=${life} ms (création ${tShown - t0} ms)`)
@@ -257,6 +257,19 @@ async function main() {
     const fo = await page.evaluate(() => ({ editor: !!document.querySelector("[data-create-facture]"), txt: [...document.querySelectorAll("[role=dialog]")].map(d => d.innerText.replace(/\s+/g, " ").slice(0, 90)) }))
     check("Créer une facture : bouton en chargement puis toast « Facture … créée »", fb.disabled && fb.spin && /^Facture( F-[\w-]+)? créée$/.test(fs), JSON.stringify({ fb, fs }))
     check("Créer une facture : éditeur fermé, la facture créée s'ouvre", !fo.editor && fo.txt.some(t => /Facture|Brouillon/i.test(t)) && writes.some(w => w.table === "factures" && w.method === "POST"), JSON.stringify(fo))
+
+    // barre interne de la feuille Facture (Enregistrer / Valider la facture) : affichée ; la navigation derrière reste masquée
+    await page.waitForTimeout(600)
+    const bar = await page.evaluate(() => {
+      const ft = document.querySelector("[data-sheet-footer]"), nav = document.querySelector("[data-mobile-nav]")
+      const btn = [...(ft?.querySelectorAll("button") || [])].find(b => /Valider la facture/.test(b.textContent))
+      const r = btn?.getBoundingClientRect(), hit = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      const hide = ft?.querySelector(".kb-hide")
+      return { btn: !!btn, save: !!ft && /Enregistrer/.test(ft.textContent), op: hide ? Number(getComputedStyle(hide).opacity) : -1, onTop: !!hit && btn.contains(hit), bottom: r ? Math.round(r.bottom) : -1, nav: nav ? Number(getComputedStyle(nav).opacity) : -1 }
+    })
+    await page.screenshot({ path: join(SHOTS, "kb-facture-barre.png") })
+    check("feuille Facture : barre Enregistrer / Valider la facture visible et cliquable", bar.btn && bar.save && bar.op === 1 && bar.onTop && bar.bottom <= HT, JSON.stringify(bar))
+    check("feuille ouverte : la navigation derrière reste masquée", bar.nav === 0, JSON.stringify(bar))
 
     const serious = errors.filter(e => !/ResizeObserver|favicon|interactive-widget|example\.supabase\.co\/realtime|status of 500|Failed to load resource|saveDevis/.test(e))
     check("aucune erreur console / pageerror", serious.length === 0, JSON.stringify(serious.slice(0, 5)))

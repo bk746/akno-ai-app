@@ -272,7 +272,10 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .ig .ig-row + .ig-row::before, .ig > * + * > .ig-row:first-child::before, .ig > * + .ig-row::before, .ig > :not(:first-child) > div > .ig-row:first-child::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: 1px; transform: scaleY(.5); transform-origin: top; background: rgba(255, 255, 255, .16); pointer-events: none; }
 /* barre du bas des éditeurs : s'efface quand le clavier est ouvert (pas de saut de mise en page) */
 .kb-hide { transition: transform .28s cubic-bezier(.32, .72, 0, 1), opacity .2s ease; will-change: auto; }
-.kb-open .kb-hide, .sheet-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; }
+/* Feuille ouverte : seules les barres de la page DERRIÈRE la feuille s'effacent (navigation, barre des chantiers). La barre
+   interne d'une feuille (Enregistrer / Valider la facture, fiche client, équipe) reste affichée : depuis update80 elle était
+   masquée par sa propre feuille. Clavier ouvert : toutes s'effacent, comme avant. */
+.kb-open .kb-hide, .sheet-open .kb-hide:not([data-sheet-root] .kb-hide) { transform: translateY(110%); opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .kb-hide { transition: none; } }
 
 /* update85 · barre du devis : masquée seulement quand le clavier est ouvert (pas .sheet-open, la feuille du devis l'activerait). Layout inchangé (absolute). */
