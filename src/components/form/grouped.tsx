@@ -103,7 +103,8 @@ const looksMail = (t: string) => /@/.test(t)
 export function ContactSheet({ open, clients, current, onPick, onClose, desk }: { open: boolean; clients: Contact[]; current?: string; onPick: (c: Contact, isNew: boolean) => void; onClose: () => void; desk?: boolean }) {
   const [q, setQ] = useState(""), [sel, setSel] = useState(0), inRef = useRef<HTMLInputElement>(null), rm = useReducedMotion()
   const [nf, setNf] = useState<Contact | null>(null), [busy, setBusy] = useState(false), [err, setErr] = useState(""), nameRef = useRef<HTMLInputElement>(null)
-  useEffect(() => { if (open) { setQ(""); setSel(0); setNf(null); setErr(""); setBusy(false) } }, [open])
+  const wasOpen = useRef(false)
+  useEffect(() => { if (open && !wasOpen.current) { setQ(""); setSel(0); setNf(null); setErr(""); setBusy(false) } ; wasOpen.current = open }, [open])
   useEffect(() => {
     if (!open) return
     const f = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); if (nf) setNf(null); else onClose() } }
@@ -128,7 +129,7 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
       if (!r.ok && !r.existing && !/session/i.test(r.error)) console.warn("[clients] fiche non créée :", r.error)
       if (!r.ok && /session/i.test(r.error)) { setErr(r.error); setBusy(false); return }
     } catch { /* hors ligne : le client est quand même choisi */ }
-    setBusy(false); onPick(c, false)
+    setBusy(false); onPick(c, true)
   }
   const nfIn = (k: keyof Contact, label: string, props: Record<string, unknown>) => <label className="ig-row flex min-h-12 items-center gap-3 pl-4">
     <span className="w-[92px] shrink-0 text-[16px]">{label}</span>

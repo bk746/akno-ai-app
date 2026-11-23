@@ -15,11 +15,11 @@ import { CO, buildDoc, missingLegal } from "../../lib/devisDoc"
 import { KIND_LABEL, KIND_SHORT, TVA_RATES, UNITS, acompteFrom, computeTotals, fmtE, fmtN, fromStored, lid, lineDisc, lineGross, lineHT, r2, toStored, withAcompte, type DevisMeta, type EdLine, type LineKind } from "../../lib/devisCalc"
 import { dropLocal, keepLocal, nextDevisNum, readLocal, saveDevis } from "../../lib/devisSave"
 import type { Devis } from "../../lib/store"
-import type { Prestation } from "../../lib/prestations"
+import { usePrestations, type Prestation } from "../../lib/prestations"
 import { NumField, Seg, Stepper, Menu, MenuItem, MenuSep, Kbd, isMac, TEAL, TEAL_T, field, ServiceLineCard } from "./fields"
 import { PrestaForm, PrestaPicker, tauxDef } from "./Prestations"
 import Modeles, { type Modele } from "./Modeles"
-import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Pill, Reveal, ival } from "../form/grouped"
+import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Pill, Reveal, SuggestPop, ival } from "../form/grouped"
 import { createPortal } from "react-dom"
 import ModalSheet from "../sheet/ModalSheet"
 import { askConfirm } from "../form/SwipeRow"
@@ -68,7 +68,7 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
   const [picker, setPicker] = useState(false), [preview, setPreview] = useState(false), [form, setForm] = useState<{ initial: any } | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   // update63 · feuille de choix du client, coordonnées repliables, adresse de chantier distincte
-  const [pickC, setPickC] = useState(false), [coordOpen, setCoordOpen] = useState(() => !(doc.client.trim() && (doc.email || doc.phone || doc.addr)))
+  const [pickC, setPickC] = useState(false), [coordOpen, setCoordOpen] = useState(() => !(doc.client.trim() && (doc.email || doc.phone || doc.addr))), [offerSaveId, setOfferSaveId] = useState<string | null>(null)
   const [siteDiff, setSiteDiff] = useState(() => !!doc.meta.site)
   const [remOpen, setRemOpen] = useState(() => !!(doc.meta.remise && doc.meta.remise.v > 0)), [moreOpen, setMoreOpen] = useState(false) // update73
   useEffect(() => { if (doc.meta.site && !siteDiff) setSiteDiff(true) }, [doc.meta.site]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -189,13 +189,14 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
   const setMeta = (p: Partial<DevisMeta>) => setDoc(d => ({ ...d, meta: { ...d.meta, ...p } }))
   const setItems = (f: (xs: EdLine[]) => EdLine[]) => setDoc(d => ({ ...d, items: f(d.items) }))
   const patch = (lineId: string, p: Partial<EdLine>) => setItems(xs => xs.map(x => x.id === lineId ? { ...x, ...p } : x))
-  const focusLine = (lineId: string, sel = "[data-f=l]") => { setFocusId(lineId); requestAnimationFrame(() => requestAnimationFrame(() => (document.querySelector(`[data-line="${lineId}"] ${sel}`) as HTMLInputElement | null)?.focus())) }
+  const focusLine = (lineId: string, sel = "[data-f=l]") => { setFocusId(lineId); requestAnimationFrame(() => requestAnimationFrame(() => { const row = document.querySelector(`[data-line="${lineId}"]`) as HTMLElement | null; row?.scrollIntoView({ block: "center", behavior: "smooth" }); (row?.querySelector(sel) as HTMLInputElement | null)?.focus() })) }
   const newLine = (k: LineKind | "sec", after?: string): EdLine => k === "sec" ? { id: lid(), k, l: "", d: "", q: 0, u: "", pu: 0, tv: tv0 } : { id: lid(), k, l: "", d: "", q: 1, u: k === "mo" ? "h" : k === "fft" ? "forfait" : "u", pu: k === "mo" ? taux ?? 0 : 0, tv: tv0 }
   const insert = (x: EdLine, after?: string | null) => { setItems(xs => { const i = after ? xs.findIndex(y => y.id === after) : -1; return i < 0 ? [...xs, x] : [...xs.slice(0, i + 1), x, ...xs.slice(i + 1)] }); focusLine(x.id) }
   const addKind = (k: LineKind | "sec") => insert(newLine(k), focusId && doc.items.some(x => x.id === focusId) ? focusId : null)
+  const addFree = (name: string) => { const line = { ...newLine("fft"), l: name.trim() }; insert(line); setOfferSaveId(line.id) }
   const fromPresta = (p: Prestation) => {
     const k = p.type, line: EdLine = { id: lid(), k, l: p.libelle, d: p.description || "", q: k === "mo" ? p.duree_h ?? 1 : 1, u: k === "mo" ? "h" : p.unite || (k === "fft" ? "forfait" : "u"), pu: k === "mo" ? p.taux_horaire ?? taux ?? 0 : p.prix_unitaire, tv: CO.tvaNA ? 0 : p.tva ?? tv0, pid: p.id, ...(p.cout_achat != null ? { ca: p.cout_achat } : {}) }
-    setItems(xs => [...xs, line]); setFocusId(line.id)
+    setItems(xs => [...xs, line]); focusLine(line.id)
   }
   const move = (lineId: string, dir: -1 | 1) => setItems(xs => { const i = xs.findIndex(x => x.id === lineId), j = i + dir; if (i < 0 || j < 0 || j >= xs.length) return xs; const c = [...xs];[c[i], c[j]] = [c[j], c[i]]; return c })
   const dup = (lineId: string) => { const x = doc.items.find(y => y.id === lineId); if (x) insert({ ...x, id: lid() }, lineId) }
@@ -271,28 +272,18 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
   </div>
 
   const nLines = doc.items.filter(x => x.k !== "sec").length
-  const lines = <section>
+  const lines = <section data-prestations>
     <div className="mb-1.5 flex items-end justify-between gap-3 px-4">
       <h2 className="text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42"><StepT n={3} t="Prestations" />{nLines > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {nLines} ligne{nLines > 1 ? "s" : ""}</span>}</h2>
       <button type="button" onClick={() => setPicker(true)} className="-mb-0.5 flex h-8 items-center gap-1.5 rounded-full pl-1 pr-1 text-[14px] font-medium text-[#7EA6FF] transition-colors hover:text-white"><Search size={14} strokeWidth={2} />Mes prestations{desk && <Kbd>{mk} K</Kbd>}</button>
     </div>
-    {/* update82 · en-tête de colonnes remplacé par la carte iOS */}
-    {doc.items.length > 0 ? <Reorder.Group axis="y" values={doc.items} onReorder={xs => setDoc(d => ({ ...d, items: xs as EdLine[] }))} className={desk ? "space-y-1.5" : "space-y-2.5"}>
-      {doc.items.map((x, i) => <LineRow key={x.id} x={x} n={x.k === "sec" ? 0 : doc.items.slice(0, i + 1).filter(y => y.k !== "sec").length} desk={desk} focused={focusId === x.id} taux={taux} subtotal={x.k === "sec" ? sub(i) : 0} first={i === 0} last={i === doc.items.length - 1}
-        onFocus={() => setFocusId(x.id)} onPatch={p => patch(x.id, p)} onMove={d => move(x.id, d)} onDup={() => dup(x.id)} onRemove={() => remove(x.id)} onSave={() => asPresta(x)} onEnter={() => addKind(x.k)} />)}
+    <Reorder.Group axis="y" values={doc.items} onReorder={xs => setDoc(d => ({ ...d, items: xs as EdLine[] }))} className={desk ? "space-y-1.5" : "space-y-2.5"}>
+      <AnimatePresence initial={false}>
+      {doc.items.map((x, i) => <LineRow key={x.id} x={x} n={x.k === "sec" ? 0 : doc.items.slice(0, i + 1).filter(y => y.k !== "sec").length} desk={desk} focused={focusId === x.id} taux={taux} tv0={tv0} subtotal={x.k === "sec" ? sub(i) : 0} first={i === 0} last={i === doc.items.length - 1} offerSave={offerSaveId === x.id}
+        onFocus={() => setFocusId(x.id)} onPatch={p => patch(x.id, p)} onMove={d => move(x.id, d)} onDup={() => dup(x.id)} onRemove={() => { if (offerSaveId === x.id) setOfferSaveId(null); remove(x.id) }} onSave={() => asPresta(x)} onEnter={() => addKind(x.k)} />)}
+      </AnimatePresence>
     </Reorder.Group>
-      : <div className="rounded-[18px] bg-[#141416] px-6 py-9 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full" style={{ background: TEAL + "22", color: TEAL_T }}><Package size={21} strokeWidth={1.6} /></div>
-        <div className="mt-3 text-[16px] font-medium">Ajoutez ce que vous facturez</div>
-        <p className="mx-auto mt-1 max-w-[340px] text-[14px] leading-5 text-white/50">Choisissez une prestation déjà enregistrée, ou écrivez une ligne vous-même.</p>
-        <button type="button" onClick={() => setPicker(true)} className="mx-auto mt-4 flex h-12 w-full max-w-[320px] items-center justify-center gap-2 rounded-full px-5 text-[16px] font-semibold text-white" style={{ background: TEAL }}><Search size={17} />Choisir une prestation</button>
-        <button type="button" onClick={() => addKind("fft")} className="mx-auto mt-2 flex h-12 w-full max-w-[320px] items-center justify-center gap-2 rounded-full bg-white/[.08] px-5 text-[16px] font-medium text-white"><Plus size={17} />Ajouter un service / une ligne</button>
-      </div>}
-    {doc.items.length > 0 && <button type="button" onClick={() => setPicker(true)} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-dashed border-white/[.14] text-[15.5px] font-medium text-[#7EA6FF] active:bg-white/[.04]"><Plus size={17} />Ajouter une prestation</button>}
-    <div className="mt-3 px-1 text-[13px] text-white/40">Ou une ligne libre :</div>
-    <div className="mt-1.5 flex flex-wrap gap-2">
-      {([["mo", "À l'heure"], ["fo", "Fourniture"], ["fft", "Forfait"], ["sec", "Titre de partie"]] as [LineKind | "sec", string][]).map(([k, l]) => { const I = k === "sec" ? Layers : KIND_ICON[k]; return <button key={k} type="button" onClick={() => addKind(k)} className="flex h-9 items-center gap-1.5 rounded-full bg-white/[.06] px-3.5 text-[14px] font-medium text-white/75 transition-colors hover:bg-white/[.1] hover:text-white active:scale-[.97]"><Plus size={14} strokeWidth={2.2} className="text-[#7EA6FF]" /><I size={14} strokeWidth={1.7} />{l}</button> })}
-    </div>
+    <AddPrestaRow onPick={p => fromPresta(p)} onCreate={addFree} />
     {desk && <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 px-1 text-[12px] text-white/35"><span><Kbd>{mk} K</Kbd> prestations</span><span><Kbd>{mk} ↵</Kbd> nouvelle ligne</span><span><Kbd>Alt ↑↓</Kbd> déplacer</span><span><Kbd>{mk} S</Kbd> enregistrer</span><span><Kbd>{mk} P</Kbd> aperçu</span></div>}
   </section>
 
@@ -366,13 +357,14 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
     </>}
 
     <ContactSheet open={pickC} desk={desk} clients={clients} current={doc.client} onClose={() => setPickC(false)} onPick={(c, isNew) => {
+      const nx = { client: c.name, email: c.email || (isNew ? "" : doc.email), phone: c.phone || (isNew ? "" : doc.phone), addr: c.addr || (isNew ? "" : doc.addr) }
+      set(nx)
+      setCoordOpen(!(nx.email || nx.phone || nx.addr) || !!isNew)
       setPickC(false)
-      if (isNew) { set({ client: c.name }); setCoordOpen(true) }
-      else { const nx = { client: c.name, email: c.email || doc.email, phone: c.phone || doc.phone, addr: c.addr || doc.addr }; set(nx); setCoordOpen(!(nx.email || nx.phone || nx.addr)) }
     }} />
     <AnimatePresence>{modeles && <Modeles desk={desk} current={{ objet: doc.objet, lignes: serialize(doc).lines }} onClose={() => setModeles(false)} onApply={applyModele} />}</AnimatePresence>
-    <AnimatePresence>{picker && <PrestaPicker desk={desk} onClose={() => setPicker(false)} onPick={p => fromPresta(p)} onNew={() => { setPicker(false); setForm({ initial: {} }) }} />}</AnimatePresence>
-    <AnimatePresence>{form && <PrestaForm initial={form.initial} title={form.initial?.libelle ? "Enregistrer comme prestation" : undefined} onCancel={() => setForm(null)} onDone={p => { setForm(null); if (p) { toast(`« ${p.libelle} » ajoutée à vos prestations`); if (!form.initial?.libelle) fromPresta(p) } }} />}</AnimatePresence>
+    <AnimatePresence>{picker && <PrestaPicker desk={desk} onClose={() => setPicker(false)} onPick={p => fromPresta(p)} onNew={name => setForm({ initial: name ? { libelle: name } : {} })} />}</AnimatePresence>
+    <AnimatePresence>{form && <PrestaForm initial={form.initial} title={form.initial?.libelle && !picker ? "Enregistrer comme prestation" : undefined} onCancel={() => setForm(null)} onDone={p => { setForm(null); if (p) { toast(`« ${p.libelle} » ajoutée à vos prestations`); if (!form.initial?.libelle || picker) fromPresta(p) } }} />}</AnimatePresence>
     {createPortal(<AnimatePresence>{preview && <motion.div className="fixed inset-0 z-[55] flex flex-col bg-black/85 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setPreview(false)}>
       <div className="flex shrink-0 items-center gap-3 px-4 py-3 lg:px-6" style={{ paddingTop: desk ? undefined : "calc(var(--sat) + 8px)" }} onClick={e => e.stopPropagation()}>
         <span className="flex-1 text-[15px] font-semibold">Aperçu · ce que reçoit le client</span>
@@ -394,16 +386,50 @@ const StepT = ({ n, t }: { n: number; t: string }) => <span className="inline-fl
 const COLS = (tvaNA: boolean) => tvaNA ? "20px minmax(0,1fr) 132px 84px 120px 116px 36px" : "20px minmax(0,1fr) 132px 84px 120px 84px 116px 36px"
 const TotRow = ({ l, v, strong, hint }: { l: string; v: string; strong?: boolean; hint?: string }) => <div className="ig-row flex min-h-11 items-center justify-between gap-3 py-2 pl-4 pr-4 text-[15px]"><span className={strong ? "font-medium text-white" : "text-white/55"}>{l}{hint && <span className="ml-1.5 text-[12.5px] text-white/30">{hint}</span>}</span><span className={`tabular-nums ${strong ? "font-medium text-white" : "text-white/85"}`}>{v}</span></div>
 
-function LineRow({ x, n, desk, focused, taux, subtotal, first, last, onFocus, onPatch, onMove, onDup, onRemove, onSave, onEnter }: { x: EdLine; n: number; desk: boolean; focused: boolean; taux: number | null; subtotal: number; first: boolean; last: boolean; onFocus: () => void; onPatch: (p: Partial<EdLine>) => void; onMove: (d: -1 | 1) => void; onDup: () => void; onRemove: () => void; onSave: () => void; onEnter: () => void }) {
+
+function normQ(s: string) { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") }
+/** update85 · une seule ligne compacte pour ajouter une prestation (catalogue ou texte libre). */
+function AddPrestaRow({ onPick, onCreate }: { onPick: (p: Prestation) => void; onCreate: (name: string) => void }) {
+  const lib = usePrestations()
+  const [q, setQ] = useState(""), [on, setOn] = useState(false)
+  const words = normQ(q).trim().split(/\s+/).filter(Boolean)
+  const list = lib.items.filter(x => !words.length || words.every(w => normQ(`${x.libelle} ${x.description} ${x.categorie}`).includes(w))).slice(0, 8)
+  const exact = list.some(x => x.libelle.toLowerCase() === q.trim().toLowerCase())
+  const commit = (raw: string, p?: Prestation) => {
+    const t = raw.trim(); if (!t && !p) return
+    if (p) onPick(p)
+    else { const hit = list.find(x => x.libelle.toLowerCase() === t.toLowerCase()); if (hit) onPick(hit); else onCreate(t) }
+    setQ(""); setOn(false)
+  }
+  return <div data-add-presta className="relative mt-2.5">
+    <div className="flex h-12 items-center gap-2 rounded-[16px] bg-[#141416] px-3.5 ring-1 ring-white/[.06]">
+      <Plus size={16} strokeWidth={2.2} className="shrink-0 text-[#7EA6FF]" />
+      <input data-add-presta-input value={q} maxLength={200} placeholder="Ajouter une prestation" aria-label="Ajouter une prestation" autoComplete="off" autoCorrect="off" className="h-full min-w-0 flex-1 bg-transparent text-[15.5px] text-white outline-none placeholder:text-white/40"
+        onChange={e => { setQ(e.target.value); setOn(true) }} onFocus={() => setOn(true)} onBlur={() => setTimeout(() => setOn(false), 180)}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(q) } }} />
+    </div>
+    <SuggestPop show={on && (q.trim().length > 0 || list.length > 0)} label="Prestations">
+      <div data-add-presta-sug className="mt-1.5 overflow-hidden rounded-[16px] bg-[#1C1C1E] ring-1 ring-white/[.08]">
+        {q.trim() && !exact && <button type="button" data-add-presta-create onMouseDown={e => e.preventDefault()} onClick={() => commit(q)} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-[#7EA6FF] active:bg-white/[.05]">
+          <Plus size={15} /><span className="min-w-0 flex-1 truncate text-[14.5px] font-medium">Créer « {q.trim()} »</span>
+        </button>}
+        {list.map(p => <button key={p.id} type="button" data-add-presta-item onMouseDown={e => e.preventDefault()} onClick={() => commit(p.libelle, p)} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left active:bg-white/[.05]">
+          <span className="min-w-0 flex-1"><span className="block truncate text-[14.5px] font-medium">{p.libelle}</span>{p.categorie && <span className="block truncate text-[12px] text-white/40">{p.categorie}</span>}</span>
+        </button>)}
+      </div>
+    </SuggestPop>
+  </div>
+}
+function LineRow({ x, n, desk, focused, taux, tv0, subtotal, first, last, offerSave, onFocus, onPatch, onMove, onDup, onRemove, onSave, onEnter }: { x: EdLine; n: number; desk: boolean; focused: boolean; taux: number | null; tv0: number; subtotal: number; first: boolean; last: boolean; offerSave?: boolean; onFocus: () => void; onPatch: (p: Partial<EdLine>) => void; onMove: (d: -1 | 1) => void; onDup: () => void; onRemove: () => void; onSave: () => void; onEnter: () => void }) {
   const controls = useDragControls(), [menu, setMenu] = useState(false), [desc, setDesc] = useState(!!x.d)
   const [remOpen, setRemOpen] = useState(!!x.rl)
-  const setKind = (k: LineKind) => onPatch({ k, u: k === "mo" ? "h" : k === "fft" ? "forfait" : x.u === "h" || x.u === "forfait" ? "u" : x.u, ...(k === "mo" && !x.pu && taux ? { pu: taux } : {}) })
+  const setKind = (k: LineKind | "sec") => onPatch(k === "sec" ? { k: "sec", u: "", pu: 0, q: 0 } : { k, u: k === "mo" ? "h" : k === "fft" ? "forfait" : x.u === "h" || x.u === "forfait" ? "u" : x.u, q: x.k === "sec" ? 1 : x.q, ...(k === "mo" && !x.pu && taux ? { pu: taux } : {}) })
   const handle = <button type="button" data-nodrag aria-label="Déplacer la ligne" onPointerDown={e => { e.preventDefault(); controls.start(e) }} className="flex h-10 w-5 shrink-0 cursor-grab touch-none items-center justify-center text-white/20 transition-colors hover:text-white/60 active:cursor-grabbing"><GripVertical size={16} /></button>
   const menuEl = <Menu open={menu} setOpen={setMenu} trigger={<button type="button" aria-label="Actions de la ligne" aria-haspopup="menu" onClick={() => setMenu(o => !o)} className={`flex h-9 w-9 items-center justify-center rounded-full text-white/40 transition-colors hover:bg-white/[.07] hover:text-white ${menu ? "bg-white/[.07] text-white" : ""}`}><MoreHorizontal size={17} /></button>}>
-    {x.k !== "sec" && <>{(["mo", "fo", "fft"] as LineKind[]).map(k => { const I = KIND_ICON[k]; return <MenuItem key={k} I={I} onClick={() => { setKind(k); setMenu(false) }} hint={x.k === k ? "✓" : undefined}>{KIND_LABEL[k]}{k === "mo" ? " à l'heure" : ""}</MenuItem> })}<MenuSep />
-      {!desc && <MenuItem I={AlignLeft} onClick={() => { setDesc(true); setMenu(false) }}>Ajouter une description</MenuItem>}
-      {!remOpen && <MenuItem I={Percent} onClick={() => { setRemOpen(true); if (!x.rl) onPatch({ rl: { t: "pct", v: 0 } }); setMenu(false) }}>Faire une remise sur cette ligne</MenuItem>}
-      <MenuItem I={BookmarkPlus} onClick={() => { onSave(); setMenu(false) }}>Enregistrer comme prestation</MenuItem></>}
+    <>{([["mo", "À l'heure"], ["fo", "Fourniture"], ["fft", "Forfait"], ["sec", "Titre de partie"]] as [LineKind | "sec", string][]).map(([k, l]) => { const I = k === "sec" ? Layers : KIND_ICON[k]; return <MenuItem key={k} I={I} onClick={() => { setKind(k); setMenu(false) }} hint={x.k === k ? "✓" : undefined}>{l}</MenuItem> })}<MenuSep />
+      {x.k !== "sec" && !desc && <MenuItem I={AlignLeft} onClick={() => { setDesc(true); setMenu(false) }}>Ajouter une description</MenuItem>}
+      {x.k !== "sec" && !remOpen && <MenuItem I={Percent} onClick={() => { setRemOpen(true); if (!x.rl) onPatch({ rl: { t: "pct", v: 0 } }); setMenu(false) }}>Faire une remise sur cette ligne</MenuItem>}
+      {x.k !== "sec" && <MenuItem I={BookmarkPlus} onClick={() => { onSave(); setMenu(false) }}>Enregistrer comme prestation</MenuItem>}</>
     <MenuItem I={Copy} onClick={() => { onDup(); setMenu(false) }}>Dupliquer</MenuItem>
     {!first && <MenuItem I={ArrowUp} hint="Alt ↑" onClick={() => { onMove(-1); setMenu(false) }}>Monter</MenuItem>}
     {!last && <MenuItem I={ArrowDown} hint="Alt ↓" onClick={() => { onMove(1); setMenu(false) }}>Descendre</MenuItem>}
@@ -413,7 +439,7 @@ function LineRow({ x, n, desk, focused, taux, subtotal, first, last, onFocus, on
   const rm = useReducedMotion(), xc = useDragControls(), mx = useMotionValue(0), delOp = useTransform(mx, [-56, -6, 0], [1, 0, 0]), [swiped, setSwiped] = useState(false)
   const snap = (open: boolean) => { setSwiped(open); void animate(mx, open ? -SWIPE : 0, rm ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42 }) }
 
-  if (x.k === "sec") return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className="relative pt-3">
+  if (x.k === "sec") return <Reorder.Item value={x} layout dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="relative pt-3">
     <div className={`flex items-center gap-2 rounded-[16px] px-2 py-1 ${focused ? "bg-white/[.03]" : ""}`}>
       {handle}
       <span aria-hidden className="h-5 w-[3px] shrink-0 rounded-full" style={{ background: TEAL_T }} />
@@ -424,13 +450,15 @@ function LineRow({ x, n, desk, focused, taux, subtotal, first, last, onFocus, on
   </Reorder.Item>
 
   // update83 · carte pleine largeur : poignée et « … » dans l'en-tête (Ligne n)
-  const form = <ServiceLineCard x={x} onPatch={p => onPatch(p)} defaultTv={x.tv > 0 ? x.tv : (CO.tvaNA ? 0 : 20)} tvaNA={CO.tvaNA} idPrefix={x.id} index={n || undefined} handle={handle} menu={menuEl} />
+  const form = <ServiceLineCard x={x} onPatch={p => onPatch(p)} defaultTv={x.tv > 0 ? x.tv : (CO.tvaNA ? 0 : tv0)} tvaNA={CO.tvaNA} idPrefix={x.id} index={n || undefined} handle={handle} menu={menuEl} />
 
-  if (desk) return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className={`relative ${focused ? "ring-1 ring-white/15 rounded-[18px]" : ""}`}>
+  if (desk) return <Reorder.Item value={x} layout dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className={`relative ${focused ? "ring-1 ring-white/15 rounded-[18px]" : ""}`}>
     {form}
+    {offerSave && <button type="button" data-line-save-presta onClick={onSave} className="mt-1.5 flex items-center gap-1.5 px-2 text-[12.5px] font-medium text-[#7EA6FF]"><BookmarkPlus size={13} />Enregistrer dans mes prestations</button>}
   </Reorder.Item>
 
-  return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className="relative">
+  return <Reorder.Item value={x} layout dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="relative">
+    {offerSave && <button type="button" data-line-save-presta onClick={onSave} className="mb-1.5 ml-1 flex items-center gap-1.5 text-[12.5px] font-medium text-[#7EA6FF]"><BookmarkPlus size={13} />Enregistrer dans mes prestations</button>}
     <motion.div aria-hidden={!swiped} style={{ opacity: delOp }} className="absolute inset-y-0 right-0 flex w-[120px] items-stretch justify-end overflow-hidden rounded-[18px] bg-[#FF453A]">
       <button type="button" tabIndex={swiped ? 0 : -1} aria-label="Supprimer la ligne" onClick={() => { snap(false); onRemove() }} className="flex w-[88px] flex-col items-center justify-center gap-1 text-[12.5px] font-semibold text-white"><Trash2 size={19} strokeWidth={1.9} />Supprimer</button>
     </motion.div>

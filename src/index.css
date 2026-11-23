@@ -274,6 +274,13 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .kb-hide { transition: transform .28s cubic-bezier(.32, .72, 0, 1), opacity .2s ease; will-change: auto; }
 .kb-open .kb-hide, .sheet-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .kb-hide { transition: none; } }
+
+/* update85 · barre du devis : masquée seulement quand le clavier est ouvert (pas .sheet-open, la feuille du devis l'activerait). Layout inchangé (absolute). */
+[data-devis-footer] { transition: transform .2s ease, opacity .2s ease; }
+.kb-open [data-devis-footer] { transform: translateY(100%); opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  [data-devis-footer], .kb-open [data-devis-footer] { transition: none; }
+}
 /* update80 · repli CSS si l'orientation n'a pas pu être verrouillée (Safari) */
 html.akno-portrait-only::after {
   content: "Tourne l'appareil en mode portrait";

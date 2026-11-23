@@ -1,5 +1,6 @@
 /* update52 · Petits champs de l'éditeur de devis (saisie française des nombres, pas à pas, segments, menu). */
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { ChevronRight, Minus, Plus } from "lucide-react"
 import { fmtN, parseN } from "../../lib/devisCalc"
 import { IToggleRow, ival } from "../form/grouped"
@@ -42,17 +43,36 @@ export function Seg<T extends string | number>({ value, onChange, opts, label, s
   </div>
 }
 
-/** Menu contextuel ancré (ferme au clic extérieur et sur Échap). */
+/** Menu contextuel ancré (portail fixed : n'est pas rogné par overflow de la carte, ni glissé sous la barre du bas). */
 export function Menu({ trigger, children, align = "right", open, setOpen }: { trigger: ReactNode; children: ReactNode; align?: "left" | "right"; open: boolean; setOpen: (b: boolean) => void }) {
-  const ref = useRef<HTMLDivElement>(null)
+  const wrap = useRef<HTMLDivElement>(null), menuRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: 0, left: 0, maxH: 360 })
+  useLayoutEffect(() => {
+    if (!open) return
+    const place = () => {
+      const trig = wrap.current
+      if (!trig) return
+      const r = trig.getBoundingClientRect(), w = 236
+      const left = align === "right" ? Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8) : Math.max(8, Math.min(r.left, window.innerWidth - w - 8))
+      const h = menuRef.current?.offsetHeight || 400
+      const below = window.innerHeight - 12 - r.bottom, above = r.top - 12
+      const goDown = below >= Math.min(h, 200) || below >= above
+      const maxH = Math.max(140, goDown ? below - 6 : above - 6)
+      const top = goDown ? r.bottom + 6 : Math.max(8, r.top - Math.min(h, maxH) - 6)
+      setPos({ top, left, maxH })
+    }
+    place(); const id = requestAnimationFrame(place)
+    addEventListener("resize", place)
+    return () => { cancelAnimationFrame(id); removeEventListener("resize", place) }
+  }, [open, align])
   useEffect(() => {
     if (!open) return
-    const f = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const f = (e: PointerEvent) => { const n = e.target as Node; if (wrap.current?.contains(n) || menuRef.current?.contains(n)) return; setOpen(false) }
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false) } }
     addEventListener("pointerdown", f, true); addEventListener("keydown", k, true)
     return () => { removeEventListener("pointerdown", f, true); removeEventListener("keydown", k, true) }
   }, [open, setOpen])
-  return <div ref={ref} className="relative">{trigger}{open && <div role="menu" className={`absolute top-[calc(100%+6px)] z-30 w-[236px] overflow-hidden rounded-[16px] border border-white/[.1] bg-[#1A1A1D] p-1.5 shadow-[0_24px_60px_-12px_rgba(0,0,0,.95)] ${align === "right" ? "right-0" : "left-0"}`}>{children}</div>}</div>
+  return <div ref={wrap} className="relative">{trigger}{open && createPortal(<div ref={menuRef} role="menu" data-line-menu style={{ position: "fixed", top: pos.top, left: pos.left, width: 236, maxHeight: pos.maxH, zIndex: 80, overflowY: "auto" }} className="rounded-[16px] border border-white/[.1] bg-[#1A1A1D] p-1.5 shadow-[0_24px_60px_-12px_rgba(0,0,0,.95)]">{children}</div>, document.body)}</div>
 }
 export const MenuItem = ({ I, children, onClick, danger, hint }: { I?: any; children: ReactNode; onClick: () => void; danger?: boolean; hint?: string }) =>
   <button type="button" role="menuitem" onClick={onClick} className={`flex h-9 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[13.5px] transition-colors hover:bg-white/[.07] ${danger ? "text-[#FF7A72]" : "text-white/85"}`}>{I && <I size={15} strokeWidth={1.75} className={danger ? "" : "text-white/50"} />}<span className="flex-1">{children}</span>{hint && <span className="text-[11.5px] text-white/30">{hint}</span>}</button>

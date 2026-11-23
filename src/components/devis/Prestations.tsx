@@ -41,7 +41,7 @@ export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?:
   }
   const del = async () => { if (!id || !confirm(`Supprimer « ${v.libelle} » de vos prestations ?`)) return; setBusy(true); const r = await deletePrestation(id); setBusy(false); if (!r.ok) { setErr(r.error); return } onDone() }
   const L = ({ children }: any) => <span className="mb-1.5 block px-0.5 text-[12.5px] text-white/50">{children}</span>
-  return <Sheet title={title || (id ? "Modifier la prestation" : "Nouvelle prestation")} sub={id ? v.categorie || "Bibliothèque" : "Réutilisable dans tous vos devis"} c={TEAL} onClose={onCancel}
+  return <Sheet title={title || (id ? "Modifier la prestation" : "Nouvelle prestation")} sub={id ? v.categorie || "Bibliothèque" : "Réutilisable dans tous vos devis"} c={TEAL} z={70} onClose={onCancel}
     footer={<div data-presta-footer>
       {/* update73 : récapitulatif dans le pied (un seul bloc plein), même présentation pour les trois types */}
       <div className="mb-3 flex min-h-[40px] items-center justify-between gap-3 rounded-[12px] bg-white/[.05] px-3.5 text-[14px]">
@@ -117,7 +117,7 @@ export function PrestationsSheet({ close }: { close: () => void }) {
 }
 
 /** Palette d'ajout rapide (⌘K) : recherche, flèches, Entrée pour ajouter, reste ouverte pour enchaîner. */
-export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Prestation) => void; onClose: () => void; onNew: () => void; desk: boolean }) {
+export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Prestation) => void; onClose: () => void; onNew: (name?: string) => void; desk: boolean }) {
   const { s } = useC(), lib = usePrestations(), taux = tauxDef(s.settings.tarifs?.tauxHoraire)
   const [q, setQ] = useState(""), [cat, setCat] = useState(""), [sel, setSel] = useState(0), [flash, setFlash] = useState<string | null>(null), inp = useRef<HTMLInputElement>(null), listRef = useRef<HTMLDivElement>(null)
   const cats = [...new Set(lib.items.map(x => x.categorie).filter(Boolean))]
@@ -129,7 +129,7 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
   const key = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setSel(i => Math.min(list.length - 1, i + 1)) }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSel(i => Math.max(0, i - 1)) }
-    else if (e.key === "Enter") { e.preventDefault(); const p = list[sel]; if (p) pick(p) }
+    else if (e.key === "Enter") { e.preventDefault(); const p = list[sel]; if (p) pick(p); else if (q.trim()) onNew(q.trim()) }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose() }
   }
   /* update73 : plus d'autoFocus. Sur iPhone, le focus pendant la montée de la feuille ouvrait le clavier, qui faisait défiler
@@ -137,25 +137,30 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
        sur ordinateur, le champ reçoit le focus une fois la feuille arrivée. */
   return <ModalSheet label="Ajouter une prestation" onClose={onClose} desk={desk} z={50} onEntered={() => { if (desk) inp.current?.focus({ preventScroll: true }) }} deskAlign="top" backdrop="bg-black/60" className={`border-white/[.09] bg-[#121214] ${desk ? "" : "h-[86dvh] border-t"}`} deskClass="max-h-[70vh] max-w-[620px]">
       {!desk && <div className="h-[22px] shrink-0" />}
-      <div className="flex shrink-0 items-center gap-3 border-b border-white/[.07] px-4 py-3">
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/[.07] px-3 py-3 sm:px-4">
         <Search size={18} strokeWidth={1.7} className="shrink-0 text-white/40" />
         <input ref={inp} value={q} onChange={e => setQ(e.target.value)} onKeyDown={key} placeholder="Rechercher une prestation…" aria-label="Rechercher une prestation" className="h-10 min-w-0 flex-1 bg-transparent text-[16px] text-white outline-none placeholder:text-white/35" />
-        <button type="button" onClick={onClose} className="shrink-0 rounded-full bg-white/[.07] px-3 py-1.5 text-[12.5px] font-medium text-white/70 hover:text-white">{desk ? "Échap" : "Fermer"}</button>
+        <button type="button" data-presta-new onClick={() => onNew(q.trim() || undefined)} className="flex h-8 shrink-0 items-center gap-1 rounded-full bg-white/[.1] px-2.5 text-[12.5px] font-semibold text-white hover:bg-white/[.14]"><Plus size={14} strokeWidth={2.2} />Nouvelle</button>
+        <button type="button" onClick={onClose} className="shrink-0 rounded-full bg-white/[.07] px-2.5 py-1.5 text-[12.5px] font-medium text-white/70 hover:text-white">{desk ? "Échap" : "Fermer"}</button>
       </div>
       {cats.length > 1 && <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 py-2.5 [scrollbar-width:none]">{["", ...cats].map(c => <button key={c || "all"} type="button" onClick={() => setCat(c)} className={`h-7 shrink-0 rounded-full px-3 text-[12.5px] font-medium transition-colors ${cat === c ? "bg-white text-black" : "bg-white/[.06] text-white/60 hover:text-white"}`}>{c || "Toutes"}</button>)}</div>}
       <StorageNoteInline mode={lib.mode} />
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {!!q.trim() && !list.some(x => x.libelle.toLowerCase() === q.trim().toLowerCase()) && <button type="button" data-presta-create onClick={() => onNew(q.trim())} className="mb-1 flex w-full items-center gap-3 rounded-[14px] px-3 py-2.5 text-left text-[#7EA6FF] hover:bg-white/[.06]">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.08]"><Plus size={15} /></span>
+          <span className="min-w-0 flex-1 truncate text-[14.5px] font-medium">Créer « {q.trim()} »</span>
+        </button>}
         {list.map((x, i) => { const I = KIND_ICON[x.type], on = i === sel, ok = flash === x.id; return <button key={x.id} data-i={i} type="button" onMouseMove={() => setSel(i)} onClick={() => pick(x)} className={`flex w-full items-center gap-3 rounded-[14px] px-3 py-2.5 text-left transition-colors ${on ? "bg-white/[.07]" : ""}`}>
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/55"><I size={15} strokeWidth={1.7} /></span>
           <span className="min-w-0 flex-1"><span className="block truncate text-[14.5px] font-medium">{x.libelle}</span><span className="block truncate text-[12.5px] text-white/45">{x.categorie ? `${x.categorie} · ` : ""}{prestaMeta(x, taux)}</span></span>
           <span className="shrink-0 text-[14px] tabular-nums text-white/80">{fmtE(prestaPrice(x, taux))}</span>
           <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors ${ok ? "text-black" : on ? "bg-white/[.08] text-white/70" : "text-white/25"}`} style={ok ? { background: TEAL_T } : {}}>{ok ? <Check size={15} strokeWidth={2.4} /> : <Plus size={15} strokeWidth={2} />}</span>
         </button> })}
-        {lib.ready && !list.length && <div className="px-4 py-10 text-center text-[13.5px] text-white/45">{lib.items.length ? "Aucune prestation ne correspond." : "Votre bibliothèque est vide."}<div className="mt-3"><button type="button" onClick={onNew} className="text-[13.5px] font-medium" style={{ color: TEAL_T }}>Créer une prestation{q ? ` « ${q} »` : ""}</button></div></div>}
+        {lib.ready && !list.length && !q.trim() && <div className="px-4 py-10 text-center text-[13.5px] text-white/45">Votre bibliothèque est vide.</div>}
+        {lib.ready && !list.length && q.trim() && <div className="px-4 py-6 text-center text-[13.5px] text-white/45">Aucune prestation ne correspond.</div>}
       </div>
-      <div className="flex shrink-0 items-center justify-between border-t border-white/[.07] px-4 py-2.5 text-[12px] text-white/40" style={desk ? {} : { paddingBottom: "max(12px, var(--sab))" }}>
+      <div className="flex shrink-0 items-center border-t border-white/[.07] px-4 py-2.5 text-[12px] text-white/40" style={desk ? {} : { paddingBottom: "max(12px, var(--sab))" }}>
         {desk ? <span>↑ ↓ pour choisir · Entrée pour ajouter · la palette reste ouverte</span> : <span>Touchez pour ajouter</span>}
-        <button type="button" onClick={onNew} className="flex items-center gap-1 font-medium text-white/70 hover:text-white"><Plus size={14} />Nouvelle</button>
       </div>
   </ModalSheet>
 }

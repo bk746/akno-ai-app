@@ -38,6 +38,10 @@ const stack: number[] = []
    clavier (.sheet-kb / --kb). Avant, la feuille du dessous (ex. « Nouveau devis ») remontait et rétrécissait elle aussi quand
    le clavier s'ouvrait dans la feuille du dessus : fond noir en haut, feuille qui « disparaît » puis revient. */
 const stackSubs = new Set<() => void>()
+/* update85 · après la fermeture d'une feuille du dessus, un tap résiduel (clavier, clic) ne doit pas fermer celles du dessous. */
+let dismissUntil = 0
+const armDismissLock = () => { dismissUntil = Date.now() + 480 }
+const dismissLocked = () => Date.now() < dismissUntil
 const stackChanged = () => { stackSubs.forEach(f => f()); document.documentElement.classList.toggle("sheet-open", stack.length > 0) }
 const TEXT_FIELD = "input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]),textarea,select,[contenteditable=true]"
 const isTextField = (el: Element | null) => !!el && el instanceof HTMLElement && el.matches(TEXT_FIELD)
@@ -64,9 +68,11 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
   const canDismiss = useRef(dismissible); canDismiss.current = dismissible
   const entered = useRef(false)
   const present = useRef(true); present.current = useIsPresent()
+  const isTopRef = useRef(true)
 
   // pile des feuilles ouvertes : seule la plus haute répond à Échap ; défilement de la page verrouillé
   const [isTop, setTop] = useState(true), [under, setUnder] = useState(false)
+  isTopRef.current = isTop
   useLayoutEffect(() => {
     // update73 · mobile : le clavier se ferme avant l'ouverture d'une feuille (pas de clavier « fantôme » sans champ)
     if (!desk) blurTyping()
@@ -97,7 +103,7 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
     let y0 = 0, x0 = 0, t0 = 0, lastY = 0, lastT = 0, vy = 0, state: "idle" | "wait" | "drag" | "off" = "idle", sc: HTMLElement | null = null
     const h = () => p.getBoundingClientRect().height || 600
     const begin = (cy: number, cx: number, target: HTMLElement | null) => {
-      if (!canDismiss.current || (target && target.closest(NO_DRAG))) { state = "off"; return }
+      if (!isTopRef.current || !canDismiss.current || (target && target.closest(NO_DRAG))) { state = "off"; return }
       y0 = lastY = cy; x0 = cx; t0 = lastT = performance.now(); vy = 0; state = "wait"; sc = scrollerOf(target, p)
     }
     const move = (cy: number, cx: number): boolean => {
@@ -119,7 +125,7 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
       state = "idle"
       const d = Number(y.get()) || 0
       // fermeture refusée (ex. « devis non enregistré ») : la feuille revient en place
-      if (d > Math.min(140, h() * .3) || (vy > .55 && d > 24)) { close.current(); setTimeout(() => { if (present.current && panel.current) { animate(y, 0, SHEET); animate(dim, 1, { duration: .25 }) } }, 450) }
+      if (d > Math.min(140, h() * .3) || (vy > .55 && d > 24)) { armDismissLock(); close.current(); setTimeout(() => { if (present.current && panel.current) { animate(y, 0, SHEET); animate(dim, 1, { duration: .25 }) } }, 450) }
       else { animate(y, 0, SHEET); animate(dim, 1, { duration: .25 }) }
       void t0
     }
@@ -156,14 +162,16 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
 
   const node = <div data-sheet-root className={`fixed inset-0 flex ${desk ? (deskAlign === "top" ? "items-start justify-center pt-[12vh]" : "items-center justify-center p-6") : "items-end justify-center"}`} style={{ zIndex: z }}>
     <motion.div aria-hidden data-sheet-backdrop className="absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .28, ease: [.22, 1, .36, 1] } }} exit={{ opacity: 0, transition: { duration: .24 } }}
-      onClick={() => { if (canDismiss.current) close.current() }}>
+      style={{ pointerEvents: isTop ? "auto" : "none" }}
+      onPointerDown={e => e.stopPropagation()}
+      onClick={e => { e.stopPropagation(); if (!isTop || !canDismiss.current || dismissLocked()) return; armDismissLock(); close.current() }}>
       <motion.div className={`absolute inset-0 ${under ? "bg-black/70" : backdrop}`} style={{ opacity: dim }} />
     </motion.div>
     <div className={desk ? "relative flex w-full justify-center" : `pointer-events-none absolute inset-x-0 top-0 flex items-end justify-center${isTop ? (size === "full" || size === "large" ? " kb-follow-pad" : " kb-follow") : ""}`}
       style={desk ? undefined : { bottom: 0 }}>
       <motion.div ref={panel} role={role} aria-modal="true" aria-label={labelledBy ? undefined : label} aria-labelledby={labelledBy} tabIndex={-1}
         {...anim} style={desk ? style : mobile}
-        onAnimationStart={() => { if (panel.current) panel.current.style.willChange = "transform" }} onAnimationComplete={() => { if (panel.current) panel.current.style.willChange = "auto"; if (!entered.current) { entered.current = true; onEntered?.() } }}
+        onPointerDown={e => e.stopPropagation()} onAnimationStart={() => { if (panel.current) panel.current.style.willChange = "transform" }} onAnimationComplete={() => { if (panel.current) panel.current.style.willChange = "auto"; if (!entered.current) { entered.current = true; onEntered?.() } }}
         className={`pointer-events-auto relative flex w-full flex-col overflow-hidden text-white outline-none ${desk ? `max-h-[88dvh] rounded-[24px] border border-white/[.08] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${deskClass}` : `max-w-[640px] ${size === "full" ? "" : "rounded-t-[22px] shadow-[0_-24px_60px_-18px_rgba(0,0,0,.9)]"}`} ${className}`}>
         {!desk && handle && <div aria-hidden data-sheet-grab className="pointer-events-none absolute left-1/2 top-[6px] z-30 h-[5px] w-9 -translate-x-1/2 rounded-full bg-white/25" />}
         {children}
