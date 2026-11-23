@@ -3,7 +3,7 @@ import { getAuthUser, supabase } from "./supabase"
 import { setCO } from "./devisDoc"
 import { loadRole } from "./role"
 import { mergeTarifs, tarifsEqual, type Tarifs } from "./tarifs"
-export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; rappelAt?: string; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; recording?: string; createdAt?: string; wantDevis?: boolean }
+export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; rappelAt?: string; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; email?: string; recording?: string; createdAt?: string; wantDevis?: boolean }
 export type EvKind = "chantier" | "rdv" | "visite" | "sav" | "urgence" | "absence"
 export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean; callId?: string; phone?: string; notes?: string; kind?: EvKind; absenceKind?: "conges" | "maladie" | "formation"; employeId?: string; clientId?: string; devisId?: string; factureId?: string; chantierId?: string; status?: "prevu" | "en_route" | "arrive" | "termine" | "annule"; lat?: number; lng?: number; rrule?: string; parentId?: string; email?: string; notesTerrain?: string; arrivedAt?: string; departedAt?: string; travelMin?: number; photos?: string[]; signature?: string; virtual?: boolean }
 export type RelStatus = "prog" | "pause" | "env" | "rep"
@@ -100,7 +100,7 @@ const toCall = (r: Row): Call => {
   const tr = typeof r.transcript === "string" ? r.transcript.split("\n").map((l: string) => l.match(/^\s*(Agent|User|Client|Akno)\s*:\s*(.*)$/i)).filter((m: RegExpMatchArray | null): m is RegExpMatchArray => !!m).map((m: RegExpMatchArray) => [/agent|akno/i.test(m[1]) ? "Akno" : "Client", m[2]] as [string, string]) : undefined
   const callback = r.rappel_souhaite === true || (r.rappel_souhaite == null && r.statut === "a_rappeler")
   const rappelAt = typeof r.rappel_creneau === "string" && r.rappel_creneau.trim() ? r.rappel_creneau.trim() : undefined
-  return { id: String(r.id), name, topic: r.motif || r.type_demande || "Appel", tag: r.motif || undefined, time: hm(d), day: today ? undefined : yest ? "Hier" : d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }), urgent: /urg|haut|high/.test(u), callback, rappelAt, note, short: note ? `${name} · ${note}` : undefined, besoin: r.besoin_detail || undefined, urgence: r.urgence || undefined, addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, suite: r.notes || undefined, dur: sec ? `${Math.floor(sec / 60)}:${pad(sec % 60)}` : undefined, transcript: tr?.length ? tr : undefined, phone: r.telephone_client || undefined, recording: r.recording_url || undefined, createdAt: r.created_at || undefined, wantDevis: String(r.type_demande || "").toLowerCase() === "devis" }
+  return { id: String(r.id), name, topic: r.motif || r.type_demande || "Appel", tag: r.motif || undefined, time: hm(d), day: today ? undefined : yest ? "Hier" : d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }), urgent: /urg|haut|high/.test(u), callback, rappelAt, note, short: note ? `${name} · ${note}` : undefined, besoin: r.besoin_detail || undefined, urgence: r.urgence || undefined, addr: [r.adresse, r.ville].filter(Boolean).join(", ") || undefined, suite: r.notes || undefined, dur: sec ? `${Math.floor(sec / 60)}:${pad(sec % 60)}` : undefined, transcript: tr?.length ? tr : undefined, phone: r.telephone_client || undefined, email: typeof r.email_client === "string" ? r.email_client : undefined, recording: r.recording_url || undefined, createdAt: r.created_at || undefined, wantDevis: String(r.type_demande || "").toLowerCase() === "devis" }
 }
 
 const parisStamp = (iso: string | Date) => {
@@ -301,7 +301,13 @@ export function useStore() {
       if (!user || gone) return // update71 : démontage avant la réponse → pas de second canal du même nom (erreur « after subscribe() »)
       const f = `artisan_id=eq.${user.id}`
       ch = supabase.channel(`akno-live-${user.id}`)
-      for (const table of ["calls", "appointments", "devis", "relances"]) ch = ch.on("postgres_changes", { event: "*", schema: "public", table, filter: f }, () => load())
+      const onDb = (table: string) => (payload: { eventType?: string; new?: Row }) => {
+        if (payload.eventType === "INSERT" && payload.new) {
+          try { dispatchEvent(new CustomEvent("akno-live", { detail: { table, row: payload.new } })) } catch { /* */ }
+        }
+        load()
+      }
+      for (const table of ["calls", "appointments", "devis", "relances"]) ch = ch.on("postgres_changes", { event: "*", schema: "public", table, filter: f }, onDb(table))
       ch.subscribe()
     })
     let timer: ReturnType<typeof setInterval> | undefined

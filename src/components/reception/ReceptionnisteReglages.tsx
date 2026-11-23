@@ -8,7 +8,8 @@ import { A, Btn, Card, Chev, Chip, GREY, Row, Sheet, Tg, tx, useC } from "../ui"
 import { useProfile } from "../../lib/profile"
 import { api, reloadAccount, useAccount } from "../../lib/accountApi"
 import { DEFAULT_VOICE, VOICES, normalizeConfig, serializeConfig, voiceInfo, type PickupMode, type ReceptionConfig } from "../../lib/voice/receptionist"
-import { OPERATORS, forwardSteps, intendedForward, nationalFr, type ForwardOperator } from "../../lib/voice/forward"
+import { FORWARD_DELAY_SEC, OPERATORS, forwardSteps, intendedForward, nationalFr, type ForwardOperator } from "../../lib/voice/forward"
+import { enablePush, pushNeedsActivation } from "../../lib/push"
 
 
 const FALLBACK = "On n'a pas pu attribuer ton numéro tout de suite. On t'attribue ton numéro sous 24 h."
@@ -87,10 +88,11 @@ function RegulatoryBundleCard({ className = "", status }: { className?: string; 
 }
 
 export function ReceptionnisteControls({ className = "" }: { className?: string }) {
-  const { toast } = useC()
+  const { toast, s, set } = useC()
   const { p, save } = useProfile()
   const a = useAccount()
   const [busy, setBusy] = useState(false)
+  const [pushBusy, setPushBusy] = useState(false)
   const [voices, setVoices] = useState(false)
   const c = normalizeConfig(p?.reception_config)
   const voice = voiceInfo(c.voice)
@@ -112,6 +114,7 @@ export function ReceptionnisteControls({ className = "" }: { className?: string 
   }
 
   return <div data-rec-reglages className={className}>
+    {pushNeedsActivation(!!s.settings.push) && <Card className="mb-4 flex flex-col gap-2 p-4 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-[15px] font-medium">Notifications</div><div className={tx.cap}>Soyez prévenu sur cet appareil à chaque appel ou rendez-vous pris par l'IA.</div></div><Btn className="h-11 shrink-0" disabled={pushBusy} onClick={() => { if (pushBusy) return; setPushBusy(true); void enablePush().then(r => { setPushBusy(false); if (r.ok) { set(x => ({ ...x, settings: { ...x.settings, push: true } })); toast("Notifications activées") } else toast(r.error || "Impossible d'activer les notifications.") }) }}>Activer</Btn></Card>}
     <Card className="flex items-center gap-3 p-4">
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-medium">L'IA répond aux appels</div>
@@ -122,7 +125,7 @@ export function ReceptionnisteControls({ className = "" }: { className?: string 
 
     <div className={`mt-5 mb-2 px-1 ${tx.cap}`}>Quand elle décroche</div>
     <div className={`grid gap-2 ${c.enabled ? "" : "pointer-events-none opacity-40"}`}>
-      {([["direct", "À ma place", "L'appel est renvoyé tout de suite vers l'IA, qui répond à votre place."], ["fallback", "Si je ne décroche pas", "Votre portable sonne environ 20 secondes, puis l'IA prend la demande."]] as const).map(([id, l, s]) => {
+      {([["direct", "À ma place", "L'appel est renvoyé tout de suite vers l'IA, qui répond à votre place."], ["fallback", "Si je ne décroche pas", `Votre portable sonne environ ${FORWARD_DELAY_SEC} secondes, puis l'IA prend la demande.`]] as const).map(([id, l, s]) => {
         const on = c.pickup === id
         return <button key={id} type="button" data-pickup={id} aria-pressed={on} disabled={busy} onClick={() => on || patch({ pickup: id as PickupMode }, id === "direct" ? "L'IA décroche à votre place" : "L'IA répond si vous ne décrochez pas")} className={`rounded-[20px] p-4 text-left transition ${on ? "bg-white/[.09] shadow-[inset_0_0_0_1.5px_rgba(255,255,255,.85)]" : "bg-white/[.035] shadow-[inset_0_0_0_1px_rgba(255,255,255,.06)]"}`}>
           <div className="flex items-center gap-2"><span className="text-[15px] font-medium">{l}</span>{on && <Check size={14} strokeWidth={2.4} className="ml-auto text-white" />}</div>
@@ -153,7 +156,7 @@ function ForwardCard({ c, num, busy, onPatch }: { c: ReceptionConfig; num: strin
   const { toast } = useC()
   const want = intendedForward(c.enabled, c.pickup)
   const dest = nationalFr(num)
-  const steps = forwardSteps(c.operator, dest, c.forwardApplied, want)
+  const steps = forwardSteps(c.operator, num || dest, c.forwardApplied, want)
   const ok = c.forwardApplied === want
   const copy = async (code: string) => {
     try { await navigator.clipboard.writeText(code); toast("Code copié. Compose-le, puis appuie sur Appeler.") }

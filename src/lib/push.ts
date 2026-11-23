@@ -21,6 +21,15 @@ export function pushSupported() {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window
 }
 
+/** Bandeau d'activation : navigateur prêt mais pas d'abonnement push actif. */
+export function pushNeedsActivation(settingsOn: boolean) {
+  if (!pushSupported()) return false
+  if (isIos() && !isStandalone()) return true
+  if (typeof Notification === "undefined") return true
+  if (Notification.permission !== "granted") return true
+  return !settingsOn
+}
+
 export function attentionCount(s: Pick<St, "calls" | "devis">) {
   const drafts = s.devis.filter(d => d.status === "aval" || (d.status === "brouillon" && d.ai)).length
   const callbacks = s.calls.filter(c => c.callback).length

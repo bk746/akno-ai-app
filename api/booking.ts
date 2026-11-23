@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { adminClient } from "./_lib/mail.js"
 import { sendAptSms, confirmSmsText, companyOf as companyOfSms, artisanSmsOn } from "./_lib/agendaSms.js"
 import { bridgeArtisan } from "./_lib/twilioVoice.js"
+import { isDuplicateCalBooking } from "./_lib/bookingIdem.js"
 
 type Json = Record<string, unknown>
 const TZ = "Europe/Paris"
@@ -303,10 +304,7 @@ async function providerBook(cfg: CalCfg, input: BookInput) {
   // update60 : Cal.com injoignable ≠ créneau pris (sinon la réceptionniste annonçait à tort « créneau déjà pris »)
   if (!daySlots.ok) return { ok: false, reason: "error", error: daySlots.error || "Impossible de lire l'agenda Cal.com.", alternatives: [] }
   const match = daySlots.slots.find(s => Math.abs(new Date(s.start).getTime() - parsed.start.getTime()) < 60_000)
-  if (!match) {
-    const wider = daySlots.slots.length ? daySlots : await providerGetSlots(cfg, { date_from: input.date || todayParis(), date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration })
-    return { ok: false, reason: "taken", error: "Ce créneau n'est plus disponible.", alternatives: wider.slots.slice(0, 4) }
-  }
+  const startForBook = match?.start || parsed.start.toISOString()
 
   const eventTypeId = eventType.id
   const address = [input.adresse, input.ville].filter(Boolean).join(", ")
@@ -328,7 +326,7 @@ async function providerBook(cfg: CalCfg, input: BookInput) {
 
   const body: Json = {
     eventTypeId,
-    start: match.start,
+    start: startForBook,
     attendee,
     ...(input.duree_minutes ? { lengthInMinutes: duration } : {}),
   }
@@ -351,16 +349,30 @@ async function providerBook(cfg: CalCfg, input: BookInput) {
   }
   if (!r.ok) {
     const msg = String((payload as { error?: { message?: string }; message?: string }).error?.message || payload.message || "Impossible de réserver ce créneau.")
-    // Cal.com refuse : créneau réellement indisponible (message explicite) ou erreur technique.
-    const taken = r.status === 409 || /not available|no available|already ha(s|ve) (a )?booking|unavailable|booked|disponible/i.test(msg)
+    if (isDuplicateCalBooking(r.status, msg)) {
+      const data = (payload as { data?: { start?: string; end?: string; uid?: string } }).data
+      const start = data?.start || startForBook
+      const end = data?.end || new Date(new Date(start).getTime() + duration * 60_000).toISOString()
+      slotsCache.clear()
+      return {
+        ok: true,
+        duplicate: true,
+        confirmation: `Rendez-vous confirmé ${formatParisLabel(start)} pour ${attendee.name}.`,
+        start,
+        end,
+        cal_uid: data?.uid,
+        label: formatParisLabel(start),
+      }
+    }
+  const taken = /not available|no available|unavailable|fully booked/i.test(msg) && !isDuplicateCalBooking(r.status, msg)
     const alts = taken ? await providerGetSlots(cfg, { date_from: input.date || todayParis(), date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration }).catch(() => ({ slots: [] as BookingSlot[] })) : { slots: [] as BookingSlot[] }
     return { ok: false, reason: taken ? "taken" : "error", error: msg, alternatives: alts.slots.slice(0, 4) }
   }
   const data = (payload.data && !Array.isArray(payload.data) ? payload.data : Array.isArray(payload.data) ? payload.data[0] : payload.data) as {
     start?: string; end?: string; uid?: string; duration?: number; title?: string
   } | undefined
-  const start = data?.start || match.start
-  const end = data?.end || match.end || new Date(new Date(start).getTime() + duration * 60_000).toISOString()
+  const start = data?.start || startForBook
+  const end = data?.end || match?.end || new Date(new Date(start).getTime() + duration * 60_000).toISOString()
   slotsCache.clear()
   return {
     ok: true,
@@ -407,12 +419,34 @@ function parisDay(ymd: string, h: number, m: number) {
   return zonedTimeToUtc(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)), Number(ymd.slice(8, 10)), h, m)
 }
 
+async function findAppointmentNear(db: SupabaseClient, artisanId: string, start: Date, input?: BookInput) {
+  const t = start.getTime()
+  const from = new Date(t - 90_000).toISOString()
+  const to = new Date(t + 90_000).toISOString()
+  const { data } = await db.from("appointments").select("id, start, end, client, telephone_client, notes").eq("artisan_id", artisanId).gte("start", from).lte("start", to).limit(20)
+  const phone = toE164(input?.telephone)
+  const client = (input?.client || "").trim().toLowerCase()
+  for (const row of data || []) {
+    const rs = new Date(String((row as { start: string }).start)).getTime()
+    if (Math.abs(rs - t) > 60_000) continue
+    if (phone && toE164(String((row as { telephone_client?: string }).telephone_client || "")) === phone) return row as { id: string; start: string; end?: string; client?: string }
+    if (client && String((row as { client?: string }).client || "").trim().toLowerCase() === client) return row as { id: string; start: string; end?: string; client?: string }
+  }
+  const hit = (data || []).find(r => Math.abs(new Date(String((r as { start: string }).start)).getTime() - t) < 60_000)
+  return (hit as { id: string; start: string; end?: string; client?: string } | undefined) || null
+}
+
 async function internalBook(db: SupabaseClient, userId: string, input: BookInput) {
   const parsed = parseBookStart(input)
   const duration = Math.max(30, Number(input.duree_minutes) || 60)
   if ("error" in parsed) {
     const alts = await internalSlots(db, userId, { date_from: input.date, date_to: addDaysYmd(input.date || todayParis(), 7), duree_minutes: duration })
     return { ok: false, reason: "invalid", error: parsed.error, alternatives: alts.slots.slice(0, 4) }
+  }
+  const exist = await findAppointmentNear(db, userId, parsed.start, input)
+  if (exist) {
+    const name = String(exist.client || input.client || "Client").trim()
+    return { ok: true, duplicate: true, start: exist.start, end: exist.end || exist.start, appointment_id: exist.id, confirmation: `Rendez-vous déjà enregistré ${formatParisLabel(String(exist.start))} pour ${name}.`, label: formatParisLabel(String(exist.start)), provider: "akno" }
   }
   const start = parsed.start, end = new Date(start.getTime() + duration * 60_000)
   if (start.getTime() < Date.now()) return { ok: false, reason: "invalid", error: "Ce créneau est déjà passé.", alternatives: [] }
@@ -525,11 +559,18 @@ export async function handleBooking(authorization: string | undefined, body: unk
       return { status: result.ok ? 200 : 502, body: result }
     }
     if (input.action === "book") {
+      const parsed = parseBookStart(input)
+      if (!("error" in parsed)) {
+        const exist = await findAppointmentNear(db, user.id, parsed.start, input)
+        if (exist) {
+          const name = String(exist.client || input.client || "Client").trim()
+          return { status: 200, body: { ok: true, duplicate: true, start: exist.start, end: exist.end || exist.start, appointment_id: exist.id, confirmation: `Rendez-vous déjà enregistré ${formatParisLabel(String(exist.start))} pour ${name}.`, label: formatParisLabel(String(exist.start)) } }
+        }
+      }
       const result = await providerBook(cfg, input)
       if (result.ok && "start" in result && result.start) {
-        try {
-          await persistAppointment(db, user.id, { ...input, source: "calcom" } as BookInput, new Date(String(result.start)), new Date(String(result.end || result.start)), "calcom")
-        } catch { /* l'agenda Cal.com reste la source, le miroir Akno est facultatif */ }
+        const saved = await persistAppointment(db, user.id, { ...input, source: "calcom" } as BookInput, new Date(String(result.start)), new Date(String(result.end || result.start)), "calcom")
+        return { status: 200, body: { ...result, appointment_id: saved.id || undefined, ...(saved.error && !saved.id ? { persist_error: saved.error } : {}) } }
       }
       return { status: result.ok ? 200 : "reason" in result && result.reason === "error" ? 502 : 409, body: result }
     }

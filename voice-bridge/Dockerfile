@@ -2,7 +2,7 @@
 #   docker build -f voice-bridge/Dockerfile -t akno-voice-bridge .
 FROM node:22-slim AS build
 WORKDIR /app
-COPY src/lib/voice/script.ts src/lib/voice/receptionist.ts src/lib/voice/
+COPY src/lib/voice/script.ts src/lib/voice/receptionist.ts src/lib/voice/callDebrief.ts src/lib/voice/
 COPY src/lib/tarifs.ts src/lib/phone.ts src/lib/
 COPY voice-bridge/package.json voice-bridge/package-lock.json* voice-bridge/
 RUN cd voice-bridge && npm install --no-audit --no-fund

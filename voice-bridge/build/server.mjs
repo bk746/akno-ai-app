@@ -592,6 +592,91 @@ function buildSessionConfig(p, sampleRate, slotsNote) {
   };
 }
 
+// ../src/lib/voice/callDebrief.ts
+var norm = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+var EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+var SLOT = /\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain)?\s*(?:\d{1,2}\s*(?:\/|janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\s*\d{0,4})?\s*(?:à\s*)?(\d{1,2})\s*(?:h|heures?)\s*(\d{0,2})?/i;
+function pickEmail(lines) {
+  for (const l of [...lines].reverse()) {
+    const m = l.text.match(EMAIL);
+    if (m) return m[0].toLowerCase();
+  }
+  return "";
+}
+function pickPhone(lines, fallbackFrom = "") {
+  for (const l of [...lines].reverse()) {
+    const digits = l.text.replace(/[^\d+]/g, "");
+    if (digits.length >= 10) {
+      let d = digits.replace(/^00/, "+");
+      if (/^0[1-9]\d{8}$/.test(d)) d = `+33${d.slice(1)}`;
+      if (/^\+33\d{9}$/.test(d) || /^0[1-9]\d{8}$/.test(d)) return d.startsWith("+") ? d : `+33${d.slice(1)}`;
+    }
+  }
+  const fb = fallbackFrom.replace(/[^\d+]/g, "");
+  if (fb.length >= 11 && fb.startsWith("+")) return fb;
+  return "";
+}
+function pickName(lines) {
+  const patts = [
+    /(?:je m['’]?appelle|mon nom est|c'est|je suis)\s+([A-ZÀ-ÖØ-Þ][\p{L}'-]+(?:\s+[A-ZÀ-ÖØ-Þ][\p{L}'-]+){0,2})/iu,
+    /(?:nom|prénom)\s*[,:]?\s*([A-ZÀ-ÖØ-Þ][\p{L}'-]+(?:\s+[A-ZÀ-ÖØ-Þ][\p{L}'-]+){0,2})/iu
+  ];
+  for (const l of lines) {
+    if (l.role !== "user") continue;
+    for (const p of patts) {
+      const m = l.text.match(p);
+      if (m?.[1] && m[1].length > 2 && !/^(oui|non|bonjour|merci)$/i.test(m[1])) return m[1].trim();
+    }
+  }
+  return "";
+}
+function pickAddress(lines) {
+  for (const l of [...lines].reverse()) {
+    const t = l.text;
+    if (/^\d+\s+(rue|avenue|boulevard|impasse|place|chemin|allée)/i.test(t) || /\d{5}\s+[A-Za-zÀ-ÿ]/.test(t)) return t.slice(0, 220);
+    const m = t.match(/(?:adresse|habite|situé)[^.]*?(\d+[^.]{8,80})/i);
+    if (m?.[1]) return m[1].trim();
+  }
+  return "";
+}
+function pickMotif(lines) {
+  const user = lines.filter((l) => l.role === "user").map((l) => l.text).join(" ");
+  const m = user.match(/(?:fuite|chaudière|ballon|dépannage|devis|robinet|évier|salle de bain|chauffage|électricité|plomberie|rénovation)[^.!?]{0,80}/i);
+  return m ? m[0].trim() : "";
+}
+function pickSlot(lines) {
+  for (const l of [...lines].reverse()) {
+    const m = l.text.match(SLOT);
+    if (m) return [m[1], m[2], m[3]].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  }
+  return "";
+}
+function debriefFromTranscript(lines, from, booked) {
+  const nom = pickName(lines);
+  const tel = pickPhone(lines, from);
+  const email = pickEmail(lines);
+  const adresse = pickAddress(lines);
+  const motif = pickMotif(lines) || "Demande d'intervention";
+  const slot = pickSlot(lines);
+  const rdv = booked?.start ? new Date(booked.start).toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : slot;
+  const issue = booked ? `Rendez-vous confirm\xE9${rdv ? ` : ${rdv}` : ""}.` : /pris|indisponible|alternativ/i.test(lines.slice(-4).map((l) => l.text).join(" ")) ? "Cr\xE9neau demand\xE9 : \xE0 confirmer avec le client." : "\xC0 rappeler pour finaliser.";
+  const resume = [motif, tel ? `T\xE9l. ${tel}` : "", email ? `E-mail ${email}` : "", adresse ? `Adresse : ${adresse}` : "", rdv || slot ? `Cr\xE9neau : ${rdv || slot}` : "", issue].filter(Boolean).join(" \xB7 ").slice(0, 600);
+  const nom_client = nom || (tel ? tel : from ? "Appelant" : "Appel t\xE9l\xE9phonique");
+  const type_demande = /devis/i.test(norm(lines.map((l) => l.text).join(" "))) ? "devis" : "autre";
+  return {
+    nom_client,
+    telephone_client: tel || from || "",
+    email_client: email,
+    adresse,
+    ville: "",
+    motif,
+    resume,
+    besoin_detail: motif,
+    type_demande,
+    rappel_souhaite: !booked
+  };
+}
+
 // src/audio.ts
 var BIAS = 132;
 function ulawToPcm(u) {
@@ -746,6 +831,8 @@ function handleCall(tw) {
   let maxTimer = null;
   let booked = null;
   let bookFailed = null;
+  let bookQueue = Promise.resolve();
+  let lastBookKey = "";
   const toTwilio = (m) => {
     if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify(m));
   };
@@ -795,42 +882,56 @@ function handleCall(tw) {
     void akno("/api/notify", artisanId, { type: "call", client: row.nom_client, motif: row.motif, resume, besoin_detail: row.besoin_detail, call_id: id, rappel_souhaite: rappel, rappel_creneau: row.rappel_creneau, urgent });
     return { ok: true, call_id: id, message: wantDevis ? "Appel enregistr\xE9. Demande de devis not\xE9e \u2014 \xE0 g\xE9n\xE9rer depuis la fiche client." : "Appel enregistr\xE9 dans R\xE9ception." };
   }
+  const bookSlotKey = (a) => `${String(a.date || "").trim()}|${String(a.heure || "").trim().toLowerCase().replace("h", ":")}`;
   async function book(args) {
-    const client = [args.prenom, args.nom].map((x) => String(x || "").trim()).filter(Boolean).join(" ") || String(args.client || "").trim() || "Client";
-    const t0 = Date.now();
-    const b = await akno("/api/booking", artisanId, { action: "book", ...args, client });
-    const slot = [args.date, args.heure].filter(Boolean).join(" \xE0 ");
-    log("[book]", b.ok ? "ok" : `refus ${b.reason || b._fail || b._status}`, `${Date.now() - t0}ms`);
-    if (!b.ok) {
-      if (isBusinessRefusal(b)) return { ok: false, reason: b.reason || "taken", error: b.error || "Cr\xE9neau indisponible.", alternatives: b.alternatives || [] };
-      bookFailed = slot || "cr\xE9neau demand\xE9";
-      return { ok: false, reason: "technical", error: "Souci technique : r\xE9servation non confirm\xE9e.", instruction: TECH_BOOK, alternatives: [] };
-    }
-    const minutes = Math.max(30, Number(args.duree_minutes) || 60);
-    const start2 = b.start || (/* @__PURE__ */ new Date()).toISOString();
-    const row = {
-      artisan_id: artisanId,
-      title: String(args.objet || "").trim() || "Rendez-vous",
-      client,
-      telephone_client: String(args.telephone || "").trim() || from || null,
-      email_client: String(args.email || "").trim() || null,
-      start: start2,
-      end: b.end || new Date(new Date(start2).getTime() + minutes * 6e4).toISOString(),
-      adresse: String(args.adresse || "").trim() || null,
-      ville: String(args.ville || "").trim() || null,
-      notes: [String(args.notes || "").trim(), b.cal_uid ? `cal:${b.cal_uid}` : ""].filter(Boolean).join(" ") || null
+    const run = async () => {
+      const key = bookSlotKey(args);
+      if (booked && lastBookKey === key) {
+        return { ok: true, appointment_id: booked.appointmentId, confirmation: `Rendez-vous confirm\xE9 pour ${[args.prenom, args.nom].filter(Boolean).join(" ") || args.client || "le client"}.` };
+      }
+      const client = [args.prenom, args.nom].map((x) => String(x || "").trim()).filter(Boolean).join(" ") || String(args.client || "").trim() || "Client";
+      const t0 = Date.now();
+      let b = await akno("/api/booking", artisanId, { action: "book", ...args, client });
+      const slot = [args.date, args.heure].filter(Boolean).join(" \xE0 ");
+      if (!b.ok && (b._fail === "timeout" || b._fail === "network")) {
+        b = await akno("/api/booking", artisanId, { action: "book", ...args, client }, Math.max(APP_TIMEOUT_MS, 12e3));
+      }
+      log("[book]", b.ok ? "ok" : `refus ${b.reason || b._fail || b._status}`, `${Date.now() - t0}ms`);
+      if (!b.ok) {
+        if (isBusinessRefusal(b)) return { ok: false, reason: b.reason || "taken", error: b.error || "Cr\xE9neau indisponible.", alternatives: b.alternatives || [] };
+        bookFailed = slot || "cr\xE9neau demand\xE9";
+        return { ok: false, reason: "technical", error: "Souci technique : r\xE9servation non confirm\xE9e.", instruction: TECH_BOOK, alternatives: [] };
+      }
+      const minutes = Math.max(30, Number(args.duree_minutes) || 60);
+      const start2 = b.start || (/* @__PURE__ */ new Date()).toISOString();
+      const row = {
+        artisan_id: artisanId,
+        title: String(args.objet || "").trim() || "Rendez-vous",
+        client,
+        telephone_client: String(args.telephone || "").trim() || from || null,
+        email_client: String(args.email || "").trim() || null,
+        start: start2,
+        end: b.end || new Date(new Date(start2).getTime() + minutes * 6e4).toISOString(),
+        adresse: String(args.adresse || "").trim() || null,
+        ville: String(args.ville || "").trim() || null,
+        notes: [String(args.notes || "").trim(), b.cal_uid ? `cal:${b.cal_uid}` : ""].filter(Boolean).join(" ") || null
+      };
+      const exists = !!b.appointment_id;
+      const ins = exists ? null : await sb(`/rest/v1/appointments?select=id`, { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(row) });
+      const appointmentId = b.appointment_id || (Array.isArray(ins) ? ins[0]?.id : null);
+      if (!appointmentId && !b.cal_uid) {
+        bookFailed = slot || "cr\xE9neau demand\xE9";
+        return { ok: false, reason: "technical", error: "Souci technique : r\xE9servation non enregistr\xE9e.", instruction: TECH_BOOK, alternatives: [] };
+      }
+      booked = { start: start2, appointmentId: appointmentId || null };
+      lastBookKey = key;
+      bookFailed = null;
+      void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" \xE0 ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId });
+      return { ok: true, appointment_id: appointmentId, confirmation: b.confirmation || `Rendez-vous confirm\xE9 pour ${client}.` };
     };
-    const exists = !!b.appointment_id;
-    const ins = exists ? null : await sb(`/rest/v1/appointments?select=id`, { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(row) });
-    const appointmentId = b.appointment_id || (Array.isArray(ins) ? ins[0]?.id : null);
-    if (!appointmentId && !b.cal_uid) {
-      bookFailed = slot || "cr\xE9neau demand\xE9";
-      return { ok: false, reason: "technical", error: "Souci technique : r\xE9servation non enregistr\xE9e.", instruction: TECH_BOOK, alternatives: [] };
-    }
-    booked = { start: start2, appointmentId: appointmentId || null };
-    bookFailed = null;
-    void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" \xE0 ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId });
-    return { ok: true, appointment_id: appointmentId, confirmation: b.confirmation || `Rendez-vous confirm\xE9 pour ${client}.` };
+    const p = bookQueue.then(run, run);
+    bookQueue = p.catch(() => void 0);
+    return p;
   }
   async function handleTool(ev) {
     let result = { ok: false, error: "Outil inconnu." };
@@ -944,10 +1045,20 @@ CONTEXTE T\xC9L\xC9PHONE : vrai appel sur la ligne de ${profile.company} (l'arti
     if (!artisanId || !callSid) return;
     const duration = Math.round((Date.now() - startedAt) / 1e3);
     try {
+      await new Promise((r) => setTimeout(r, 750));
+      const inferred = debriefFromTranscript(lines, from, booked);
       if (!saved && duration > 4) {
-        await saveCall({ resume: lines.length ? lines.map((l) => l.text).slice(-6).join(" ").slice(0, 600) : `Appel de ${from || "num\xE9ro masqu\xE9"} sans informations recueillies. Rappelez le client.`, rappel_souhaite: true, type_demande: "autre", urgence: "normal" });
+        await saveCall({ ...inferred, rdv_pris: !!booked, rappel_souhaite: !booked, type_demande: inferred.type_demande, urgence: "normal" });
       } else if (saved) {
-        await upsertCall({ transcript: transcriptText(lines) || null, duration });
+        const patch = { transcript: transcriptText(lines) || null, duration };
+        if (inferred.nom_client && inferred.nom_client !== "Appel t\xE9l\xE9phonique") patch.nom_client = inferred.nom_client;
+        if (inferred.resume && lines.length > 2) patch.resume = inferred.resume;
+        if (inferred.telephone_client) patch.telephone_client = inferred.telephone_client;
+        if (inferred.email_client) patch.email_client = inferred.email_client;
+        if (inferred.adresse) patch.adresse = inferred.adresse;
+        if (inferred.motif) patch.motif = inferred.motif;
+        if (booked?.start) patch.rdv_date = booked.start;
+        await upsertCall(patch);
       }
       if (callId && rec.seconds > 1 && SB_URL && SB_KEY) {
         const path = `${artisanId}/${callId}.wav`;

@@ -7,6 +7,7 @@
 import http from "node:http"
 import { WebSocketServer, WebSocket } from "ws"
 import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, companyName, type SlotHint, type VoiceProfile } from "../../src/lib/voice/script"
+import { debriefFromTranscript } from "../../src/lib/voice/callDebrief"
 import { CallRecorder } from "./audio"
 import { verifyToken } from "./token"
 
@@ -95,6 +96,8 @@ function handleCall(tw: WebSocket) {
   // update60 : rendez-vous réellement créé pendant l'appel (seule source de vérité pour rdv_pris / rdv_date)
   let booked: { start: string; appointmentId: string | null } | null = null
   let bookFailed: string | null = null
+  let bookQueue = Promise.resolve()
+  let lastBookKey = ""
 
   const toTwilio = (m: Json) => { if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify(m)) }
   const toXai = (m: Json) => { if (xai?.readyState === WebSocket.OPEN) xai.send(JSON.stringify(m)) }
@@ -147,17 +150,27 @@ function handleCall(tw: WebSocket) {
     return { ok: true, call_id: id, message: wantDevis ? "Appel enregistré. Demande de devis notée — à générer depuis la fiche client." : "Appel enregistré dans Réception." }
   }
 
+  const bookSlotKey = (a: Json) => `${String(a.date || "").trim()}|${String(a.heure || "").trim().toLowerCase().replace("h", ":")}`
+
   async function book(args: Json) {
-    const client = [args.prenom, args.nom].map(x => String(x || "").trim()).filter(Boolean).join(" ") || String(args.client || "").trim() || "Client"
-    const t0 = Date.now()
-    const b = await akno("/api/booking", artisanId, { action: "book", ...args, client })
-    const slot = [args.date, args.heure].filter(Boolean).join(" à ")
-    log("[book]", b.ok ? "ok" : `refus ${b.reason || b._fail || b._status}`, `${Date.now() - t0}ms`)
-    if (!b.ok) {
-      if (isBusinessRefusal(b)) return { ok: false, reason: b.reason || "taken", error: b.error || "Créneau indisponible.", alternatives: b.alternatives || [] }
-      bookFailed = slot || "créneau demandé"
-      return { ok: false, reason: "technical", error: "Souci technique : réservation non confirmée.", instruction: TECH_BOOK, alternatives: [] }
-    }
+    const run = async () => {
+      const key = bookSlotKey(args)
+      if (booked && lastBookKey === key) {
+        return { ok: true, appointment_id: booked.appointmentId, confirmation: `Rendez-vous confirmé pour ${[args.prenom, args.nom].filter(Boolean).join(" ") || args.client || "le client"}.` }
+      }
+      const client = [args.prenom, args.nom].map(x => String(x || "").trim()).filter(Boolean).join(" ") || String(args.client || "").trim() || "Client"
+      const t0 = Date.now()
+      let b = await akno("/api/booking", artisanId, { action: "book", ...args, client })
+      const slot = [args.date, args.heure].filter(Boolean).join(" à ")
+      if (!b.ok && (b._fail === "timeout" || b._fail === "network")) {
+        b = await akno("/api/booking", artisanId, { action: "book", ...args, client }, Math.max(APP_TIMEOUT_MS, 12000))
+      }
+      log("[book]", b.ok ? "ok" : `refus ${b.reason || b._fail || b._status}`, `${Date.now() - t0}ms`)
+      if (!b.ok) {
+        if (isBusinessRefusal(b)) return { ok: false, reason: b.reason || "taken", error: b.error || "Créneau indisponible.", alternatives: b.alternatives || [] }
+        bookFailed = slot || "créneau demandé"
+        return { ok: false, reason: "technical", error: "Souci technique : réservation non confirmée.", instruction: TECH_BOOK, alternatives: [] }
+      }
     const minutes = Math.max(30, Number(args.duree_minutes) || 60)
     const start = b.start || new Date().toISOString()
     const row = {
@@ -176,10 +189,15 @@ function handleCall(tw: WebSocket) {
       bookFailed = slot || "créneau demandé"
       return { ok: false, reason: "technical", error: "Souci technique : réservation non enregistrée.", instruction: TECH_BOOK, alternatives: [] }
     }
-    booked = { start, appointmentId: appointmentId || null }
-    bookFailed = null
-    void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" à ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId })
-    return { ok: true, appointment_id: appointmentId, confirmation: b.confirmation || `Rendez-vous confirmé pour ${client}.` }
+      booked = { start, appointmentId: appointmentId || null }
+      lastBookKey = key
+      bookFailed = null
+      void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" à ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId })
+      return { ok: true, appointment_id: appointmentId, confirmation: b.confirmation || `Rendez-vous confirmé pour ${client}.` }
+    }
+    const p = bookQueue.then(run, run)
+    bookQueue = p.catch(() => undefined)
+    return p
   }
 
   async function handleTool(ev: Json) {
@@ -268,10 +286,20 @@ function handleCall(tw: WebSocket) {
     if (!artisanId || !callSid) return
     const duration = Math.round((Date.now() - startedAt) / 1000)
     try {
+      await new Promise(r => setTimeout(r, 750))
+      const inferred = debriefFromTranscript(lines, from, booked)
       if (!saved && duration > 4) {
-        await saveCall({ resume: lines.length ? lines.map(l => l.text).slice(-6).join(" ").slice(0, 600) : `Appel de ${from || "numéro masqué"} sans informations recueillies. Rappelez le client.`, rappel_souhaite: true, type_demande: "autre", urgence: "normal" })
+        await saveCall({ ...inferred, rdv_pris: !!booked, rappel_souhaite: !booked, type_demande: inferred.type_demande, urgence: "normal" })
       } else if (saved) {
-        await upsertCall({ transcript: transcriptText(lines) || null, duration })
+        const patch: Json = { transcript: transcriptText(lines) || null, duration }
+        if (inferred.nom_client && inferred.nom_client !== "Appel téléphonique") patch.nom_client = inferred.nom_client
+        if (inferred.resume && lines.length > 2) patch.resume = inferred.resume
+        if (inferred.telephone_client) patch.telephone_client = inferred.telephone_client
+        if (inferred.email_client) patch.email_client = inferred.email_client
+        if (inferred.adresse) patch.adresse = inferred.adresse
+        if (inferred.motif) patch.motif = inferred.motif
+        if (booked?.start) patch.rdv_date = booked.start
+        await upsertCall(patch)
       }
       if (callId && rec.seconds > 1 && SB_URL && SB_KEY) {
         const path = `${artisanId}/${callId}.wav`
