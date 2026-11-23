@@ -1,5 +1,4 @@
 import PageSkeleton from "./PageSkeleton"
-import DevisPaper from "./DevisPaper"
 import VoiceCall from "./VoiceCall"
 import { formatVoiceTimings, isVoiceDebugEnabled, setVoiceDebugEnabled, subscribeVoiceTimings } from "../lib/voice/timing"
 import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
@@ -19,7 +18,7 @@ import ReceptionnisteReglagesSheet, { ActivateReceptionniste, ReceptionnisteCont
 import { voiceInfo } from "../lib/voice/receptionist"
 import Gate from "./sheets/Gate"
 import SetupGate from "./setup/SetupGate"
-import DevisEditor, { type EditorReq, type CtInfo } from "./devis/DevisEditor"
+import type { EditorReq, CtInfo } from "./devis/DevisEditor"
 import { chainProgress, looksPhone, sendDevisSms, useChain } from "../lib/chaine"
 import { Frise, LinesCard, NextCard } from "./devis/Chaine"
 import { Tiles } from "./sheets/PilotageSheet"
@@ -57,10 +56,15 @@ const ChantiersPage = lazyPage(() => import("./chantiers/ChantiersPage"))
 const EquipePage = lazyPage(() => import("./equipe/EquipePage")) // update65
 const ClientsPage = lazyPage(() => import("./clients/ClientsPage")) // update66
 import { loadChantiers, requestNewChantier, requestOpenChantier, useChantiers } from "../lib/chantiers"
-import ClientChantiers from "./chantiers/ClientChantiers"
 import { clientsState, loadClients, requestNewClient, requestOpenClient, useClients } from "../lib/clients"
 // update57 · configurateur « Ma réceptionniste » (chargé à la demande)
 const ReceptionnisteStudio = lazyPage(() => import("./reception/ReceptionnisteStudio"))
+const DevisEditor = lazyPage(() => import("./devis/DevisEditor"))
+const DevisPaper = lazyPage(() => import("./DevisPaper"))
+const ClientChantiers = lazyPage(() => import("./chantiers/ClientChantiers"))
+const EventSheet = lazyPage(() => import("./agenda/EventSheet"))
+const TeamView = lazyPage(() => import("./agenda/TeamView"))
+const AgendaTools = lazyPage(() => import("./agenda/AgendaTools"))
 import UpdateButton from "./UpdateButton"
 import { billingHidden, isNative, webOrigin } from "../lib/native"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
@@ -70,9 +74,6 @@ import { CROSSFADE, PUSH, SNAP, TAB, TOAST, idle, lazyPage } from "../lib/motion
 import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
 import ModalSheet from "./sheet/ModalSheet"
 import { SwipeRow, askConfirm, ConfirmHost } from "./form/SwipeRow"
-import EventSheet from "./agenda/EventSheet"
-import TeamView from "./agenda/TeamView"
-import AgendaTools from "./agenda/AgendaTools"
 import { attachTravel, expandForGrid, expandRecurring, kindColor } from "../lib/agenda"
 import { useAppRole } from "../lib/role"
 
@@ -516,7 +517,7 @@ function AgCal() {
   const nav = <div className="flex items-center gap-1.5"><button onClick={() => setCur(TODAY)} disabled={isNow} className="h-9 rounded-full bg-white/[.07] px-3.5 text-[13px] font-medium text-white transition hover:bg-white/[.12] disabled:opacity-40">Aujourd'hui</button><button aria-label="Précédent" onClick={() => move(-1)} className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:bg-white/[.07] hover:text-white"><ChevronLeft size={20} strokeWidth={SW} /></button><button aria-label="Suivant" onClick={() => move(1)} className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:bg-white/[.07] hover:text-white"><ChevronRight size={20} strokeWidth={SW} /></button></div>
   const view = v === "a" ? <YearGrid cur={cur} evs={evs} onMonth={f => { setCur(f); setV("m") }} />
     : v === "m" ? <MonthGrid cur={cur} evs={evs} onDay={x => { setCur(x); setV("j") }} />
-    : v === "e" ? <TeamView date={cur} evs={evs} onEv={onEv} onAssign={(ev, employeId) => { const id = String(ev.id).split("~")[0]; set(x => ({ ...x, events: x.events.map(y => y.id === id ? { ...y, employeId: employeId || undefined } : y) })); toast("Assignation mise à jour") }} onSlot={(emp, h) => modal({ kind: "rdv", data: { date: cur, start: h, employeId: emp } })} />
+    : v === "e" ? <Suspense fallback={null}><TeamView date={cur} evs={evs} onEv={onEv} onAssign={(ev: Ev, employeId: string) => { const id = String(ev.id).split("~")[0]; set(x => ({ ...x, events: x.events.map(y => y.id === id ? { ...y, employeId: employeId || undefined } : y) })); toast("Assignation mise à jour") }} onSlot={(emp: string, h: number) => modal({ kind: "rdv", data: { date: cur, start: h, employeId: emp } })} /></Suspense>
     : v === "s" ? (desk ? <TimeGrid days={wkD} evs={evs} onEv={onEv} onSlot={onSlot} /> : <WeekSlider cur={cur} evs={evs} onEv={onEv} onSlot={onSlot} onWeek={setCur} />)
     : <TimeGrid days={[cur]} evs={evs} onEv={onEv} onSlot={onSlot} />
   const strip = v === "j" && <div className="mb-4 grid grid-cols-7 gap-1">{wkD.map(x => { const on = x === cur, td = x === TODAY, n = evs.filter(e => e.date === x).length, we = (dd(x).getDay() + 6) % 7 >= 5
@@ -545,9 +546,9 @@ function Ag() {
     { I: Plus, l: "Nouveau", on: () => modal({ kind: "rdv", data: { date: day } }) }, { I: ChevronLeft, l: "Précédente", on: () => goWk(wk - 1) },
     { I: ChevronRight, l: "Suivante", on: () => goWk(wk + 1) }, { I: RotateCcw, l: "Aujourd'hui", on: () => goWk(0), dis: wk === 0 && day === TODAY }]}>
     <Col><Section t={day === TODAY ? "Aujourd'hui" : dlabel(day)} aside={`${list.length} RDV`}>{list.length ? <List>{list.map(ERow)}</List> : <List><Row first label="Ajouter un rendez-vous" onClick={() => modal({ kind: "rdv", data: { date: day } })} lead={<Ic I={Plus} />} t="Journée libre" s="Touchez pour ajouter un rendez-vous" r={<Chev />} /></List>}</Section>
-      {!desk && <><AgCal /><AgendaTools evs={s.events} day={day} /></>}<Section t="À retenir"><List>{next && <Row first label="Prochain rendez-vous" onClick={() => modal({ kind: "ev", data: next })} lead={<Ic I={Clock} />} t="Prochain" s={`${next.name} · ${next.topic}`} r={hh(next.start)} rs={fmtD(next.date)} />}{last && <Row label="Dernier RDV pris" onClick={() => modal({ kind: "ev", data: last })} lead={<Ic I={Sparkles} />} t="Dernier pris" s={`${last.name} · ${last.topic}`} r={hh(last.start)} rs={<StatusText>Confirmé</StatusText>} />}</List></Section></Col>
+      {!desk && <><AgCal /><Suspense fallback={null}><AgendaTools evs={s.events} day={day} /></Suspense></>}<Section t="À retenir"><List>{next && <Row first label="Prochain rendez-vous" onClick={() => modal({ kind: "ev", data: next })} lead={<Ic I={Clock} />} t="Prochain" s={`${next.name} · ${next.topic}`} r={hh(next.start)} rs={fmtD(next.date)} />}{last && <Row label="Dernier RDV pris" onClick={() => modal({ kind: "ev", data: last })} lead={<Ic I={Sparkles} />} t="Dernier pris" s={`${last.name} · ${last.topic}`} r={hh(last.start)} rs={<StatusText>Confirmé</StatusText>} />}</List></Section></Col>
     <Col><Section t="Semaine" aside={range}><Chart c={c} label="Rendez-vous par jour" value={`${wkE.length} RDV`} v={per} l={days.map(d => DAYS[(dd(d).getDay() + 6) % 7].slice(0, 3))} sel={days.indexOf(day)} onPick={(i: number) => setDay(days[i])} /></Section></Col>
-    {desk && <div className="col-span-2"><AgCal /><AgendaTools evs={s.events} day={day} /></div>}
+    {desk && <div className="col-span-2"><AgCal /><Suspense fallback={null}><AgendaTools evs={s.events} day={day} /></Suspense></div>}
   </Shell>
 }
 
@@ -1025,7 +1026,7 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
       {devis.map((d, i) => <Row key={d.id} first={i === 0} label={`Devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Ic I={Receipt} />} t={`Devis N° ${d.num}`} s={d.objet} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} />)}
       {evs.map((e, i) => <Row key={e.id} first={!devis.length && i === 0} label={`RDV ${e.topic}`} onClick={() => modal({ kind: "ev", data: e })} lead={<Ic I={CalendarDays} />} t={e.topic} s={`${fmtD(e.date)} · ${hh(e.start)} – ${hh(e.start + e.dur)}`} r={<Chev />} />)}</div></>}
     <ClientFactures name={nm} onOpen={id => modal({ kind: "factures", data: { id } })} />
-    <ClientChantiers name={nm} onOpen={id => { close(); requestOpenChantier(id); go("ch") }} />
+    <Suspense fallback={null}><ClientChantiers name={nm} onOpen={(id: string) => { close(); requestOpenChantier(id); go("ch") }} /></Suspense>
     {calls.length > 0 && <><H>Appels et enregistrements ({calls.length})</H><div className="space-y-2">{calls.map(c => <div key={c.id} className="rounded-[20px] bg-white/[.04] p-4"><div className="flex items-center justify-between gap-2"><div className="truncate text-[14.5px] font-medium">{c.besoin || c.topic}</div><span className={`shrink-0 ${tx.cap}`}>{c.day || "Aujourd'hui"} {c.time}{c.dur ? ` · ${c.dur}` : ""}</span></div>{c.note && <p className="mt-1 line-clamp-3 text-[13.5px] leading-relaxed text-white/55">{c.note}</p>}{c.recording && <div className="mt-2.5"><CallInline call={c} onMic={() => { close(); setChat(true) }} /></div>}</div>)}</div></>}
     {hist.length > 0 && <><H>Historique</H><div className="relative pl-2">{hist.map((h, i) => <div key={i} className="relative flex gap-3 pb-4 last:pb-0">{i < hist.length - 1 && <span className="absolute left-[15px] top-8 bottom-0 w-px bg-white/[.08]" />}<span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><h.I size={14} strokeWidth={SW} /></span><div className="min-w-0 pt-1"><div className="truncate text-[14px]">{h.t}</div><div className={tx.cap}>{h.w}</div></div></div>)}</div></>}
   </Sheet>
@@ -1150,7 +1151,7 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     </div>}
     {draft && missingLegal("devis").length > 0 && <button type="button" onClick={() => modal({ kind: "entreprise" })} className="mb-3 block w-full rounded-[14px] border border-[#FFB340]/30 bg-[#FFB340]/10 px-4 py-3 text-left text-[14px] text-white/80">Mentions obligatoires manquantes : {missingLegal("devis").join(", ")}. <span className="font-medium text-white">Compléter</span></button>}
     {mailErr && <div role="alert" className="mb-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[14px] text-[#FF9B96]">{mailErr}</div>}
-    {desk ? <DevisPaper d={doc} sig={signed || undefined} />
+    {desk ? <Suspense fallback={null}><DevisPaper d={doc} sig={signed || undefined} /></Suspense>
       : <LinesCard lines={lines as never} tv={tv} tvaNA={CO.tvaNA} head={<div className="min-w-0"><div className="text-[13px] text-white/50">Devis n° {dv.num} · {dv.client || "Client"}</div><div className="mt-0.5 break-words text-[16px] font-medium leading-snug">{dv.objet}</div></div>} />}
     <div className="mt-3 grid grid-cols-1 gap-2"><Btn className="w-full" onClick={download}><FileText size={16} strokeWidth={1.6} />{signed ? "Voir le PDF signé" : "Voir le PDF"}</Btn>
       {dv.token && !draft && <Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${webOrigin()}/accept/${dv.token}`); toast("Lien de signature copié") }}><Copy size={16} />Copier le lien de signature</Btn>}
@@ -1268,11 +1269,11 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     </div>
     {foot("Créer le RDV", !!f.name.trim() && !!f.date, () => { set(x => ({ ...x, events: [...x.events, { id: uid(), date: f.date, start: toH(f.start), dur: Number(f.dur), name: f.name.trim(), topic: f.topic || "Intervention", addr: f.addr, created: Date.now(), kind: f.kind || "rdv", employeId: f.employeId || undefined, rrule: f.rrule || undefined, absenceKind: f.kind === "absence" ? f.absenceKind : undefined }] })); const wd = dd(f.date).getDay(); toast(wd === 0 || wd === 6 ? "RDV créé (week-end : visible sur mobile)" : "RDV créé"); go("ag") }, A.ag.c)}</Sheet>
   if (m.kind === "ev") { const raw = s.events.find(y => y.id === d.id || y.id === String(d.id || "").split("~")[0]) || d as Ev; const e = raw
-    return <EventSheet e={e} all={s.events} onClose={close} onChange={p => set(x => ({ ...x, events: x.events.map(y => y.id === e.id ? { ...y, ...p } : y) }))}
+    return <Suspense fallback={null}><EventSheet e={e} all={s.events} onClose={close} onChange={(p: Partial<Ev>) => set(x => ({ ...x, events: x.events.map(y => y.id === e.id ? { ...y, ...p } : y) }))}
       onOpenClient={() => modal({ kind: "client", data: { name: e.name, event: e.id } })}
       onOpenDevis={e.devisId ? () => modal({ kind: "devisPrev", data: s.devis.find(z => z.id === e.devisId) || { id: e.devisId } }) : undefined}
       onOpenFacture={e.factureId ? () => modal({ kind: "factures", data: { id: e.factureId } }) : undefined}
-      onOpenChantier={e.chantierId ? () => { requestOpenChantier(e.chantierId!); close(); go("ch") } : undefined} /> }
+      onOpenChantier={e.chantierId ? () => { requestOpenChantier(e.chantierId!); close(); go("ch") } : undefined} /></Suspense> }
   if (m.kind === "rel") return <Sheet title="Nouvelle relance" c={A.rel.c} onClose={close}><div className="space-y-3"><F l="Client"><input autoFocus list="akno-clients" autoComplete="off" placeholder="Nom du client" className={inp} {...v("name")} /></F><F l="Type"><select className={inp} {...v("type")}>{["Relance devis", "Demande d'avis", "Rappel RDV", "Relance facture"].map(x => <option key={x}>{x}</option>)}</select></F><div className="grid grid-cols-2 gap-2"><F l="Canal"><select className={inp} {...v("canal")}><option>Appel</option><option>SMS</option><option>E-mail</option></select></F><F l="Quand"><input className={inp} {...v("when")} /></F></div><p className="px-1 text-[13px] leading-5 text-white/50">C'est un rappel pour vous : Akno ne l'envoie pas tout seul. Les relances de devis envoyés et les demandes d'avis, elles, partent automatiquement.</p></div>
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
@@ -1532,7 +1533,7 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
     let stop = false, i = 0
     const todo = ["rec", "ag", "dev", "ch"]
     const next = () => { if (stop) return; while (i < todo.length && slots.includes(todo[i])) i++; if (i >= todo.length) return; const k = todo[i++]; const L = LAZY[k as P]; const add = () => { if (!stop) setSlots(l => l.includes(k) ? l : [...l, k]); setTimeout(() => idle(next, 3000), 400) }; if (L && !L.ready()) void L.preload().then(add, () => {}); else add() }
-    const t = setTimeout(() => idle(next, 3000), 1800)
+    const t = setTimeout(() => idle(next, 800), 400)
     return () => { stop = true; clearTimeout(t) }
   }, [loading]) // eslint-disable-line react-hooks/exhaustive-deps
   return <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -1544,7 +1545,7 @@ function AknoApp() {
   const pathname = useLocation().pathname, navigate = useNavigate()
   const [s, setS, loading, put] = useStore(), desk = useDesk()
   useClients() // update66 : les fiches clients alimentent les sélecteurs de client (devis, factures, chantiers)
-  useEffect(() => { if (!loading) void loadClients() }, [loading])
+  useEffect(() => { if (!loading) idle(() => { void loadClients() }) }, [loading])
   // update52 : éditeur de devis pro (plein écran, au-dessus des pages, sous les fiches)
   const [ed, setEd] = useState<EditorReq | null>(null)
   CL = s.clients || []
@@ -1613,8 +1614,8 @@ function AknoApp() {
     addEventListener("akno:back", f); return () => removeEventListener("akno:back", f) }, [page, rr.reception, rr.ready])
   const setChat = (b: boolean) => { setChatS(b); navigate(`/${slugOf(page)}${b ? "?chat=1" : ""}`, { replace: true }) }
   const modal = (x: Modal) => {
-    if (x?.kind === "devis") { setM(null); setEd({ prefill: x.data }); return }
-    if (x?.kind === "devisEditor") { setM(null); setEd({ initial: x.data, prefill: (x as { prefill?: EditorReq["prefill"] }).prefill }); return }
+    if (x?.kind === "devis") { setM(null); const req = { prefill: x.data }; if (DevisEditor.ready()) setEd(req); else void DevisEditor.preload().then(() => setEd(req), () => setEd(req)); return }
+    if (x?.kind === "devisEditor") { setM(null); const req = { initial: x.data, prefill: (x as { prefill?: EditorReq["prefill"] }).prefill }; if (DevisEditor.ready()) setEd(req); else void DevisEditor.preload().then(() => setEd(req), () => setEd(req)); return }
     if (x?.kind === "contacts") { go("cl"); return } // update66 : l'ancienne liste Clients est remplacée par la page /clients
     setM(x)
   }
@@ -1630,19 +1631,19 @@ function AknoApp() {
   const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
   const pkey = page === "fac" ? "dev" : page // update63 : Devis ↔ Factures sans re-monter la page (le bot reste en place)
   // update67 : préchargement des pages et feuilles chargées à part, au repos (puis au toucher, cf. MobileNav)
-  useEffect(() => { idle(() => { for (const L of [ChantiersPage, ClientsPage, EquipePage, FacturesSheet, ReceptionnisteStudio]) void L.preload().catch(() => {}); void loadChantiers() }) }, []) // update67 : pages et données Chantiers / Équipe prêtes avant le premier tap (pas de squelette)
+  useEffect(() => { idle(() => { for (const L of [ChantiersPage, ClientsPage, EquipePage, FacturesSheet, ReceptionnisteStudio, DevisEditor, EventSheet, TeamView, AgendaTools, ClientChantiers, DevisPaper]) void L.preload().catch(() => {}); void loadChantiers() }) }, []) // update67 : pages et données Chantiers / Équipe prêtes avant le premier tap (pas de squelette)
   const prefetch = (p: P) => { void LAZY[p]?.preload().catch(() => {}) }
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} page={page} desk loading={loading} /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
       : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
-    <AnimatePresence>{ed && <DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={dv => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} onCreateFacture={async dv => {
+    <AnimatePresence>{ed && <Suspense fallback={null}><DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={(dv: Devis) => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} onCreateFacture={async (dv: Devis) => {
       setEd(null)
       const { createFactureDraft } = await import("./sheets/FacturesSheet")
       const { devisToFactureLines } = await import("../../api/_lib/factureCalc")
       const r = await createFactureDraft({ client_nom: dv.client, client_email: dv.email, client_telephone: dv.phone, client_adresse: dv.addr, objet: dv.objet, lignes: devisToFactureLines(dv.lines || []) })
       if (!r.ok) { setToastT({ t: r.error || "Création de la facture impossible.", k: Date.now(), err: true }); return }
       setM({ kind: "factures", data: { id: r.facture_id } })
-    }} />}</AnimatePresence>
+    }} /></Suspense>}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />

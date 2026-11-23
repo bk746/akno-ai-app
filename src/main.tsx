@@ -5,9 +5,6 @@ import "@fontsource-variable/geist"
 import "@fontsource-variable/geist-mono"
 import "./index.css"
 import AknoApp from "./components/AknoApp"
-import ReserverPublic from "./components/ReserverPublic"
-import RejoindrePublic from "./components/RejoindrePublic"
-import AcceptDevis from "./components/AcceptDevis"
 import { initMonitoring } from "./lib/monitoring"
 import { initMobile } from "./lib/mobile"
 import { initNative } from "./lib/native"
@@ -17,6 +14,9 @@ import { Capacitor } from "@capacitor/core"
 const Legal = lazy(() => import("./components/Legal"))
 const DossierPublic = lazy(() => import("./components/DossierPublic"))
 const PayerPublic = lazy(() => import("./components/PayerPublic"))
+const AcceptDevis = lazy(() => import("./components/AcceptDevis"))
+const ReserverPublic = lazy(() => import("./components/ReserverPublic"))
+const RejoindrePublic = lazy(() => import("./components/RejoindrePublic"))
 const LEGAL = ["cgv", "mentions-legales", "confidentialite", "dpa", "suppression-compte"] // update70 : page publique de suppression de compte (Google Play)
 const Lazy = ({ children }: { children: React.ReactNode }) => <Suspense fallback={<div className="fixed inset-0 bg-black" />}>{children}</Suspense>
 initMonitoring()
@@ -37,9 +37,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
-        <Route path="/accept/:token" element={<AcceptDevis />} />
-        <Route path="/reserver/:token" element={<ReserverPublic />} />
-        <Route path="/rejoindre/:token" element={<RejoindrePublic />} />
+        <Route path="/accept/:token" element={<Lazy><AcceptDevis /></Lazy>} />
+        <Route path="/reserver/:token" element={<Lazy><ReserverPublic /></Lazy>} />
+        <Route path="/rejoindre/:token" element={<Lazy><RejoindrePublic /></Lazy>} />
         <Route path="/dossier/:token" element={<Lazy><DossierPublic /></Lazy>} />
         <Route path="/payer/:token" element={<Lazy><PayerPublic /></Lazy>} />
         {LEGAL.map(d => <Route key={d} path={`/${d}`} element={<Lazy><Legal doc={d} /></Lazy>} />)}

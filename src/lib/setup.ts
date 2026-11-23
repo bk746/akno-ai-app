@@ -5,7 +5,7 @@
    elle n'est écrite qu'après la confirmation du serveur. */
 import { useSyncExternalStore } from "react"
 import type { User } from "@supabase/supabase-js"
-import { supabase } from "./supabase"
+import { getAuthUser, supabase } from "./supabase"
 
 export type SK = "rec" | "ag" | "rel" | "dev"
 export type SetupFlags = Partial<Record<SK, string>>
@@ -40,9 +40,9 @@ let inflight: Promise<void> | null = null
 function load() {
   if (inflight) return inflight
   inflight = (async () => {
-    const { data, error } = await supabase.auth.getUser()
-    if (data.user) { adopt(data.user); return }
-    if (error) { const { data: s } = await supabase.auth.getSession(); if (s.session) adopt(s.session.user) }
+    const user = await getAuthUser()
+    if (user) { adopt(user); return }
+    const { data: s } = await supabase.auth.getSession(); if (s.session) adopt(s.session.user)
   })().catch(() => { /* réseau : on réessaiera au prochain abonnement */ }).finally(() => { inflight = null })
   return inflight
 }

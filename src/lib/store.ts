@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { supabase } from "./supabase"
+import { getAuthUser, supabase } from "./supabase"
 import { setCO } from "./devisDoc"
+import { loadRole } from "./role"
 import { mergeTarifs, tarifsEqual, type Tarifs } from "./tarifs"
 export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; rappelAt?: string; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; recording?: string; createdAt?: string; wantDevis?: boolean }
 export type EvKind = "chantier" | "rdv" | "visite" | "sav" | "urgence" | "absence"
@@ -202,31 +203,65 @@ const devRow = (d: Devis, tva: number) => {
   }
 }
 
+
+const SWR_KEY = (uid: string) => `akno-swr-v1:${uid}`
+function sessionUid(): string | null {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && /^sb-.*-auth-token$/.test(k)) {
+        const s = JSON.parse(localStorage.getItem(k) || "null")
+        const id = s?.user?.id
+        if (typeof id === "string" && id) return id
+      }
+    }
+  } catch { /* */ }
+  return null
+}
+type SwrSnap = { v: 1; employeId: string | null; calls: Call[]; events: Ev[]; devis: Devis[]; rels: Rel[] }
+function readSwr(uid: string | null): SwrSnap | null {
+  if (!uid) return null
+  try {
+    const x = JSON.parse(localStorage.getItem(SWR_KEY(uid)) || "null")
+    if (x && x.v === 1 && Array.isArray(x.calls) && Array.isArray(x.events) && Array.isArray(x.devis) && Array.isArray(x.rels)) return x as SwrSnap
+  } catch { /* */ }
+  return null
+}
+function writeSwr(uid: string, s: St, employeId: string | null) {
+  try { localStorage.setItem(SWR_KEY(uid), JSON.stringify({ v: 1, employeId, calls: s.calls, events: s.events, devis: s.devis, rels: s.rels } satisfies SwrSnap)) } catch { /* quota */ }
+}
+
 const empty = (): St => {
   try { for (const k of OLD_KEYS) localStorage.removeItem(k) } catch { }
   const d = seed().settings, loc = (() => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") } catch { return {} } })()
   const { name: _n, company: _c, email: _e, ...keep } = loc.settings || {}
-  return { clients: [], calls: [], events: [], rels: [], devis: [], chat: [], lastRel: { client: "", type: "", time: "", canal: "" }, settings: { ...d, ...keep, tarifs: mergeTarifs(keep.tarifs) } }
+  const base: St = { clients: [], calls: [], events: [], rels: [], devis: [], chat: [], lastRel: { client: "", type: "", time: "", canal: "" }, settings: { ...d, ...keep, tarifs: mergeTarifs(keep.tarifs) } }
+  const cached = readSwr(sessionUid())
+  return cached ? { ...base, calls: cached.calls, events: cached.events, devis: cached.devis, rels: cached.rels } : base
 }
 const toRel = (r: Row): Rel => ({ id: r.id, client: r.client || "", type: r.type || "", canal: r.canal || "SMS", status: (["prog", "pause", "env", "rep"].includes(r.statut) ? r.statut : "prog") as RelStatus, date: r.date_label || new Date(r.created_at).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" }), at: r.created_at, devisId: r.devis_id || undefined, appointmentId: r.appointment_id || undefined, scheduledFor: r.scheduled_for || undefined, sentAt: r.sent_at || undefined })
 const relRow = (r: Rel) => ({ client: r.client, type: r.type, canal: r.canal, statut: r.status, date_label: r.date, ...(r.devisId ? { devis_id: r.devisId } : {}), ...(r.appointmentId ? { appointment_id: r.appointmentId } : {}), ...(r.scheduledFor ? { scheduled_for: r.scheduledFor } : {}) })
 
 /** Données de l'artisan connecté : appels, rendez-vous, devis et profil viennent de Supabase (RLS = artisan_id = auth.uid()). */
 export function useStore() {
-  const [s, setRaw] = useState<St>(empty), [loading, setLoading] = useState(true), uidRef = useRef<string | null>(null), cur = useRef(s)
+  const [s, setRaw] = useState<St>(empty), [loading, setLoading] = useState(() => !readSwr(sessionUid())), uidRef = useRef<string | null>(sessionUid()), cur = useRef(s), empRef = useRef<string | null | undefined>(readSwr(sessionUid())?.employeId)
   cur.current = s
   useEffect(() => { try { const { name: _n, company: _c, email: _e, ...settings } = s.settings; localStorage.setItem(KEY, JSON.stringify({ settings })) } catch { } }, [s])
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser(); if (!user) return
+    const user = await getAuthUser(); if (!user) return
     uidRef.current = user.id
     // update44 : filtre artisan_id explicite en plus de la RLS (défense en profondeur, multi-clients)
     const since = new Date(Date.now() - 400 * 864e5).toISOString()
     // update78 : un employé ne doit JAMAIS se voir créer une fiche artisan (il resterait patron).
-    let employeId: string | null = null
-    try {
-      const emp = await supabase.from("employes").select("id, artisan_id").eq("user_id", user.id).maybeSingle()
-      if (emp.data?.id) employeId = emp.data.id
-    } catch { /* colonne user_id absente tant que la migration update78 n'est pas appliquée */ }
+    // update87 : réutilise loadRole (déjà en vol au démarrage) au lieu d'un 2e SELECT employes.
+    let employeId: string | null = empRef.current === undefined ? null : empRef.current
+    if (empRef.current === undefined) {
+      try {
+        const role = await loadRole()
+        employeId = role?.kind === "employe" ? role.employeId : null
+      } catch { employeId = null }
+      empRef.current = employeId
+    }
     const evQ = employeId
       ? supabase.from("appointments").select("*").eq("employe_id", employeId).gte("start", since).order("start").limit(2000)
       : supabase.from("appointments").select("*").eq("artisan_id", user.id).gte("start", since).order("start").limit(2000)
@@ -256,12 +291,13 @@ export function useStore() {
       return { ...x, calls: nextCalls, events: nextEvents, devis: nextDevis, rels: nextRels, settings }
     })
     setLoading(false)
+    writeSwr(user.id, { ...cur.current, calls: nextCalls, events: nextEvents, devis: nextDevis, rels: nextRels }, employeId)
   }, [])
   useEffect(() => {
     load()
     // Temps réel filtré sur l'artisan connecté + filet de sécurité toutes les 15 s (au lieu de 2 s : 7× moins de requêtes)
     let ch: ReturnType<typeof supabase.channel> | undefined, gone = false
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    getAuthUser().then(user => {
       if (!user || gone) return // update71 : démontage avant la réponse → pas de second canal du même nom (erreur « after subscribe() »)
       const f = `artisan_id=eq.${user.id}`
       ch = supabase.channel(`akno-live-${user.id}`)

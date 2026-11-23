@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { supabase } from "./supabase"
+import { getAuthUser, supabase } from "./supabase"
 import { setCO } from "./devisDoc"
 
 /* update44 · fiche artisan complète (écran Entreprise, onboarding, réglages réception…).
@@ -17,8 +17,8 @@ const subs = new Set<(p: Profile | null) => void>()
 function loadProfile(force = false) {
   if (inflight && !force) return inflight
   inflight = (async () => {
-    const { data: { user }, error: ue } = await supabase.auth.getUser()
-    if (!user) { cur = null; pstate = ue && ue.name !== "AuthSessionMissingError" ? "error" : "idle"; subs.forEach(f => f(null)); return }
+    const user = await getAuthUser()
+    if (!user) { cur = null; pstate = "idle"; subs.forEach(f => f(null)); return }
     puid = user.id
     const { data, error } = await supabase.from("artisans").select("*").eq("id", user.id).maybeSingle()
     if (data) { cur = data as Profile; pstate = "ok"; setCO(data); subs.forEach(f => f(cur)) }
@@ -42,7 +42,7 @@ export function useProfile() {
   }, [])
   const load = useCallback(() => loadProfile(true), [])
   const save = useCallback(async (patch: Record<string, unknown>) => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getAuthUser()
     if (!user) return "Session expirée."
     const { error } = await supabase.from("artisans").update(patch).eq("id", user.id)
     if (error) return "Enregistrement impossible."
