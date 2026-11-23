@@ -32,10 +32,23 @@ async function sb(path: string, init: RequestInit = {}): Promise<any> {
   return t ? JSON.parse(t) : null
 }
 
+const PROFILE_CACHE_TTL_MS = 10 * 60_000
+const profileCache = new Map<string, { profile: VoiceProfile; at: number }>()
+
+function profileFromCache(artisanId: string) {
+  const hit = profileCache.get(artisanId)
+  if (!hit || Date.now() - hit.at > PROFILE_CACHE_TTL_MS) return null
+  return hit.profile
+}
+
+function putProfileCache(artisanId: string, profile: VoiceProfile) {
+  profileCache.set(artisanId, { profile, at: Date.now() })
+}
+
 async function loadProfile(artisanId: string): Promise<VoiceProfile> {
   const rows = await sb(`/rest/v1/artisans?id=eq.${artisanId}&select=*`)
   const a = Array.isArray(rows) ? rows[0] || {} : {}
-  return mergeProfile({
+  const profile = mergeProfile({
     prenom: a.prenom || "",
     company: companyName(a.nom_entreprise, a.entreprise_nom),
     email: a.entreprise_email || a.email || "",
@@ -45,11 +58,23 @@ async function loadProfile(artisanId: string): Promise<VoiceProfile> {
     tarifs: a.tarifs && typeof a.tarifs === "object" ? a.tarifs : undefined,
     telephoneUrgence: typeof a.telephone_urgence === "string" ? a.telephone_urgence : "",
     accueil: typeof a.message_accueil === "string" ? a.message_accueil.slice(0, 300) : "",
-    // update57 : configurateur « Ma réceptionniste » (voix, débit, prestations, FAQ…), métier et horaires
     metier: typeof a.entreprise_metier === "string" ? a.entreprise_metier.slice(0, 80) : "",
     horaires: a.horaires && typeof a.horaires === "object" ? a.horaires : undefined,
     reception: a.reception_config && typeof a.reception_config === "object" ? a.reception_config : undefined,
   })
+  putProfileCache(artisanId, profile)
+  return profile
+}
+
+function phoneNote(p: VoiceProfile, from: string) {
+  return `\n\nCONTEXTE TÉLÉPHONE : vrai appel sur la ligne de ${p.company} (l'artisan n'a pas pu décrocher, l'appel t'a été renvoyé). Numéro de l'appelant : ${from || "masqué"}. Si ce numéro est connu, demande simplement si l'on peut le rappeler sur ce numéro au lieu de le faire dicter. Quand tout est noté et que le client a dit au revoir, conclus en une phrase courte.`
+}
+
+function twilioSession(p: VoiceProfile, slotsNote: string, from: string) {
+  const session = buildSessionConfig(p, 8000, slotsNote + phoneNote(p, from)) as Json
+  session.audio.input.format = { type: "audio/pcmu" }
+  session.audio.output.format = { type: "audio/pcmu" }
+  return session
 }
 
 // ---------- API Akno (Vercel) ----------
@@ -98,6 +123,14 @@ function handleCall(tw: WebSocket) {
   let bookFailed: string | null = null
   let bookQueue = Promise.resolve()
   let lastBookKey = ""
+  let ringT0 = 0
+  let firstAudioLogged = false
+  let slotsHintText = ""
+
+  const latency = (tag: string) => {
+    if (!ringT0) return
+    log("[latency]", tag, `${Date.now() - ringT0}ms`, "call", callSid ? callSid.slice(-8) : "?")
+  }
 
   const toTwilio = (m: Json) => { if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify(m)) }
   const toXai = (m: Json) => { if (xai?.readyState === WebSocket.OPEN) xai.send(JSON.stringify(m)) }
@@ -221,13 +254,18 @@ function handleCall(tw: WebSocket) {
     const type = String(ev.type || "")
     if (type === "session.updated" && !ready) {
       ready = true
+      latency("session.updated")
       toXai({ type: "conversation.item.create", item: { type: "force_message", role: "assistant", interruptible: false, content: [{ type: "output_text", text: welcomeLine(profile) }] } })
       return
     }
     if (type === "response.output_audio.delta" || type === "response.audio.delta") {
       // μ-law 8 kHz brut (session audio/pcmu) : renvoyé tel quel à Twilio — pas de pcmToUlaw ni resample (double conversion = voix métallique).
       const d = String(ev.delta || ev.audio || "")
-      if (d && streamSid) { rec.addOutbound(d); toTwilio({ event: "media", streamSid, media: { payload: d } }) }
+      if (d && streamSid) {
+        if (!firstAudioLogged) { firstAudioLogged = true; latency("first audio delta") }
+        rec.addOutbound(d)
+        toTwilio({ event: "media", streamSid, media: { payload: d } })
+      }
       return
     }
     if (type === "input_audio_buffer.speech_started" && !greeting) {
@@ -253,25 +291,38 @@ function handleCall(tw: WebSocket) {
     if (type === "error") log("[xai] error", JSON.stringify(ev.error || ev).slice(0, 300))
   }
 
+  const patchSession = () => {
+    if (closed || !xai || xai.readyState !== WebSocket.OPEN || !ready) return
+    toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
+  }
+
   async function start(params: Json) {
     if (!verifyToken(E.BRIDGE_SECRET || "", params)) { log("[call] jeton invalide, raccroche"); tw.close(); return }
     artisanId = params.artisan_id; from = params.from || ""
+    ringT0 = Date.now()
+    latency("twilio start")
     log("[call] start", callSid, "artisan", artisanId.slice(0, 8))
-    // update60 : cette requête réveille aussi /api/booking (et Cal.com) dès le décroché ; on n'attend que 1,5 s
-    // pour l'accueil, mais elle continue en arrière-plan (8 s) pour que la future réservation tombe sur une fonction chaude.
-    const warm = akno("/api/booking", artisanId, { action: "slots" }).then(b => (Array.isArray(b.slots) ? b.slots : []) as SlotHint[]).catch(() => [] as SlotHint[])
-    const slotsP = Promise.race([warm, new Promise<SlotHint[]>(r => setTimeout(() => r([]), 1500))])
-    const [p, slots] = await Promise.all([loadProfile(artisanId), slotsP])
-    profile = p
-    log("[call] voix", profile.reception?.voice || "défaut", "débit", profile.reception?.speed || 1)
-    const phoneNote = `\n\nCONTEXTE TÉLÉPHONE : vrai appel sur la ligne de ${profile.company} (l'artisan n'a pas pu décrocher, l'appel t'a été renvoyé). Numéro de l'appelant : ${from || "masqué"}. Si ce numéro est connu, demande simplement si l'on peut le rappeler sur ce numéro au lieu de le faire dicter. Quand tout est noté et que le client a dit au revoir, conclus en une phrase courte.`
-    const session = buildSessionConfig(profile, 8000, formatSlotsHint(slots) + phoneNote) as Json
-    // Téléphone : G.711 μ-law 8 kHz des deux côtés, sans transcodage.
-    session.audio.input.format = { type: "audio/pcmu" }
-    session.audio.output.format = { type: "audio/pcmu" }
+
+    profile = profileFromCache(artisanId) || mergeProfile()
+    slotsHintText = ""
+    void loadProfile(artisanId).then(p => {
+      profile = p
+      if (!ready && xai?.readyState === WebSocket.OPEN) {
+        toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
+      } else if (ready) patchSession()
+    }).catch(e => log("[call] profile", e))
+    void akno("/api/booking", artisanId, { action: "slots" }).then(b => {
+      const slots = (Array.isArray(b.slots) ? b.slots : []) as SlotHint[]
+      slotsHintText = formatSlotsHint(slots)
+      patchSession()
+    }).catch(() => { /* warm agenda en arrière-plan */ })
+
     if (closed) return
     xai = new WebSocket(XAI_URL, { headers: { Authorization: `Bearer ${E.XAI_API_KEY || ""}` } })
-    xai.on("open", () => toXai({ type: "session.update", session }))
+    xai.on("open", () => {
+      latency("xai open")
+      toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
+    })
     xai.on("message", onXai)
     xai.on("close", (c) => { log("[xai] close", c); if (!closed) tw.close() })
     xai.on("error", e => log("[xai] ws error", e.message))

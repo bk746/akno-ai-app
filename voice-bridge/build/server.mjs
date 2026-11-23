@@ -723,10 +723,20 @@ async function sb(path, init = {}) {
   const t = await r.text();
   return t ? JSON.parse(t) : null;
 }
+var PROFILE_CACHE_TTL_MS = 10 * 6e4;
+var profileCache = /* @__PURE__ */ new Map();
+function profileFromCache(artisanId) {
+  const hit = profileCache.get(artisanId);
+  if (!hit || Date.now() - hit.at > PROFILE_CACHE_TTL_MS) return null;
+  return hit.profile;
+}
+function putProfileCache(artisanId, profile) {
+  profileCache.set(artisanId, { profile, at: Date.now() });
+}
 async function loadProfile(artisanId) {
   const rows = await sb(`/rest/v1/artisans?id=eq.${artisanId}&select=*`);
   const a = Array.isArray(rows) ? rows[0] || {} : {};
-  return mergeProfile({
+  const profile = mergeProfile({
     prenom: a.prenom || "",
     company: companyName(a.nom_entreprise, a.entreprise_nom),
     email: a.entreprise_email || a.email || "",
@@ -736,11 +746,23 @@ async function loadProfile(artisanId) {
     tarifs: a.tarifs && typeof a.tarifs === "object" ? a.tarifs : void 0,
     telephoneUrgence: typeof a.telephone_urgence === "string" ? a.telephone_urgence : "",
     accueil: typeof a.message_accueil === "string" ? a.message_accueil.slice(0, 300) : "",
-    // update57 : configurateur « Ma réceptionniste » (voix, débit, prestations, FAQ…), métier et horaires
     metier: typeof a.entreprise_metier === "string" ? a.entreprise_metier.slice(0, 80) : "",
     horaires: a.horaires && typeof a.horaires === "object" ? a.horaires : void 0,
     reception: a.reception_config && typeof a.reception_config === "object" ? a.reception_config : void 0
   });
+  putProfileCache(artisanId, profile);
+  return profile;
+}
+function phoneNote(p, from) {
+  return `
+
+CONTEXTE T\xC9L\xC9PHONE : vrai appel sur la ligne de ${p.company} (l'artisan n'a pas pu d\xE9crocher, l'appel t'a \xE9t\xE9 renvoy\xE9). Num\xE9ro de l'appelant : ${from || "masqu\xE9"}. Si ce num\xE9ro est connu, demande simplement si l'on peut le rappeler sur ce num\xE9ro au lieu de le faire dicter. Quand tout est not\xE9 et que le client a dit au revoir, conclus en une phrase courte.`;
+}
+function twilioSession(p, slotsNote, from) {
+  const session = buildSessionConfig(p, 8e3, slotsNote + phoneNote(p, from));
+  session.audio.input.format = { type: "audio/pcmu" };
+  session.audio.output.format = { type: "audio/pcmu" };
+  return session;
 }
 var APP_TIMEOUT_MS = Number(E.APP_TIMEOUT_MS || 8e3);
 async function akno(path, artisanId, body, ms = APP_TIMEOUT_MS) {
@@ -781,6 +803,13 @@ function handleCall(tw) {
   let bookFailed = null;
   let bookQueue = Promise.resolve();
   let lastBookKey = "";
+  let ringT0 = 0;
+  let firstAudioLogged = false;
+  let slotsHintText = "";
+  const latency = (tag) => {
+    if (!ringT0) return;
+    log("[latency]", tag, `${Date.now() - ringT0}ms`, "call", callSid ? callSid.slice(-8) : "?");
+  };
   const toTwilio = (m) => {
     if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify(m));
   };
@@ -907,12 +936,17 @@ function handleCall(tw) {
     const type = String(ev.type || "");
     if (type === "session.updated" && !ready) {
       ready = true;
+      latency("session.updated");
       toXai({ type: "conversation.item.create", item: { type: "force_message", role: "assistant", interruptible: false, content: [{ type: "output_text", text: welcomeLine(profile) }] } });
       return;
     }
     if (type === "response.output_audio.delta" || type === "response.audio.delta") {
       const d = String(ev.delta || ev.audio || "");
       if (d && streamSid) {
+        if (!firstAudioLogged) {
+          firstAudioLogged = true;
+          latency("first audio delta");
+        }
         rec.addOutbound(d);
         toTwilio({ event: "media", streamSid, media: { payload: d } });
       }
@@ -948,6 +982,10 @@ function handleCall(tw) {
     }
     if (type === "error") log("[xai] error", JSON.stringify(ev.error || ev).slice(0, 300));
   }
+  const patchSession = () => {
+    if (closed || !xai || xai.readyState !== WebSocket.OPEN || !ready) return;
+    toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
+  };
   async function start(params) {
     if (!verifyToken(E.BRIDGE_SECRET || "", params)) {
       log("[call] jeton invalide, raccroche");
@@ -956,21 +994,29 @@ function handleCall(tw) {
     }
     artisanId = params.artisan_id;
     from = params.from || "";
+    ringT0 = Date.now();
+    latency("twilio start");
     log("[call] start", callSid, "artisan", artisanId.slice(0, 8));
-    const warm = akno("/api/booking", artisanId, { action: "slots" }).then((b) => Array.isArray(b.slots) ? b.slots : []).catch(() => []);
-    const slotsP = Promise.race([warm, new Promise((r) => setTimeout(() => r([]), 1500))]);
-    const [p, slots] = await Promise.all([loadProfile(artisanId), slotsP]);
-    profile = p;
-    log("[call] voix", profile.reception?.voice || "d\xE9faut", "d\xE9bit", profile.reception?.speed || 1);
-    const phoneNote = `
-
-CONTEXTE T\xC9L\xC9PHONE : vrai appel sur la ligne de ${profile.company} (l'artisan n'a pas pu d\xE9crocher, l'appel t'a \xE9t\xE9 renvoy\xE9). Num\xE9ro de l'appelant : ${from || "masqu\xE9"}. Si ce num\xE9ro est connu, demande simplement si l'on peut le rappeler sur ce num\xE9ro au lieu de le faire dicter. Quand tout est not\xE9 et que le client a dit au revoir, conclus en une phrase courte.`;
-    const session = buildSessionConfig(profile, 8e3, formatSlotsHint(slots) + phoneNote);
-    session.audio.input.format = { type: "audio/pcmu" };
-    session.audio.output.format = { type: "audio/pcmu" };
+    profile = profileFromCache(artisanId) || mergeProfile();
+    slotsHintText = "";
+    void loadProfile(artisanId).then((p) => {
+      profile = p;
+      if (!ready && xai?.readyState === WebSocket.OPEN) {
+        toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
+      } else if (ready) patchSession();
+    }).catch((e) => log("[call] profile", e));
+    void akno("/api/booking", artisanId, { action: "slots" }).then((b) => {
+      const slots = Array.isArray(b.slots) ? b.slots : [];
+      slotsHintText = formatSlotsHint(slots);
+      patchSession();
+    }).catch(() => {
+    });
     if (closed) return;
     xai = new WebSocket(XAI_URL, { headers: { Authorization: `Bearer ${E.XAI_API_KEY || ""}` } });
-    xai.on("open", () => toXai({ type: "session.update", session }));
+    xai.on("open", () => {
+      latency("xai open");
+      toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
+    });
     xai.on("message", onXai);
     xai.on("close", (c) => {
       log("[xai] close", c);
