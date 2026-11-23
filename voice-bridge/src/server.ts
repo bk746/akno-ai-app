@@ -207,6 +207,7 @@ function handleCall(tw: WebSocket) {
       return
     }
     if (type === "response.output_audio.delta" || type === "response.audio.delta") {
+      // μ-law 8 kHz brut (session audio/pcmu) : renvoyé tel quel à Twilio — pas de pcmToUlaw ni resample (double conversion = voix métallique).
       const d = String(ev.delta || ev.audio || "")
       if (d && streamSid) { rec.addOutbound(d); toTwilio({ event: "media", streamSid, media: { payload: d } }) }
       return
@@ -292,6 +293,7 @@ function handleCall(tw: WebSocket) {
       if (params.call_sid && callSid && params.call_sid !== callSid) { tw.close(); return }
       void start(params).catch(e => { log("[call] start", e); tw.close() })
     } else if (m.event === "media" && m.media?.payload) {
+      // Appelant → xAI : payload base64 μ-law Twilio inchangé (ulawToPcm seulement pour l'enregistrement WAV).
       rec.addInbound(m.media.payload)
       if (ready) toXai({ type: "input_audio_buffer.append", audio: m.media.payload })
     } else if (m.event === "stop") {

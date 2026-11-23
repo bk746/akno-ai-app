@@ -109,15 +109,20 @@ var VOICES = [
   { id: "rigel", name: "Rigel", gender: "male", tone: "Pr\xE9cis, professionnel, calme", use: "Assistant, support", accent: "australien" },
   { id: "naksh", name: "Naksh", gender: "male", tone: "Chaleureux, r\xE9fl\xE9chi", use: "Assistant, support", accent: "indien" }
 ];
-var DEFAULT_VOICE = "celeste";
+var DEFAULT_VOICE = "ara";
 var VOICE_IDS = new Set(VOICES.map((v) => v.id));
 var isVoiceId = (v) => typeof v === "string" && VOICE_IDS.has(v.toLowerCase());
+var DEFAULT_PICKUP = "fallback";
 var LIMITS = { presentation: 600, services: 20, nom: 80, prix: 40, duree: 40, zone: 200, disponibilites: 300, urgences: 500, interdits: 500, faq: 12, q: 160, r: 400, consignes: 1200, prononciations: 10, mot: 60, dit: 80 };
 var SPEED_MIN = 0.85;
 var SPEED_MAX = 1.2;
 var emptyConfig = () => ({
   voice: DEFAULT_VOICE,
   speed: 1,
+  enabled: true,
+  pickup: DEFAULT_PICKUP,
+  operator: "orange",
+  forwardApplied: "",
   tutoiement: false,
   presentation: "",
   services: [],
@@ -139,6 +144,10 @@ function normalizeConfig(raw) {
   return {
     voice: isVoiceId(o.voice) ? String(o.voice).toLowerCase() : base.voice,
     speed: Number.isFinite(sp) && sp > 0 ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, sp)) * 100) / 100 : 1,
+    enabled: o.enabled !== false,
+    pickup: o.pickup === "direct" ? "direct" : DEFAULT_PICKUP,
+    operator: o.operator === "sfr" || o.operator === "bouygues" || o.operator === "free" ? o.operator : "orange",
+    forwardApplied: o.forwardApplied === "off" || o.forwardApplied === "direct" || o.forwardApplied === "fallback" ? o.forwardApplied : "",
     tutoiement: o.tutoiement === true,
     presentation: clean(o.presentation, LIMITS.presentation),
     services: arr(o.services).map((s) => s && typeof s === "object" ? s : {}).map((s) => ({ nom: line(s.nom, LIMITS.nom), prix: line(s.prix, LIMITS.prix), duree: line(s.duree, LIMITS.duree) })).filter((s) => s.nom).slice(0, LIMITS.services),

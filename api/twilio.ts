@@ -2,6 +2,7 @@ import { adminClient, appUrl, escapeHtml } from "./_lib/mail.js"
 import { verifyTwilioSignature, toE164 } from "./_lib/sms.js"
 import { notifyArtisan } from "./_lib/push.js"
 import { reportError } from "./_lib/monitoring.js"
+import { say } from "./_lib/twilioVoice.js"
 
 /* update48 · Préparation de la vraie ligne téléphonique (débordement), SANS toucher à la
    réceptionniste vocale de l'app (xAI Grok Voice, inchangée).
@@ -14,7 +15,6 @@ import { reportError } from "./_lib/monitoring.js"
    Toutes les requêtes sont vérifiées avec la signature X-Twilio-Signature. */
 
 const xml = (body: string) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`, { status: 200, headers: { "Content-Type": "text/xml; charset=utf-8", "Cache-Control": "no-store" } })
-const say = (t: string) => `<Say language="fr-FR" voice="Polly.Lea">${escapeHtml(t)}</Say>`
 
 function publicUrl(request: Request) {
   const u = new URL(request.url)

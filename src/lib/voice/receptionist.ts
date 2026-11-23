@@ -40,10 +40,8 @@ export const VOICES: VoiceInfo[] = [
   { id: "naksh", name: "Naksh", gender: "male", tone: "Chaleureux, réfléchi", use: "Assistant, support", accent: "indien" },
 ]
 
-/** Voix par défaut (update57) : « celeste » — voix féminine que xAI destine à l'accueil / l'assistance
- *  (« compassionate, confident, and reassuring — Support, Assistant »), sans accent étranger annoncé.
- *  Avant l'update57 : « ara » (toujours disponible dans le sélecteur). */
-export const DEFAULT_VOICE = "celeste"
+/** Voix par défaut si l'artisan n'en a pas choisi : « ara » (chaleureuse, polyvalente — moins « robot » que les voix trop placées). */
+export const DEFAULT_VOICE = "ara"
 const VOICE_IDS = new Set(VOICES.map(v => v.id))
 export const isVoiceId = (v: unknown): v is string => typeof v === "string" && VOICE_IDS.has(v.toLowerCase())
 export const voiceInfo = (id?: string) => VOICES.find(v => v.id === (id || "").toLowerCase()) || VOICES.find(v => v.id === DEFAULT_VOICE)!

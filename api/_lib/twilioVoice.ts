@@ -5,7 +5,9 @@ import { timingSafeEqual } from "./http.js"
    Twilio → /api/twilio-voice → TwiML <Connect><Stream> → relais voice-bridge → xAI Grok Voice. */
 
 export const xml = (body: string) => `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`
-export const say = (t: string) => `<Say language="fr-FR" voice="Polly.Lea">${escapeHtml(t)}</Say>`
+/** Voix neuronale Google (tous les <Say> Twilio de l'app). */
+export const TWILIO_SAY_VOICE = "Google.fr-FR-Chirp3-HD-Aoede"
+export const say = (t: string) => `<Say language="fr-FR" voice="${TWILIO_SAY_VOICE}">${escapeHtml(t)}</Say>`
 
 /** Message vocal poli puis raccroche (hors forfait, numéro inconnu, panne). */
 export function sayHangup(text: string) {

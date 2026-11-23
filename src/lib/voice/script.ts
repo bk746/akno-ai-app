@@ -67,8 +67,7 @@ export function mergeProfile(partial?: Partial<VoiceProfile> | null): VoiceProfi
   }
 }
 
-/** Voix xAI par défaut (session.update.voice). update57 : choisie par l'artisan dans « Ma réceptionniste »
- *  (liste et justification dans ./receptionist.ts). Avant l'update57 : « ara ». */
+/** Voix xAI par défaut (session.update.voice) si l'artisan n'en a pas choisi — voir DEFAULT_VOICE dans ./receptionist.ts. */
 export const VOICE_ID = DEFAULT_VOICE
 
 /** Annonce d'enregistrement (information préalable RGPD) : toujours présente dans l'accueil. */

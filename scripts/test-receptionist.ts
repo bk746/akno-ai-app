@@ -10,13 +10,13 @@ const base = { company: "Plomberie Bouzerda", city: "Lyon", email: "contact@bouz
 
 // 1) Catalogue des voix (doc xAI : 28 voix intégrées)
 T("28 voix, identifiants uniques", VOICES.length === 28 && new Set(VOICES.map(v => v.id)).size === 28)
-T("voix par défaut = celeste (féminine)", DEFAULT_VOICE === "celeste" && VOICE_ID === "celeste" && VOICES.find(v => v.id === "celeste")?.gender === "female")
+T("voix par défaut = ara (féminine)", DEFAULT_VOICE === "ara" && VOICE_ID === "ara" && VOICES.find(v => v.id === "ara")?.gender === "female")
 T("9 voix féminines / 19 masculines (GET /v1/tts/voices)", VOICES.filter(v => v.gender === "female").length === 9 && VOICES.filter(v => v.gender === "male").length === 19)
 
 // 2) Zéro configuration : fonctionne, prompt sans bloc artisan
 const p0 = mergeProfile(base)
 const s0 = buildSessionConfig(p0, 24000)
-T("sans config : voix par défaut, débit 1", s0.voice === "celeste" && s0.audio.output.speed === 1)
+T("sans config : voix par défaut, débit 1", s0.voice === "ara" && s0.audio.output.speed === 1)
 T("sans config : pas de bloc INFOS DE L'ARTISAN ni replace", !/INFOS DE L'ARTISAN/.test(s0.instructions) && !("replace" in s0))
 T("sans config : vouvoiement", /Français, vouvoiement/.test(s0.instructions))
 T("métier « Plombier » → « plomberie » dans le prompt", /entreprise de plomberie à Lyon/.test(s0.instructions) && metierActivite("Électricien") === "électricité")
@@ -62,7 +62,7 @@ T("tutoiement : ton + consigne + accueil", /Français, tutoiement/.test(buildIns
 
 // 5) Robustesse (données en base corrompues / hostiles)
 const bad = normalizeConfig({ voice: "voix-inventee", speed: 9, services: "x", faq: [null, 3], presentation: "a\u0000b".repeat(1000) })
-T("voix inconnue → défaut, débit borné, listes invalides ignorées", bad.voice === "celeste" && bad.speed === 1.2 && bad.services.length === 0 && bad.faq.length === 0)
+T("voix inconnue → défaut, débit borné, listes invalides ignorées", bad.voice === "ara" && bad.speed === 1.2 && bad.services.length === 0 && bad.faq.length === 0)
 T("sans enabled/pickup : IA active, mode si je ne décroche pas", normalizeConfig({}).enabled === true && normalizeConfig({}).pickup === "fallback")
 T("enabled: false conservé", normalizeConfig({ enabled: false }).enabled === false)
 T("pickup direct conservé, valeur invalide → fallback", normalizeConfig({ pickup: "direct" }).pickup === "direct" && normalizeConfig({ pickup: "xyz" }).pickup === "fallback")
@@ -70,7 +70,7 @@ T("serialize inclut enabled et pickup", (() => { const z = serializeConfig(norma
 T("operator par défaut orange, forwardApplied vide", normalizeConfig({}).operator === "orange" && normalizeConfig({}).forwardApplied === "")
 T("operator/forwardApplied conservés", normalizeConfig({ operator: "bouygues", forwardApplied: "off" }).operator === "bouygues" && normalizeConfig({ operator: "bouygues", forwardApplied: "off" }).forwardApplied === "off")
 T("textes tronqués et sans caractères de contrôle", bad.presentation.length <= 600 && !/\u0000/.test(bad.presentation))
-T("normalizeConfig(null) / undefined", normalizeConfig(null).voice === "celeste" && formatConfigForPrompt(normalizeConfig(undefined)) === "")
+T("normalizeConfig(null) / undefined", normalizeConfig(null).voice === "ara" && formatConfigForPrompt(normalizeConfig(undefined)) === "")
 T("replaceMap vide → undefined", replaceMap(normalizeConfig({})) === undefined)
 T("serializeConfig : version + sans champs vides", (() => { const z = serializeConfig(n); return z.v === 1 && z.services[1] && !("prix" in z.services[1]) })())
 T("formatHoraires invalide → vide", formatHoraires({ lun: ["x", "y"] }) === "" && formatHoraires(null) === "")

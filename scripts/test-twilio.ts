@@ -34,7 +34,7 @@ const params = { CallSid: "CA0123456789abcdef", From: "+33612345678", To: "+3397
   T("paramètres artisan_id / call_sid / from transmis", /<Parameter name="artisan_id" value="a-1"\/>/.test(tw) && /name="call_sid" value="CA1"/.test(tw) && /name="from" value="\+33612345678"/.test(tw))
   T("valeurs échappées (XML sûr)", tw.includes('value="t&amp;&lt;&quot;"'))
   const h = sayHangup("Bonjour, l'assistante n'est pas disponible.")
-  T("hors forfait : message vocal fr-FR puis raccroche", /<Say language="fr-FR"[^>]*>Bonjour, l&#39;assistante n&#39;est pas disponible\.<\/Say><Hangup\/><\/Response>$/.test(h))
+  T("hors forfait : message vocal fr-FR puis raccroche", /<Say language="fr-FR" voice="Google\.fr-FR-Chirp3-HD-Aoede"[^>]*>Bonjour, l&#39;assistante n&#39;est pas disponible\.<\/Say><Hangup\/><\/Response>$/.test(h))
   T("VOICE_BRIDGE_URL https → wss…/twilio", bridgeStreamUrl("https://akno-voice-bridge.fly.dev/") === "wss://akno-voice-bridge.fly.dev/twilio")
   T("VOICE_BRIDGE_URL déjà wss…/twilio inchangée", bridgeStreamUrl("wss://x.fly.dev/twilio") === "wss://x.fly.dev/twilio")
   T("VOICE_BRIDGE_URL vide → désactivé", bridgeStreamUrl("") === "")
