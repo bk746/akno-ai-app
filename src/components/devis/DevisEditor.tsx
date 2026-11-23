@@ -6,7 +6,7 @@
    update63 · refonte visuelle « iOS » : sections groupées (Client, Chantier, Prestations, Conditions), libellés en ligne,
    choix du client en feuille de recherche, coordonnées repliables, « Identique à l'adresse client », lignes en cartes
    (balayer pour supprimer), barre du bas compacte HT / TVA / TTC. Logique, champs, modèles et brouillons inchangés. */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, animate, motion, Reorder, useDragControls, useMotionValue, useReducedMotion, useTransform } from "motion/react"
 import { X, Plus, GripVertical, MoreHorizontal, Copy, ArrowUp, ArrowDown, Trash2, BookmarkPlus, Clock, Package, Tag, Layers, Eye, Send, Check, AlertCircle, Loader2, Search, AlignLeft, Download, LayoutTemplate, Percent } from "lucide-react"
 import { useC } from "../ui"
@@ -34,6 +34,16 @@ const DEFAULT_COND = "Acompte de 30 % à la signature, solde à la fin des trava
 
 export default function DevisEditor({ req, onClose, onSend, onCreateFacture, clients }: { req: EditorReq; onClose: () => void; onSend: (d: Devis) => void; onCreateFacture?: (d: Devis) => void | Promise<void>; clients: CtInfo[] }) {
   const { s, desk, toast, put } = useC()
+  const footRef = useRef<HTMLDivElement>(null)
+  const [footH, setFootH] = useState(168)
+  useLayoutEffect(() => {
+    const el = footRef.current
+    if (!el) return
+    const apply = () => setFootH(el.offsetHeight)
+    const ro = new ResizeObserver(apply)
+    ro.observe(el); apply()
+    return () => ro.disconnect()
+  }, [desk])
   const tv0 = CO.tvaNA ? 0 : Number(s.settings.tva) || 10
   const taux = tauxDef(s.settings.tarifs?.tauxHoraire)
   const init = req.initial
@@ -253,7 +263,7 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
     </div>
     {/* update82 · en-tête de colonnes remplacé par la carte iOS */}
     {doc.items.length > 0 ? <Reorder.Group axis="y" values={doc.items} onReorder={xs => setDoc(d => ({ ...d, items: xs as EdLine[] }))} className={desk ? "space-y-1.5" : "space-y-2.5"}>
-      {doc.items.map((x, i) => <LineRow key={x.id} x={x} desk={desk} focused={focusId === x.id} taux={taux} subtotal={x.k === "sec" ? sub(i) : 0} first={i === 0} last={i === doc.items.length - 1}
+      {doc.items.map((x, i) => <LineRow key={x.id} x={x} n={x.k === "sec" ? 0 : doc.items.slice(0, i + 1).filter(y => y.k !== "sec").length} desk={desk} focused={focusId === x.id} taux={taux} subtotal={x.k === "sec" ? sub(i) : 0} first={i === 0} last={i === doc.items.length - 1}
         onFocus={() => setFocusId(x.id)} onPatch={p => patch(x.id, p)} onMove={d => move(x.id, d)} onDup={() => dup(x.id)} onRemove={() => remove(x.id)} onSave={() => asPresta(x)} onEnter={() => addKind(x.k)} />)}
     </Reorder.Group>
       : <div className="rounded-[18px] bg-[#141416] px-6 py-9 text-center">
@@ -322,11 +332,11 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
         </aside>
       </div>
     </div> : <>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: "calc(148px + var(--sab) + var(--kb, 0px))" }}>
+      <div data-devis-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: `calc(${footH}px + 24px + var(--kb, 0px))` }}>
         {restorePill}
         <div className="space-y-8">{clientCard}{lines}{recap}</div>
       </div>
-      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/[.06] bg-[#0B0B0C] px-4 pt-2.5" style={{ paddingBottom: "max(10px, var(--sab))" }}>
+      <div ref={footRef} data-devis-footer className="absolute inset-x-0 bottom-0 z-10 border-t border-white/[.06] bg-[#0B0B0C] px-4 pt-2.5" style={{ paddingBottom: "max(10px, var(--sab))" }}>
         <div className="flex items-center gap-2.5">
           <div className="min-w-0 flex-1" aria-label={`Total ${fmtE(T.ttc)} TTC`}>
             <div className="flex gap-2.5 truncate text-[11.5px] tabular-nums text-white/45"><span>HT {fmtE(T.ht)}</span>{!CO.tvaNA && <span>TVA {fmtE(T.tva)}</span>}{T.remise > 0 && <span>remise incluse</span>}</div>
@@ -369,7 +379,7 @@ const StepT = ({ n, t }: { n: number; t: string }) => <span className="inline-fl
 const COLS = (tvaNA: boolean) => tvaNA ? "20px minmax(0,1fr) 132px 84px 120px 116px 36px" : "20px minmax(0,1fr) 132px 84px 120px 84px 116px 36px"
 const TotRow = ({ l, v, strong, hint }: { l: string; v: string; strong?: boolean; hint?: string }) => <div className="ig-row flex min-h-11 items-center justify-between gap-3 py-2 pl-4 pr-4 text-[15px]"><span className={strong ? "font-medium text-white" : "text-white/55"}>{l}{hint && <span className="ml-1.5 text-[12.5px] text-white/30">{hint}</span>}</span><span className={`tabular-nums ${strong ? "font-medium text-white" : "text-white/85"}`}>{v}</span></div>
 
-function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPatch, onMove, onDup, onRemove, onSave, onEnter }: { x: EdLine; desk: boolean; focused: boolean; taux: number | null; subtotal: number; first: boolean; last: boolean; onFocus: () => void; onPatch: (p: Partial<EdLine>) => void; onMove: (d: -1 | 1) => void; onDup: () => void; onRemove: () => void; onSave: () => void; onEnter: () => void }) {
+function LineRow({ x, n, desk, focused, taux, subtotal, first, last, onFocus, onPatch, onMove, onDup, onRemove, onSave, onEnter }: { x: EdLine; n: number; desk: boolean; focused: boolean; taux: number | null; subtotal: number; first: boolean; last: boolean; onFocus: () => void; onPatch: (p: Partial<EdLine>) => void; onMove: (d: -1 | 1) => void; onDup: () => void; onRemove: () => void; onSave: () => void; onEnter: () => void }) {
   const controls = useDragControls(), [menu, setMenu] = useState(false), [desc, setDesc] = useState(!!x.d)
   const [remOpen, setRemOpen] = useState(!!x.rl)
   const setKind = (k: LineKind) => onPatch({ k, u: k === "mo" ? "h" : k === "fft" ? "forfait" : x.u === "h" || x.u === "forfait" ? "u" : x.u, ...(k === "mo" && !x.pu && taux ? { pu: taux } : {}) })
@@ -398,13 +408,11 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
     </div>
   </Reorder.Item>
 
-  // update82 · carte iOS complète (description, coût, unité, qté, remise, taxe, total en direct)
-  const form = <ServiceLineCard x={x} onPatch={p => onPatch(p)} defaultTv={x.tv > 0 ? x.tv : (CO.tvaNA ? 0 : 20)} tvaNA={CO.tvaNA} idPrefix={x.id} />
+  // update83 · carte pleine largeur : poignée et « … » dans l'en-tête (Ligne n)
+  const form = <ServiceLineCard x={x} onPatch={p => onPatch(p)} defaultTv={x.tv > 0 ? x.tv : (CO.tvaNA ? 0 : 20)} tvaNA={CO.tvaNA} idPrefix={x.id} index={n || undefined} handle={handle} menu={menuEl} />
 
-  if (desk) return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className="relative">
-    <div className={`flex items-start gap-1 rounded-[18px] ${focused ? "ring-1 ring-white/15" : ""}`}>
-      {handle}<div className="min-w-0 flex-1">{form}</div>{menuEl}
-    </div>
+  if (desk) return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className={`relative ${focused ? "ring-1 ring-white/15 rounded-[18px]" : ""}`}>
+    {form}
   </Reorder.Item>
 
   return <Reorder.Item value={x} dragListener={false} dragControls={controls} data-line={x.id} onFocusCapture={onFocus} className="relative">
@@ -414,7 +422,7 @@ function LineRow({ x, desk, focused, taux, subtotal, first, last, onFocus, onPat
     <motion.div drag="x" dragDirectionLock dragListener={false} dragControls={xc} onPointerDown={e => { if (!(e.target as HTMLElement).closest("[data-nodrag]")) xc.start(e) }} dragConstraints={{ left: -SWIPE, right: 0 }} dragElastic={{ left: .12, right: 0 }} dragMomentum={false} style={{ x: mx, touchAction: "pan-y" }}
       onDragEnd={(_, i) => snap(i.offset.x < -44 || i.velocity.x < -350 ? true : false)} onClickCapture={e => { if (swiped) { e.stopPropagation(); e.preventDefault(); snap(false) } }}
       className="relative">
-      <div className="flex items-start gap-1">{handle}<div data-nodrag className="min-w-0 flex-1">{form}</div>{menuEl}</div>
+      {form}
     </motion.div>
   </Reorder.Item>
 }

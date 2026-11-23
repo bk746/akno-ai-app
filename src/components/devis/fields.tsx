@@ -1,6 +1,6 @@
 /* update52 · Petits champs de l'éditeur de devis (saisie française des nombres, pas à pas, segments, menu). */
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { Minus, Plus } from "lucide-react"
+import { ChevronRight, Minus, Plus } from "lucide-react"
 import { fmtN, parseN } from "../../lib/devisCalc"
 import { IToggleRow, ival } from "../form/grouped"
 import { fmtE, r2, type LineDisc } from "../../lib/devisCalc"
@@ -72,46 +72,70 @@ export function lineAmount(x: { q: number; pu: number; rl?: LineDisc }) {
   return r2(g - disc)
 }
 
-const slabel = "w-[138px] shrink-0 text-[15px] text-white/50"
-const srow = "ig-row flex min-h-12 items-center gap-3 pl-4"
+const slabel = "w-[148px] shrink-0 text-[15px] leading-[20px] text-white/50"
+const srow = "ig-row flex min-h-12 items-center gap-3 pl-4 pr-4"
+const sval = "h-12 w-full min-w-0 bg-transparent text-right text-[16px] text-white outline-none caret-[#2F6BFF] [color-scheme:dark] placeholder:text-white/28 disabled:text-white/55 disabled:opacity-100"
 
-export function ServiceLineCard({ x, onPatch, defaultTv = 20, tvaNA, ro, idPrefix }: {
+/** Montant à droite, une seule typo : « 0,00 € ». */
+function RightMoney({ id, value, onChange, disabled, ariaLabel }: { id: string; value: number; onChange: (n: number) => void; disabled?: boolean; ariaLabel: string }) {
+  const fmt = (v: number) => r2(Number(v) || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[\u202f\u00a0]/g, " ") + " €"
+  const [raw, setRaw] = useState(fmt(value)), [focus, setFocus] = useState(false)
+  useEffect(() => { if (!focus) setRaw(fmt(value)) }, [value, focus])
+  return <input id={id} disabled={disabled} inputMode="decimal" aria-label={ariaLabel} value={raw}
+    onFocus={e => { setFocus(true); setRaw(fmt(value)); requestAnimationFrame(() => e.target.select()) }}
+    onBlur={() => { setFocus(false); setRaw(fmt(value)) }}
+    onChange={e => { const txt = e.target.value; setRaw(txt); const n = parseN(txt.replace(/€/g, "")); if (txt.trim() === "" || txt.trim() === "€") onChange(0); else if (Number.isFinite(n)) onChange(Math.max(0, n)) }}
+    className={sval + " tabular-nums"} />
+}
+
+export function ServiceLineCard({ x, onPatch, defaultTv = 20, tvaNA, ro, idPrefix, index, handle, menu }: {
   x: ServiceVal; onPatch: (p: Partial<ServiceVal>) => void; defaultTv?: number; tvaNA?: boolean; ro?: boolean; idPrefix: string
+  index?: number; handle?: ReactNode; menu?: ReactNode
 }) {
   const remOn = !!x.rl
   const taxed = !tvaNA && (Number(x.tv) || 0) > 0
   const total = lineAmount(x)
   const pid = (s: string) => `${idPrefix}-${s}`
+  const remKind = x.rl?.t === "eur" ? "eur" : "pct"
   return (
     <div data-line-form className="ig overflow-hidden rounded-[18px] bg-[#141416]">
+      {(handle || menu || index != null) && <div data-line-head className="ig-row flex h-12 items-center gap-1 pl-1.5 pr-1">
+        {handle || <span className="w-5 shrink-0" />}
+        <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-white/85">{index != null ? `Ligne ${index}` : "Ligne"}</span>
+        {menu}
+      </div>}
+      <div data-nodrag>
       <div className={srow}>
         <label htmlFor={pid("l")} className={slabel}>Description</label>
-        <input id={pid("l")} data-f="l" data-line-desc disabled={ro} value={x.l} maxLength={280} placeholder="Désignation" onChange={e => onPatch({ l: e.target.value })} className={ival} />
+        <input id={pid("l")} data-f="l" data-line-desc disabled={ro} value={x.l} maxLength={280} placeholder="Désignation" onChange={e => onPatch({ l: e.target.value })} className={sval} />
       </div>
-      <div className={srow + " pr-4"}>
+      <div className={srow}>
         <label htmlFor={pid("pu")} className={slabel}>Coût unitaire</label>
-        <NumField id={pid("pu")} value={x.pu} onChange={n => onPatch({ pu: n ?? 0 })} suffix="€" ariaLabel="Coût unitaire" disabled={ro} className="ml-auto w-[128px]" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px] disabled:text-white/55" />
+        <RightMoney id={pid("pu")} value={Number(x.pu) || 0} onChange={n => onPatch({ pu: n })} disabled={ro} ariaLabel="Coût unitaire" />
       </div>
-      <div className={srow + " pr-4"}>
+      <div className={srow}>
         <label htmlFor={pid("u")} className={slabel}>Unité</label>
-        <input id={pid("u")} data-line-unit disabled={ro} value={x.u || ""} placeholder="heures, jours" onChange={e => onPatch({ u: e.target.value })} className={ival + " text-right"} />
+        <input id={pid("u")} data-line-unit disabled={ro} value={x.u || ""} placeholder="heures, jours" onChange={e => onPatch({ u: e.target.value })} className={sval} />
       </div>
-      <div className={srow + " pr-4"}>
+      <div className={srow}>
         <label htmlFor={pid("q")} className={slabel}>Quantité</label>
-        <NumField id={pid("q")} value={x.q} onChange={n => onPatch({ q: n ?? 1 })} ariaLabel="Quantité" disabled={ro} className="ml-auto w-[88px]" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px]" />
+        <NumField id={pid("q")} value={x.q} onChange={n => onPatch({ q: n ?? 1 })} ariaLabel="Quantité" disabled={ro} className="min-w-0 flex-1" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px] tabular-nums" />
       </div>
-      <div className={srow + " pr-3"}>
+      <div className={srow}>
         <label htmlFor={pid("rem-type")} className={slabel}>Remise</label>
-        <select id={pid("rem-type")} data-line-remise-type disabled={ro} aria-label="Remise" value={remOn ? "total" : "none"} onChange={e => onPatch({ rl: e.target.value === "none" ? undefined : { t: x.rl?.t || "pct", v: x.rl?.v || 0 } })} className="h-12 min-w-0 flex-1 appearance-none bg-transparent pr-1 text-right text-[16px] text-white outline-none [color-scheme:dark] disabled:text-white/55">
-          <option value="none">Aucune</option>
-          <option value="total">Remise sur total</option>
-        </select>
+        <div className="relative min-w-0 flex-1">
+          <select id={pid("rem-type")} data-line-remise-type disabled={ro} aria-label="Remise" value={remOn ? "total" : "none"} onChange={e => onPatch({ rl: e.target.value === "none" ? undefined : { t: x.rl?.t || "pct", v: x.rl?.v || 0 } })} className={sval + " appearance-none pr-5"}>
+            <option value="none">Aucune</option>
+            <option value="total">Remise sur total</option>
+          </select>
+          <ChevronRight data-line-remise-chevron size={17} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-white/25" />
+        </div>
       </div>
-      {remOn && <div className={srow + " pr-4"}>
-        <label htmlFor={pid("rem")} className={slabel}>Montant de la remise</label>
-        <div className="ml-auto flex items-center gap-1">
-          <NumField id={pid("rem")} value={x.rl?.v || null} placeholder="0" max={x.rl?.t === "eur" ? undefined : 100} onChange={n => onPatch({ rl: { t: x.rl?.t || "pct", v: n || 0 } })} ariaLabel="Montant de la remise" disabled={ro} className="w-[72px]" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px]" />
-          <select aria-label="Type de montant de remise" disabled={ro} value={x.rl?.t || "pct"} onChange={e => onPatch({ rl: { t: e.target.value === "eur" ? "eur" : "pct", v: x.rl?.v || 0 } })} className="h-12 bg-transparent text-[15px] text-white/70 outline-none [color-scheme:dark]">
+      {remOn && <div className={srow}>
+        <label htmlFor={pid("rem")} className={slabel}>Montant de la remise %</label>
+        <div className="flex min-w-0 flex-1 items-center">
+          <NumField id={pid("rem")} value={x.rl?.v || null} placeholder="0" max={remKind === "eur" ? undefined : 100} onChange={n => onPatch({ rl: { t: remKind, v: n || 0 } })} ariaLabel="Montant de la remise" disabled={ro} className="min-w-0 flex-1" inputClass="!h-12 !border-0 !bg-transparent !px-0 !text-right !text-[16px] tabular-nums" />
+          <select aria-label="Type de montant de remise" disabled={ro} value={remKind} onChange={e => onPatch({ rl: { t: e.target.value === "eur" ? "eur" : "pct", v: x.rl?.v || 0 } })} className="h-12 shrink-0 bg-transparent pl-1 text-right text-[16px] text-white outline-none [color-scheme:dark]">
             <option value="pct">%</option>
             <option value="eur">€</option>
           </select>
@@ -121,6 +145,7 @@ export function ServiceLineCard({ x, onPatch, defaultTv = 20, tvaNA, ro, idPrefi
       <div className="ig-row flex min-h-12 items-center justify-between pl-4 pr-4">
         <span className="text-[16px] font-semibold">Total</span>
         <span data-line-total className="text-[16px] font-semibold tabular-nums">{fmtE(total)}</span>
+      </div>
       </div>
     </div>
   )

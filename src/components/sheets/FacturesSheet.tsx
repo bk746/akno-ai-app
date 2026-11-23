@@ -271,10 +271,8 @@ function FactureDetail({ f, rels, close, reload, openOther, clients }: { f: Fact
       {ro ? <section><div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations</div><LinesCard lines={d.lignes.map(x => ({ ...x, tv: CO.tvaNA || d.autoliquidation ? 0 : x.tv }))} tvaNA={CO.tvaNA || !!d.autoliquidation} noTotals /></section> : <section>
         <div className="mb-1.5 px-4 text-[12.5px] font-medium uppercase tracking-[.06em] text-white/42">Prestations{d.lignes.length > 0 && <span className="ml-1.5 normal-case tracking-normal text-white/30">· {d.lignes.length} ligne{d.lignes.length > 1 ? "s" : ""}</span>}</div>
         <div className="space-y-2.5">
-          {d.lignes.map((x, i) => <div key={i} className="relative">
-            <ServiceLineCard x={x} ro={ro} defaultTv={Number(x.tv) > 0 ? Number(x.tv) : 20} tvaNA={CO.tvaNA || !!d.autoliquidation} idPrefix={`fa-${i}`} onPatch={p => setLine(i, p)} />
-            {!ro && <button type="button" aria-label="Supprimer la ligne" className="absolute right-1 top-1 flex h-9 w-9 items-center justify-center rounded-full text-white/35 hover:text-[#FF9B96]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={16} /></button>}
-          </div>)}
+          {d.lignes.map((x, i) => <ServiceLineCard key={i} x={x} ro={ro} defaultTv={Number(x.tv) > 0 ? Number(x.tv) : 20} tvaNA={CO.tvaNA || !!d.autoliquidation} idPrefix={`fa-${i}`} index={i + 1} onPatch={p => setLine(i, p)}
+            menu={!ro ? <button type="button" aria-label="Supprimer la ligne" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/35 hover:text-[#FF9B96]" onClick={() => set({ lignes: d.lignes.filter((_, j) => j !== i) })}><Trash2 size={16} /></button> : undefined} />)}
           {!ro && <button type="button" className="ig-card flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[#141416] text-[15.5px] font-medium text-[#7EA6FF] transition-colors active:bg-white/[.06]" onClick={() => set({ lignes: [...d.lignes, { l: "", q: 1, u: "", pu: 0, tv: CO.tvaNA || d.autoliquidation ? 0 : 20 }] })}><Plus size={17} strokeWidth={2.2} />Ajouter une ligne</button>}
         </div>
       </section>}
