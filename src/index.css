@@ -370,20 +370,24 @@ select.sel { -webkit-appearance: none; appearance: none; padding-right: 28px !im
   initial-value: 0px;
 }
 
-.kb-follow {
-  transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0);
-}
+/* fix clavier · une seule compensation, sans translate : l'enveloppe de la feuille du dessus (ModalSheet) reçoit --kb en
+   padding bas ; le bas utile de la feuille s'arrête au clavier et sa hauteur max suit, l'en-tête ne sort jamais de l'écran.
+   --sheet-kb = clavier vu par CETTE feuille (0 pour les feuilles du dessous, qui ne bougent pas). */
 .kb-follow-pad {
   padding-bottom: var(--kb, 0px);
-}
-.kb-ease .kb-follow {
-  transition: transform .28s cubic-bezier(.2, .8, .2, 1);
+  --sheet-kb: var(--kb, 0px);
 }
 .kb-ease .kb-follow-pad {
   transition: padding-bottom .28s cubic-bezier(.2, .8, .2, 1);
 }
+/* Feuilles à hauteur fixe (choix du client, Mes prestations) : le haut reste en place, la feuille se raccourcit par le bas
+   d'exactement la hauteur du clavier (même durée, même courbe que l'enveloppe : le haut ne bouge pas d'un pixel). */
+.sheet-h86 { height: calc(86dvh - var(--sheet-kb, 0px)); }
+.kb-ease .sheet-h86 {
+  transition: height .28s cubic-bezier(.2, .8, .2, 1);
+}
 @media (prefers-reduced-motion: reduce) {
-  .kb-follow, .kb-follow-pad, .kb-ease .kb-follow, .kb-ease .kb-follow-pad { transition: none; }
+  .kb-follow-pad, .kb-ease .kb-follow-pad, .kb-ease .sheet-h86 { transition: none; }
 }
 
 [data-week-slider] {

@@ -44,6 +44,7 @@
     "test:update84": "node scripts/test-update84.mjs",
     "test:update85": "node scripts/test-update85.mjs",
     "test:update86": "node scripts/test-update86.mjs",
+    "test:kb-sheets": "node scripts/test-kb-sheets.mjs",
     "test:client-picker": "node scripts/test-client-picker.mjs",
     "test:devis-ui": "node scripts/test-devis-ui.mjs",
     "test:devis-pdf": "esbuild scripts/render-devis-pdf.ts --bundle --platform=node --format=esm --packages=external --outfile=node_modules/.cache/akno-render-devis.mjs --log-level=warning && node node_modules/.cache/akno-render-devis.mjs"
@@ -52,6 +53,7 @@
     "@capacitor/app": "^8.1.2",
     "@capacitor/browser": "^8.0.5",
     "@capacitor/core": "^8.6.2",
+    "@capacitor/haptics": "^8.0.2",
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.4",
     "@capgo/capacitor-native-biometric": "^8.9.3",

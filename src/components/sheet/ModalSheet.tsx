@@ -1,7 +1,7 @@
 /* update67 · Feuille modale unique de l'app, façon iOS.
    - fond assombri en fondu, montée en ressort (SHEET), poignée ;
    - fermeture : glisser vers le bas (poignée, en-tête, ou contenu déjà en haut de son défilement), tap sur le fond, Échap ;
-   - clavier virtuel : la feuille remonte et se raccourcit en douceur (--kb, lib/mobile.ts), sans saut ;
+   - clavier virtuel : la feuille du dessus s'arrête au ras du clavier (--kb, lib/mobile.ts), sans translate ni saut ;
    - bureau : boîte centrée (fondu + léger zoom) ;
    - prefers-reduced-motion : simple fondu.
    À placer dans <AnimatePresence> : la sortie est animée depuis la position courante (y compris après un glissement). */
@@ -47,9 +47,23 @@ const TEXT_FIELD = "input:not([type=checkbox]):not([type=radio]):not([type=range
 const isTextField = (el: Element | null) => !!el && el instanceof HTMLElement && el.matches(TEXT_FIELD)
 /** ferme le clavier : retire le focus d'un champ de saisie actif (iOS garde parfois le clavier sans champ visible) */
 export const blurTyping = () => { const a = document.activeElement; if (isTextField(a)) (a as HTMLElement).blur() }
-let lockN = 0, saved: [string, string] = ["", ""]
-const lock = () => { if (lockN++ === 0) { const b = document.body.style, h = document.documentElement.style; saved = [b.overflow, h.overflow]; b.overflow = "hidden"; h.overflow = "hidden" } }
-const unlock = () => { if (--lockN === 0) { document.body.style.overflow = saved[0]; document.documentElement.style.overflow = saved[1] } }
+/* fix clavier · tactile : en plus d'overflow caché, le body est figé (position fixe) tant qu'une feuille est ouverte. iOS ne peut
+   plus faire défiler la page derrière la feuille quand le clavier s'ouvre (la feuille compense déjà : une seule compensation). */
+let lockN = 0, saved: string[] = [], lockY = 0, pinned = false
+const lock = () => {
+  if (lockN++ !== 0) return
+  const b = document.body.style, h = document.documentElement.style
+  saved = [b.overflow, h.overflow, b.position, b.top, b.left, b.right, b.width]
+  b.overflow = "hidden"; h.overflow = "hidden"
+  pinned = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
+  if (pinned) { lockY = window.scrollY || 0; b.position = "fixed"; b.top = `${-lockY}px`; b.left = "0"; b.right = "0"; b.width = "100%" }
+}
+const unlock = () => {
+  if (--lockN !== 0) return
+  const b = document.body.style
+  b.overflow = saved[0]; document.documentElement.style.overflow = saved[1]
+  if (pinned) { b.position = saved[2]; b.top = saved[3]; b.left = saved[4]; b.right = saved[5]; b.width = saved[6]; if (lockY) window.scrollTo(0, lockY) }
+}
 let seq = 0
 const NO_DRAG = "input[type=range],[data-no-sheet-drag],.leaflet-container"
 const scrollerOf = (el: HTMLElement | null, stop: HTMLElement) => {
@@ -167,9 +181,14 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
       onClick={e => { e.stopPropagation(); if (!isTop || !canDismiss.current || dismissLocked()) return; armDismissLock(); close.current() }}>
       <motion.div className={`absolute inset-0 ${under ? "bg-black/70" : backdrop}`} style={{ opacity: dim }} />
     </motion.div>
-    <div className={desk ? "relative flex w-full justify-center" : `pointer-events-none absolute inset-x-0 top-0 flex items-end justify-center${isTop ? (size === "full" || size === "large" ? " kb-follow-pad" : " kb-follow") : ""}`}
+    {/* fix clavier · une seule compensation, pour toutes les tailles : le bas utile de la feuille du dessus remonte de --kb
+        (kb-follow-pad, index.css) et sa hauteur max suit — plus aucun translate. Avant, une feuille « auto » était translatée de
+        toute la hauteur du clavier : en-tête et champs d'une grande feuille (Nouveau client) sortaient par le haut de l'écran. */}
+    <div className={desk ? "relative flex w-full justify-center" : `pointer-events-none absolute inset-x-0 top-0 flex items-end justify-center${isTop ? " kb-follow-pad" : ""}`}
       style={desk ? undefined : { bottom: 0 }}>
       <motion.div ref={panel} role={role} aria-modal="true" aria-label={labelledBy ? undefined : label} aria-labelledby={labelledBy} tabIndex={-1}
+        // le panneau (overflow caché) ne défile jamais : un focus natif pouvait le décaler et pousser l'en-tête hors de l'écran
+        onScroll={e => { const p = e.currentTarget; if (p === e.target && p.scrollTop) p.scrollTop = 0 }}
         {...anim} style={desk ? style : mobile}
         onPointerDown={e => e.stopPropagation()} onAnimationStart={() => { if (panel.current) panel.current.style.willChange = "transform" }} onAnimationComplete={() => { if (panel.current) panel.current.style.willChange = "auto"; if (!entered.current) { entered.current = true; onEntered?.() } }}
         className={`pointer-events-auto relative flex w-full flex-col overflow-hidden text-white outline-none ${desk ? `max-h-[88dvh] rounded-[24px] border border-white/[.08] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${deskClass}` : `max-w-[640px] ${size === "full" ? "" : "rounded-t-[22px] shadow-[0_-24px_60px_-18px_rgba(0,0,0,.9)]"}`} ${className}`}>

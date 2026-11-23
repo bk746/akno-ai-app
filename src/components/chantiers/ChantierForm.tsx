@@ -86,7 +86,7 @@ export default function ChantierForm({ req, clients, devis, desk, onClose, onSav
         </div>
       </div>
       {err && <div role="alert" className="shrink-0 bg-[#FF453A]/12 px-5 py-2.5 text-[13.5px] text-[#FFB4AF]">{err}</div>}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: "calc(40px + var(--sab) + var(--kb, 0px))" }}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: "calc(40px + var(--sab))" }}>
         <div className="space-y-7">
           <IGroup title="Chantier" id="cf-g-ch">
             <IRow label="Titre" htmlFor="cf-title"><input id="cf-title" className={ival} value={d.title} maxLength={160} autoCapitalize="sentences" enterKeyHint="next" placeholder="Ex. Rénovation salle de bain" onChange={e => set({ title: e.target.value })} /></IRow>

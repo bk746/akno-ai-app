@@ -15,6 +15,8 @@ export const SNAP = { type: "spring" as const, stiffness: 560, damping: 42, mass
 export const LIST = { type: "spring" as const, stiffness: 500, damping: 40, mass: .8 }
 /** Toast : ressort court, légère arrivée. */
 export const TOAST = { type: "spring" as const, stiffness: 520, damping: 32, mass: .7 }
+/** Toast de confirmation en haut de l'écran : ressort doux. */
+export const TOAST_TOP = { type: "spring" as const, stiffness: 380, damping: 30, mass: .8 }
 /** Suggestions : fade + scale 0,96 → 1, origine en haut. */
 export const POP = { type: "spring" as const, stiffness: 520, damping: 36, mass: .7 }
 /** Suivi du clavier (--kb). */

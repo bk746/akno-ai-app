@@ -33,8 +33,12 @@ const KIND_ICON: Record<LineKind, any> = { mo: Clock, fo: Package, fft: Tag }
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` }
 const DEFAULT_COND = "Acompte de 30 % à la signature, solde à la fin des travaux."
 
-export default function DevisEditor({ req, onClose, onSend, onCreateFacture, clients }: { req: EditorReq; onClose: () => void; onSend: (d: Devis) => void; onCreateFacture?: (d: Devis) => void | Promise<void>; clients: CtInfo[] }) {
-  const { s, desk, toast, put } = useC()
+export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onCreated, clients }: { req: EditorReq; onClose: () => void; onSend: (d: Devis) => void
+  /** crée la facture ; { ok: false, error } laisse l'éditeur ouvert et rempli */
+  onCreateFacture?: (d: Devis) => void | { ok: boolean; error?: string } | Promise<void | { ok: boolean; error?: string }>
+  /** devis créé : le parent ferme l'éditeur, confirme (toast) et ouvre le document */
+  onCreated?: (d: Devis) => void; clients: CtInfo[] }) {
+  const { s, desk, toast, put, flash } = useC()
   const footRef = useRef<HTMLDivElement>(null)
   const [footH, setFootH] = useState(168)
   useLayoutEffect(() => {
@@ -81,6 +85,7 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
   function serialize(d: Doc) { return { client: d.client, email: d.email, phone: d.phone, addr: d.addr, objet: d.objet, lines: toStored(d.items, d.meta) } }
 
   /* ---------- enregistrement ---------- */
+  const saveErr = useRef("")
   const saveNow = useCallback(async (): Promise<boolean> => {
     if (saving.current) { again.current = true; return saving.current }
     const run = (async () => {
@@ -93,7 +98,7 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
       const t = computeTotals(d.items, d.meta, { tvaNA: CO.tvaNA })
       const rates = t.rates.map(x => x.r)
       const r = await saveDevis(idRef.current, { parentId: req.prefill?.parentId, num: n, client: d.client, email: d.email, phone: d.phone, addr: d.addr, objet: d.objet || d.items.find(x => x.k !== "sec" && x.l.trim())?.l || "Travaux", lines: ser.lines, ht: t.ht, ttc: t.ttc, tva: rates.length === 1 ? rates[0] : rates.includes(tv0) ? tv0 : rates[rates.length - 1] ?? tv0 })
-      if (!r.ok) { setSt("error"); setErr(r.error); keepLocal(idRef.current || "new", d); return false }
+      if (!r.ok) { setSt("error"); setErr(r.error); saveErr.current = r.error || ""; keepLocal(idRef.current || "new", d); return false }
       lastJson.current = json
       if (!idRef.current) { dropLocal("new") }
       dropLocal(r.devis.id)
@@ -154,10 +159,24 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
     onSend({ ...(dv || { status: "brouillon", created: Date.now() } as Devis), id: idRef.current, num: numRef.current || 0, client: doc.client, objet: doc.objet || "Travaux", amount: T.ttc, lines: ser.lines, email: doc.email || undefined, phone: doc.phone || undefined, addr: doc.addr || undefined })
   }
 
+  /* Création (devis / facture) : bouton en chargement et désactivé (pas de double envoi) ; toute erreur est dite par un toast
+     rouge en haut de l'écran et l'éditeur reste ouvert, rempli. */
+  const [busy, setBusy] = useState<null | "devis" | "facture">(null), busyRef = useRef(false)
+  const fail = (msg: string) => { if (flash) flash(msg, "err"); else toast(msg) }
   const readyDoc = () => {
-    if (!doc.client.trim()) { setErr("Indiquez le client."); setSt("error"); return false }
-    if (!doc.items.some(x => x.k !== "sec" && (lineHT(x) > 0 || x.q * x.pu > 0))) { setErr("Ajoutez au moins une ligne chiffrée."); setSt("error"); return false }
+    const bad = (msg: string) => { setErr(msg); setSt("error"); fail(msg); return false }
+    if (!doc.client.trim()) return bad("Indiquez le client.")
+    if (!doc.items.some(x => x.k !== "sec" && (lineHT(x) > 0 || x.q * x.pu > 0))) return bad("Ajoutez au moins une ligne chiffrée.")
     return true
+  }
+  const begin = (k: "devis" | "facture") => { if (busyRef.current || !readyDoc()) return false; busyRef.current = true; setBusy(k); return true }
+  const end = () => { busyRef.current = false; setBusy(null) }
+  const saved = async () => {
+    saveErr.current = ""
+    const ok = await saveNow().catch(() => false)
+    if (ok && idRef.current) return true
+    fail(saveErr.current || "Enregistrement impossible. Vérifiez la connexion et réessayez.")
+    return false
   }
   const snapshot = (): Devis => {
     const dv = s.devis.find(x => x.id === idRef.current)
@@ -165,18 +184,20 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
     return { ...(dv || { status: "brouillon", created: Date.now() } as Devis), id: idRef.current!, num: numRef.current || 0, client: doc.client, objet: doc.objet || "Travaux", amount: T.ttc, lines: ser.lines, email: doc.email || undefined, phone: doc.phone || undefined, addr: doc.addr || undefined }
   }
   const createDevis = async () => {
-    if (!readyDoc()) return
-    const ok = await saveNow()
-    if (!ok || !idRef.current) return
-    toast(numRef.current ? `Devis N° ${numRef.current} créé` : "Devis créé")
-    onClose()
+    if (!begin("devis")) return
+    if (!await saved()) { end(); return }
+    if (onCreated) onCreated(snapshot())
+    else { toast(numRef.current ? `Devis N° ${numRef.current} créé` : "Devis créé"); onClose() }
   }
   const createFacture = async () => {
-    if (!readyDoc()) return
-    const ok = await saveNow()
-    if (!ok || !idRef.current) return
-    if (onCreateFacture) await onCreateFacture(snapshot())
-    else onClose()
+    if (!begin("facture")) return
+    if (!await saved()) { end(); return }
+    if (!onCreateFacture) { onClose(); return }
+    try {
+      const r = await onCreateFacture(snapshot())
+      if (r && r.ok === false) { fail(r.error || "Création de la facture impossible."); end() }
+      else if (!r) end()
+    } catch { fail("Création de la facture impossible. Vérifiez la connexion et réessayez."); end() }
   }
 
   /* ---------- édition ---------- */
@@ -328,8 +349,8 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
         <div className="min-w-0 space-y-8">{restorePill}{clientCard}{lines}</div>
         <aside className="sticky top-6 space-y-5">{recap}
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" data-create-devis onClick={() => void createDevis()} className="flex h-11 items-center justify-center rounded-full bg-white/[.1] px-3 text-[14.5px] font-semibold text-white">Créer un devis</button>
-            <button type="button" data-create-facture onClick={() => void createFacture()} className="flex h-11 items-center justify-center rounded-full px-3 text-[14.5px] font-semibold text-white" style={{ background: TEAL }}>Créer une facture</button>
+            <button type="button" data-create-devis disabled={!!busy} aria-busy={busy === "devis"} onClick={() => void createDevis()} className="flex h-11 items-center justify-center gap-2 rounded-full bg-white/[.1] px-3 text-[14.5px] font-semibold text-white transition-opacity disabled:opacity-60">{busy === "devis" && <Loader2 data-spin size={16} className="shrink-0 animate-spin" />}Créer un devis</button>
+            <button type="button" data-create-facture disabled={!!busy} aria-busy={busy === "facture"} onClick={() => void createFacture()} className="flex h-11 items-center justify-center gap-2 rounded-full px-3 text-[14.5px] font-semibold text-white transition-opacity disabled:opacity-60" style={{ background: TEAL }}>{busy === "facture" && <Loader2 data-spin size={16} className="shrink-0 animate-spin" />}Créer une facture</button>
           </div>
           <button type="button" onClick={() => setPreview(true)} className="group block w-full overflow-hidden rounded-[18px] border border-white/[.06] bg-[#0F0F11] p-3 text-left transition-colors hover:border-white/[.14]">
             <div className="pointer-events-none max-h-[150px] overflow-hidden rounded-[8px] opacity-90 [mask-image:linear-gradient(to_bottom,#000_60%,transparent)]"><DevisPaper d={pdoc()} /></div>
@@ -338,7 +359,8 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
         </aside>
       </div>
     </div> : <>
-      <div data-devis-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: `calc(${footH}px + 24px + var(--kb, 0px))` }}>
+      {/* fix clavier · plus de « + var(--kb) » ici : la feuille s'arrête déjà au clavier (ModalSheet), une seule compensation */}
+      <div data-devis-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-5" style={{ paddingBottom: `calc(${footH}px + 24px)` }}>
         {restorePill}
         <div className="space-y-8">{clientCard}{lines}{recap}</div>
       </div>
@@ -350,8 +372,8 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
           </div>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <button type="button" data-create-devis onClick={() => void createDevis()} className="flex h-11 items-center justify-center rounded-full bg-white/[.1] px-3 text-[14.5px] font-semibold text-white transition-transform active:scale-[.97]">Créer un devis</button>
-          <button type="button" data-create-facture onClick={() => void createFacture()} className="flex h-11 items-center justify-center rounded-full px-3 text-[14.5px] font-semibold text-white transition-transform active:scale-[.97]" style={{ background: TEAL }}>Créer une facture</button>
+          <button type="button" data-create-devis disabled={!!busy} aria-busy={busy === "devis"} onClick={() => void createDevis()} className="flex h-11 items-center justify-center gap-2 rounded-full bg-white/[.1] px-3 text-[14.5px] font-semibold text-white transition-[transform,opacity] active:scale-[.97] disabled:opacity-60">{busy === "devis" && <Loader2 data-spin size={16} className="shrink-0 animate-spin" />}Créer un devis</button>
+          <button type="button" data-create-facture disabled={!!busy} aria-busy={busy === "facture"} onClick={() => void createFacture()} className="flex h-11 items-center justify-center gap-2 rounded-full px-3 text-[14.5px] font-semibold text-white transition-[transform,opacity] active:scale-[.97] disabled:opacity-60" style={{ background: TEAL }}>{busy === "facture" && <Loader2 data-spin size={16} className="shrink-0 animate-spin" />}Créer une facture</button>
         </div>
       </div>
     </>}

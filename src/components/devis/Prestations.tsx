@@ -135,7 +135,7 @@ export function PrestaPicker({ onPick, onClose, onNew, desk }: { onPick: (p: Pre
   /* update73 : plus d'autoFocus. Sur iPhone, le focus pendant la montée de la feuille ouvrait le clavier, qui faisait défiler
        et redimensionner l'écran : la feuille « Nouveau devis » disparaissait ~2 s. Le clavier ne s'ouvre plus qu'au toucher du champ ;
        sur ordinateur, le champ reçoit le focus une fois la feuille arrivée. */
-  return <ModalSheet label="Ajouter une prestation" onClose={onClose} desk={desk} z={50} onEntered={() => { if (desk) inp.current?.focus({ preventScroll: true }) }} deskAlign="top" backdrop="bg-black/60" className={`border-white/[.09] bg-[#121214] ${desk ? "" : "h-[86dvh] border-t"}`} deskClass="max-h-[70vh] max-w-[620px]">
+  return <ModalSheet label="Ajouter une prestation" onClose={onClose} desk={desk} z={50} onEntered={() => { if (desk) inp.current?.focus({ preventScroll: true }) }} deskAlign="top" backdrop="bg-black/60" className={`border-white/[.09] bg-[#121214] ${desk ? "" : "sheet-h86 border-t"}`} deskClass="max-h-[70vh] max-w-[620px]">
       {!desk && <div className="h-[22px] shrink-0" />}
       <div className="flex shrink-0 items-center gap-2 border-b border-white/[.07] px-3 py-3 sm:px-4">
         <Search size={18} strokeWidth={1.7} className="shrink-0 text-white/40" />

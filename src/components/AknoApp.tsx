@@ -70,7 +70,9 @@ import { billingHidden, isNative, webOrigin } from "../lib/native"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
 import MobileNav, { type CreateKind } from "./nav/MobileNav"
-import { CROSSFADE, PUSH, SNAP, TAB, TOAST, idle, lazyPage } from "../lib/motion"
+import { CROSSFADE, PUSH, SNAP, TAB, TOAST, TOAST_TOP, idle, lazyPage } from "../lib/motion"
+import { createPortal } from "react-dom"
+import { hapticSuccess } from "../lib/haptics"
 import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
 import ModalSheet from "./sheet/ModalSheet"
 import { SwipeRow, askConfirm, ConfirmHost } from "./form/SwipeRow"
@@ -1571,6 +1573,10 @@ function AknoApp() {
   }, [isEmploye, page, navigate])
   useEffect(() => { document.title = `Akno · ${pageTitle(page)}` }, [page])
   useEffect(() => { if (!toastT) return; const t = setTimeout(() => setToastT(null), toastT.undo || toastT.err ? 6000 : 2600); return () => clearTimeout(t) }, [toastT])
+  // Toast du haut (création devis / facture) : au-dessus des feuilles ; 2,5 s pour une confirmation, 5 s pour une erreur (le temps de lire).
+  const [flashT, setFlashT] = useState<{ t: string; k: number; err?: boolean } | null>(null)
+  const flash = (t: string, kind: "ok" | "err" = "ok") => setFlashT({ t, k: Date.now(), err: kind === "err" })
+  useEffect(() => { if (!flashT) return; const t = setTimeout(() => setFlashT(null), flashT.err ? 5000 : 2500); return () => clearTimeout(t) }, [flashT])
   // update52 : toute écriture refusée par la base est signalée (fini les devis qui disparaissent sans explication)
   useEffect(() => { const f = (e: Event) => setToastT({ t: String((e as CustomEvent).detail || "Enregistrement impossible."), k: Date.now(), err: true }); addEventListener("akno-sync-error", f); return () => removeEventListener("akno-sync-error", f) }, [])
   useEffect(() => { if (!pushNote) return; const t = setTimeout(() => setPushNote(null), 10000); return () => clearTimeout(t) }, [pushNote])
@@ -1628,7 +1634,7 @@ function AknoApp() {
     else if (k === "relances") go("rel") // update81 : accès Relances depuis le +
     else setToastT({ t: "Bientôt disponible", k: Date.now(), info: true })
   }
-  const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put }
+  const ctx: Ctx = { s, set: setS, desk, page, go, modal, chat, setChat, toast: (t: string, undo?: () => void) => setToastT({ t, k: Date.now(), undo }), q, setQ, put, flash }
   const pkey = page === "fac" ? "dev" : page // update63 : Devis ↔ Factures sans re-monter la page (le bot reste en place)
   // update67 : préchargement des pages et feuilles chargées à part, au repos (puis au toucher, cf. MobileNav)
   useEffect(() => { idle(() => { for (const L of [ChantiersPage, ClientsPage, EquipePage, FacturesSheet, ReceptionnisteStudio, DevisEditor, EventSheet, TeamView, AgendaTools, ClientChantiers, DevisPaper]) void L.preload().catch(() => {}); void loadChantiers() }) }, []) // update67 : pages et données Chantiers / Équipe prêtes avant le premier tap (pas de squelette)
@@ -1636,19 +1642,33 @@ function AknoApp() {
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} page={page} desk loading={loading} /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
       : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
-    <AnimatePresence>{ed && <Suspense fallback={null}><DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={(dv: Devis) => { setEd(null); setM({ kind: "devisPrev", data: dv }) }} onCreateFacture={async (dv: Devis) => {
-      setEd(null)
+    <AnimatePresence>{ed && <Suspense fallback={null}><DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={(dv: Devis) => { setEd(null); setM({ kind: "devisPrev", data: dv }) }}
+      // Création confirmée : toast du haut + retour haptique léger, puis le document créé s'ouvre.
+      onCreated={(dv: Devis) => { setEd(null); flash(dv.num ? `Devis D-${dv.num} créé` : "Devis créé"); void hapticSuccess(); setM({ kind: "devisPrev", data: dv }) }}
+      onCreateFacture={async (dv: Devis) => {
+      // L'éditeur reste ouvert (et rempli) tant que la facture n'existe pas : en cas d'erreur, rien n'est perdu.
       const { createFactureDraft } = await import("./sheets/FacturesSheet")
       const { devisToFactureLines } = await import("../../api/_lib/factureCalc")
       const r = await createFactureDraft({ client_nom: dv.client, client_email: dv.email, client_telephone: dv.phone, client_adresse: dv.addr, objet: dv.objet, lignes: devisToFactureLines(dv.lines || []) })
-      if (!r.ok) { setToastT({ t: r.error || "Création de la facture impossible.", k: Date.now(), err: true }); return }
+      if (!r.ok) return { ok: false, error: r.error || "Création de la facture impossible." }
+      // un brouillon de facture n'a pas encore de numéro légal (attribué à l'émission)
+      setEd(null); flash("Facture créée"); void hapticSuccess()
       setM({ kind: "factures", data: { id: r.facture_id } })
+      return { ok: true }
     }} /></Suspense>}</AnimatePresence>
     <AnimatePresence>{m && <Forms key={m.kind + (m.data?.id || "")} m={m} close={() => setM(null)} />}</AnimatePresence>
     <Gate />
     <UpgradeHost />
     <ConfirmHost />
     <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`, { replace: true }); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[22px] border border-white/[.06] bg-[#141416] px-4 py-3 ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
+    {createPortal(<div className="pointer-events-none fixed inset-x-0 z-[95] grid justify-items-center px-4" style={{ top: "calc(var(--sat, 0px) + 10px)" }}>
+      <AnimatePresence>{flashT && <motion.div key={flashT.k} role={flashT.err ? "alert" : "status"} data-toast data-toast-top data-kind={flashT.err ? "err" : "ok"}
+        initial={{ opacity: 0, y: -18, scale: .94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -10, scale: .97, transition: { duration: .18, ease: "easeOut" } }} transition={TOAST_TOP}
+        className={`pointer-events-auto col-start-1 row-start-1 flex max-w-full items-center gap-2.5 border py-2 pl-2.5 pr-4 text-[14.5px] font-medium shadow-[0_16px_40px_-8px_rgba(0,0,0,.72),0_2px_8px_rgba(0,0,0,.35)] backdrop-blur-xl ${flashT.err ? "max-w-[min(520px,100%)] rounded-[20px] border-[#FF453A]/35 bg-[#2A1513]/95 text-[#FFB4AF]" : "rounded-full border-white/[.1] bg-[#1C1C1F]/92 text-white"}`}>
+        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${flashT.err ? "bg-[#FF453A]/25 text-[#FF7A72]" : "bg-white/[.14] text-white"}`}>{flashT.err ? <X size={14} strokeWidth={2.4} /> : <Check size={14} strokeWidth={2.6} />}</span>
+        <span className={flashT.err ? "py-0.5 leading-5" : "truncate"}>{flashT.t}</span>
+      </motion.div>}</AnimatePresence>
+    </div>, document.body)}
     <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" data-toast initial={{ opacity: 0, y: 16, scale: .96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: .98 }} transition={TOAST} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/90 py-2 pl-3 text-[14px] shadow-[0_16px_40px_-8px_rgba(0,0,0,.72),0_2px_8px_rgba(0,0,0,.35)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(94px+max(var(--sab)-10px,12px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : toastT.info ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/[.12] text-white/85"><Clock size={13} strokeWidth={2.2} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
 }

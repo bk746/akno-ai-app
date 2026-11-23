@@ -118,7 +118,7 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
   const pick = (i: number) => { const c = list[i]; if (c) onPick(c, false); else startNew() }
   const saveNew = async () => {
     if (!nf || busy) return
-    const name = nf.name.trim(); if (!name) { setErr("Indiquez le nom du client."); nameRef.current?.focus(); return }
+    const name = nf.name.trim(); if (!name) { setErr("Indiquez le nom du client."); nameRef.current?.focus({ preventScroll: true }); return }
     const c: Contact = { name, phone: nf.phone?.trim() || undefined, email: nf.email?.trim() || undefined, addr: nf.addr?.trim() || undefined }
     setBusy(true); setErr("")
     try {
@@ -136,7 +136,7 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
     <input value={nf?.[k] || ""} onChange={e => { const v = e.target.value; setNf(x => x ? { ...x, [k]: v } : x); setErr("") }} className={ival} {...props} />
   </label>
   return <AnimatePresence>{open && <ModalSheet key="cs" label={nf ? "Nouveau client" : "Choisir un client"} onClose={onClose} desk={desk} z={60} escape={false} onEntered={() => { if (desk) inRef.current?.focus({ preventScroll: true }) }}
-      className={`bg-[#1C1C1E] ${desk ? "" : "h-[86dvh] pt-2"}`} deskClass="max-h-[72dvh] max-w-[460px] rounded-[22px]" style={desk ? undefined : { paddingBottom: "var(--sab)" }}>
+      className={`bg-[#1C1C1E] ${desk ? "" : "sheet-h86 pt-2"}`} deskClass="max-h-[72dvh] max-w-[460px] rounded-[22px]" style={desk ? undefined : { paddingBottom: "var(--sab)" }}>
       {nf ? <div data-new-client className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
           <button type="button" onClick={() => setNf(null)} className="w-20 text-left text-[16px] text-[#7EA6FF]">Retour</button>
@@ -162,7 +162,7 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
         <input ref={inRef} value={q} onChange={e => { setQ(e.target.value); setSel(0) }} placeholder="Nom, téléphone ou e-mail" aria-label="Rechercher un client" enterKeyHint="done" autoComplete="off" autoCapitalize="words"
           onKeyDown={e => { if (e.key === "ArrowDown") { e.preventDefault(); setSel(i => Math.min(list.length - 1, i + 1)) } else if (e.key === "ArrowUp") { e.preventDefault(); setSel(i => Math.max(0, i - 1)) } else if (e.key === "Enter") { e.preventDefault(); pick(sel) } }}
           className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-white outline-none caret-[#2F6BFF] placeholder:text-white/35" />
-        {q && <button type="button" aria-label="Effacer" onClick={() => { setQ(""); inRef.current?.focus() }} className="flex h-5 w-5 items-center justify-center rounded-full bg-white/25 text-black"><X size={12} strokeWidth={3} /></button>}
+        {q && <button type="button" aria-label="Effacer" onClick={() => { setQ(""); inRef.current?.focus({ preventScroll: true }) }} className="flex h-5 w-5 items-center justify-center rounded-full bg-white/25 text-black"><X size={12} strokeWidth={3} /></button>}
       </label></div>
       <div role="listbox" aria-label="Contacts" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6">
         <div className="ig mb-4 overflow-hidden rounded-[14px] bg-white/[.05]">

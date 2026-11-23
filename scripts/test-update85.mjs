@@ -353,6 +353,10 @@ async function main() {
     const editorGone = await page.locator("[data-create-devis]").count() === 0
     const toastOk = await page.locator("[data-toast]").count() > 0
     check("Créer un devis enregistre et ferme l'éditeur", (devisWrite || toastOk) && editorGone, JSON.stringify({ devisWrite, editorGone, toastOk, err: errors.slice(0, 3) }))
+    // fix confirmation création : le devis créé s'ouvre ensuite — on le referme avant le parcours suivant
+    const devisOpen = await page.locator('[role=dialog][aria-label^="Devis N°"]').count() > 0
+    check("le devis créé s'ouvre après la création", devisOpen)
+    if (devisOpen) { await page.locator('[role=dialog][aria-label^="Devis N°"] [aria-label="Fermer"]').first().click(); await page.waitForTimeout(700) }
 
     /* ---- Créer une facture (nouveau parcours) ---- */
     await openNouveau(page)
