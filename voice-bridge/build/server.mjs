@@ -721,6 +721,13 @@ var APP_URL = (E.APP_URL || "https://akno-ai-app-v2.vercel.app").replace(/\/$/, 
 var SB_URL = (E.SUPABASE_URL || "").replace(/\/$/, "");
 var SB_KEY = E.SUPABASE_SERVICE_ROLE_KEY || "";
 var MAX_CALL_S = Number(E.MAX_CALL_SECONDS || 900);
+var PROFILE_WAIT_MS = Number(E.PROFILE_WAIT_MS || 300);
+var PROFILE_WAIT_COLD_MS = Number(E.PROFILE_WAIT_COLD_MS || 1500);
+var SESSION_ACK_MS = Number(E.SESSION_ACK_MS || 2500);
+var PREAUTH_MS = 5e3;
+var MAX_PREOPEN = 6;
+var preopenPending = 0;
+var VOICE_ERR = /(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i;
 var log = (...a) => console.log((/* @__PURE__ */ new Date()).toISOString(), ...a);
 async function sb(path, init = {}) {
   if (!SB_URL || !SB_KEY) {
@@ -747,7 +754,8 @@ function putProfileCache(artisanId, profile) {
 }
 async function loadProfile(artisanId) {
   const rows = await sb(`/rest/v1/artisans?id=eq.${artisanId}&select=*`);
-  const a = Array.isArray(rows) ? rows[0] || {} : {};
+  if (!Array.isArray(rows) || !rows[0]) throw new Error("fiche artisan illisible");
+  const a = rows[0];
   const profile = mergeProfile({
     prenom: a.prenom || "",
     company: companyName(a.nom_entreprise, a.entreprise_nom),
@@ -815,19 +823,27 @@ function handleCall(tw) {
   let bookFailed = null;
   let bookQueue = Promise.resolve();
   let lastBookKey = "";
-  let ringT0 = 0;
   let firstAudioLogged = false;
   let slotsHintText = "";
   let voiceReverted = false;
-  const latency = (tag) => {
-    if (!ringT0) return;
-    log("[latency]", tag, `${Date.now() - ringT0}ms`, "call", callSid ? callSid.slice(-8) : "?");
-  };
+  let profileReady = false, sessionSent = false, slotsPending = false, lastSession = "";
+  let preopened = false, preopenHeld = false;
+  let profileTimer = null, ackTimer = null;
+  const askedVoices = [];
+  const since = () => `${Date.now() - startedAt}ms`;
+  const tag = () => callSid ? callSid.slice(-8) : "?";
+  const latency = (name) => log("[latency]", name, since(), "call", tag());
   const toTwilio = (m) => {
     if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify(m));
   };
   const toXai = (m) => {
     if (xai?.readyState === WebSocket.OPEN) xai.send(JSON.stringify(m));
+  };
+  const releasePreopen = () => {
+    if (preopenHeld) {
+      preopenHeld = false;
+      preopenPending--;
+    }
   };
   async function upsertCall(fields) {
     const row = { artisan_id: artisanId, twilio_call_sid: callSid, source: "ia_telephone", ...fields };
@@ -939,18 +955,49 @@ function handleCall(tw) {
     toXai({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(result) } });
     toXai({ type: "response.create" });
   }
-  const fallbackBuiltinVoice = (detail) => {
-    if (voiceReverted) return;
+  const withBuiltinVoice = (p) => ({ ...p, reception: { ...normalizeConfig(p.reception), voice: DEFAULT_VOICE } });
+  const applyProfile = (p) => {
+    profile = voiceReverted ? withBuiltinVoice(p) : p;
+  };
+  const sendSession = (why) => {
+    if (closed || !xai || xai.readyState !== WebSocket.OPEN) return false;
+    const session = twilioSession(profile, slotsHintText, from);
+    const body = JSON.stringify(session);
+    if (body === lastSession) return true;
+    lastSession = body;
+    const voice = String(session.voice || "");
+    askedVoices.push(voice);
+    toXai({ type: "session.update", session });
+    log("[session.update]", why, "voice", voice, "artisan", artisanId.slice(0, 8), since(), "call", tag());
+    return true;
+  };
+  const fallbackBuiltinVoice = (why) => {
+    if (voiceReverted) return false;
     const cur = normalizeConfig(profile.reception).voice;
-    if (cur === DEFAULT_VOICE) return;
-    const msg = typeof detail === "string" ? detail : JSON.stringify(detail || "").slice(0, 280);
-    if (!/(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i.test(msg)) return;
+    if (cur === DEFAULT_VOICE) return false;
     voiceReverted = true;
-    log("[voice] repli voix int\xE9gr\xE9e", String(cur).slice(0, 12), "\u2192", DEFAULT_VOICE);
-    profile = { ...profile, reception: { ...normalizeConfig(profile.reception), voice: DEFAULT_VOICE } };
-    if (closed || !xai || xai.readyState !== WebSocket.OPEN) return;
-    if (ready) patchSession();
-    else toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
+    log("[voice] repli voix int\xE9gr\xE9e", cur, "\u2192", DEFAULT_VOICE, `(${why})`, "artisan", artisanId.slice(0, 8), since(), "call", tag());
+    profile = withBuiltinVoice(profile);
+    return true;
+  };
+  const startSession = () => {
+    if (sessionSent || !profileReady || !artisanId) return;
+    if (!sendSession("initial")) return;
+    sessionSent = true;
+    ackTimer = setTimeout(() => {
+      if (ready || closed) return;
+      log("[xai] pas de session.updated apr\xE8s", `${SESSION_ACK_MS}ms`, "call", tag());
+      askedVoices.length = 0;
+      if (fallbackBuiltinVoice("xAI ne r\xE9pond pas")) sendSession("repli");
+    }, SESSION_ACK_MS);
+  };
+  const patchSession = (why, urgent = false) => {
+    if (!sessionSent) return;
+    if (!ready && !urgent) {
+      slotsPending = true;
+      return;
+    }
+    sendSession(why);
   };
   function onXai(raw) {
     let ev;
@@ -960,10 +1007,23 @@ function handleCall(tw) {
       return;
     }
     const type = String(ev.type || "");
-    if (type === "session.updated" && !ready) {
+    if (type === "session.updated") {
+      const asked = askedVoices.shift() || "";
+      const applied = String(ev.session?.voice || "").toLowerCase();
+      log("[session.updated] voice", applied || "?", "demand\xE9e", asked || "?", since(), "call", tag());
+      if (asked && applied && applied !== asked.toLowerCase()) {
+        log("[voice] xAI a ignor\xE9 la voix demand\xE9e", asked, "\u2192 appliqu\xE9e", applied, "(voix absente de l'\xE9quipe de cette cl\xE9 API ?)", "call", tag());
+        if (fallbackBuiltinVoice("voix ignor\xE9e par xAI") && applied !== DEFAULT_VOICE) sendSession("repli");
+      }
+      if (ready) return;
       ready = true;
+      if (ackTimer) clearTimeout(ackTimer);
       latency("session.updated");
       toXai({ type: "conversation.item.create", item: { type: "force_message", role: "assistant", interruptible: false, content: [{ type: "output_text", text: welcomeLine(profile) }] } });
+      if (slotsPending) {
+        slotsPending = false;
+        sendSession("cr\xE9neaux");
+      }
       return;
     }
     if (type === "response.output_audio.delta" || type === "response.audio.delta") {
@@ -1008,14 +1068,28 @@ function handleCall(tw) {
     }
     if (type === "error") {
       const snippet = JSON.stringify(ev.error || ev).slice(0, 300);
-      log("[xai] error", snippet);
-      fallbackBuiltinVoice(snippet);
+      log("[xai] error", snippet, since(), "call", tag());
+      if ((!ready || VOICE_ERR.test(snippet)) && !voiceReverted && normalizeConfig(profile.reception).voice !== DEFAULT_VOICE) {
+        askedVoices.length = 0;
+        if (fallbackBuiltinVoice("erreur xAI")) sendSession("repli");
+      }
     }
   }
-  const patchSession = () => {
-    if (closed || !xai || xai.readyState !== WebSocket.OPEN || !ready) return;
-    toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
-  };
+  function openXai() {
+    if (xai || closed) return;
+    const ws = new WebSocket(XAI_URL, { headers: { Authorization: `Bearer ${E.XAI_API_KEY || ""}` } });
+    xai = ws;
+    ws.on("open", () => {
+      latency("xai open");
+      startSession();
+    });
+    ws.on("message", onXai);
+    ws.on("close", (c) => {
+      log("[xai] close", c, "call", tag());
+      if (!closed) tw.close();
+    });
+    ws.on("error", (e) => log("[xai] ws error", e.message, "call", tag()));
+  }
   async function start(params) {
     if (!verifyToken(E.BRIDGE_SECRET || "", params)) {
       log("[call] jeton invalide, raccroche");
@@ -1024,44 +1098,65 @@ function handleCall(tw) {
     }
     artisanId = params.artisan_id;
     from = params.from || "";
-    ringT0 = Date.now();
+    clearTimeout(preAuthTimer);
+    releasePreopen();
     latency("twilio start");
-    log("[call] start", callSid, "artisan", artisanId.slice(0, 8));
-    profile = profileFromCache(artisanId) || mergeProfile();
+    log("[call] start", callSid, "artisan", artisanId.slice(0, 8), preopened ? "(xAI pr\xE9-ouvert)" : "");
+    const cached = profileFromCache(artisanId);
+    if (cached) profile = cached;
     slotsHintText = "";
+    const profileDone = () => {
+      if (profileReady) return;
+      profileReady = true;
+      if (profileTimer) clearTimeout(profileTimer);
+      startSession();
+    };
+    profileTimer = setTimeout(() => {
+      if (profileReady || closed) return;
+      log("[call] fiche lente : accueil avec", cached ? "la fiche en cache" : "le profil par d\xE9faut", since(), "call", tag());
+      profileDone();
+    }, cached ? PROFILE_WAIT_MS : PROFILE_WAIT_COLD_MS);
     void loadProfile(artisanId).then((p) => {
-      profile = p;
-      if (!ready && xai?.readyState === WebSocket.OPEN) {
-        toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
-      } else if (ready) patchSession();
-    }).catch((e) => log("[call] profile", e));
+      applyProfile(p);
+      latency("profile");
+      if (profileReady) patchSession("fiche", true);
+      else profileDone();
+    }).catch((e) => {
+      log("[call] profile", e?.message || e, "call", tag());
+      profileDone();
+    });
     void akno("/api/booking", artisanId, { action: "slots" }).then((b) => {
       const slots = Array.isArray(b.slots) ? b.slots : [];
       slotsHintText = formatSlotsHint(slots);
-      patchSession();
+      patchSession("cr\xE9neaux");
     }).catch(() => {
     });
     if (closed) return;
-    xai = new WebSocket(XAI_URL, { headers: { Authorization: `Bearer ${E.XAI_API_KEY || ""}` } });
-    xai.on("open", () => {
-      latency("xai open");
-      toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) });
-    });
-    xai.on("message", onXai);
-    xai.on("close", (c) => {
-      log("[xai] close", c);
-      if (!closed) tw.close();
-    });
-    xai.on("error", (e) => log("[xai] ws error", e.message));
+    openXai();
     maxTimer = setTimeout(() => {
       log("[call] dur\xE9e max atteinte");
       tw.close();
     }, MAX_CALL_S * 1e3);
   }
+  if (preopenPending < MAX_PREOPEN) {
+    preopenPending++;
+    preopenHeld = true;
+    preopened = true;
+    openXai();
+  }
+  const preAuthTimer = setTimeout(() => {
+    if (artisanId || closed) return;
+    log("[call] aucun start Twilio valide, fermeture");
+    tw.close();
+  }, PREAUTH_MS);
   async function finish() {
     if (closed) return;
     closed = true;
+    clearTimeout(preAuthTimer);
+    releasePreopen();
     if (maxTimer) clearTimeout(maxTimer);
+    if (profileTimer) clearTimeout(profileTimer);
+    if (ackTimer) clearTimeout(ackTimer);
     try {
       xai?.close();
     } catch {
@@ -1146,4 +1241,5 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(PORT, () => {
   const miss = ["XAI_API_KEY", "BRIDGE_SECRET", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter((k) => !E[k]);
   log(`[bridge] \xE9coute sur :${PORT}${miss.length ? ` \u2014 variables manquantes : ${miss.join(", ")}` : ""}`);
+  if (SB_URL && SB_KEY) void sb("/rest/v1/artisans?select=id&limit=1").catch(() => null);
 });

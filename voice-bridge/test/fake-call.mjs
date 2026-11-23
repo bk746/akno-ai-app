@@ -14,12 +14,22 @@ const seen = { session: null, appends: 0, toolOutput: null, auth: "" }
 // update60 : scénario de réservation (null = scénario historique get_available_slots)
 let scenario = null
 const sc = { bookOut: null, saveOut: null }
+// Voix clonée : "ignore" = comme xAI aujourd'hui pour une voix inconnue de l'équipe (aucune erreur, voix « Ara » appliquée) ; "error" = refus explicite.
+const CUSTOM = "3ixfadarbuwy"
+let customMode = "ok"
 const xai = new WebSocketServer({ port: 18901 })
 xai.on("connection", (ws, req) => {
   seen.auth = req.headers.authorization || ""
+  const conn = { updates: [], greetedAfter: -1 }
+  seen.conn = conn
   ws.on("message", raw => {
     const m = JSON.parse(raw.toString())
-    if (m.type === "session.update") { seen.session = m.session; ws.send(JSON.stringify({ type: "session.updated" })) }
+    if (m.type === "session.update") {
+      seen.session = m.session; conn.updates.push(m.session.voice)
+      if (m.session.voice === CUSTOM && customMode === "error") { ws.send(JSON.stringify({ type: "error", error: { message: "Unknown voice" } })); return }
+      ws.send(JSON.stringify({ type: "session.updated", session: { voice: m.session.voice === CUSTOM && customMode === "ignore" ? "Ara" : m.session.voice } }))
+    }
+    if (m.type === "conversation.item.create" && m.item?.type === "force_message") conn.greetedAfter = conn.updates.length
     if (m.type === "conversation.item.create" && m.item?.type === "force_message") {
       seen.greeting = m.item.content[0].text
       ws.send(JSON.stringify({ type: "response.output_audio.delta", delta: Buffer.alloc(160, 0xff).toString("base64") }))
@@ -69,10 +79,17 @@ const sbSeen = { artisanAuth: "", calls: [], appts: [], apptPatch: [] }
 const ARTISAN_ROW = { id: ARTISAN, nom_entreprise: "Plomberie Test", entreprise_cp_ville: "69001 Lyon", entreprise_metier: "Plombier", message_accueil: "Plomberie Test, bonjour !",
   horaires: { lun: ["08:00", "18:00"], mar: ["08:00", "18:00"], mer: ["08:00", "18:00"], jeu: ["08:00", "18:00"], ven: ["08:00", "18:00"], sam: null, dim: null },
   reception_config: { v: 1, voice: "aurora", speed: 1.1, services: [{ nom: "Recherche de fuite", prix: "dès 89 €" }], faq: [{ q: "Le devis est-il gratuit ?", r: "Oui, toujours." }], prononciations: [{ mot: "Bouzerda", dit: "Bou-zèr-da" }] } }
+// Lecture de la fiche : délai simulé (ms) et config « Ma réceptionniste » de remplacement pour un scénario.
+let sbDelay = 0, receptionOverride = null
 const supa = http.createServer((req, res) => {
   let b = ""; req.on("data", c => b += c); req.on("end", () => {
     res.setHeader("Content-Type", "application/json")
-    if (req.url.startsWith("/rest/v1/artisans")) { sbSeen.artisanAuth = req.headers.authorization || ""; res.end(JSON.stringify([ARTISAN_ROW])); return }
+    if (req.url.startsWith("/rest/v1/artisans")) {
+      sbSeen.artisanAuth = req.headers.authorization || ""
+      const row = receptionOverride ? { ...ARTISAN_ROW, reception_config: receptionOverride } : ARTISAN_ROW
+      setTimeout(() => res.end(JSON.stringify([row])), sbDelay)
+      return
+    }
     if (req.url.startsWith("/rest/v1/calls") && req.method === "POST") { sbSeen.calls.push(JSON.parse(b || "{}")); res.end(JSON.stringify([{ id: 77 }])); return }
     if (req.url.startsWith("/rest/v1/appointments") && req.method === "POST") { sbSeen.appts.push(JSON.parse(b || "{}")); res.end(JSON.stringify([{ id: "appt-1" }])); return }
     if (req.url.startsWith("/rest/v1/appointments") && req.method === "PATCH") { sbSeen.apptPatch.push({ url: req.url, body: JSON.parse(b || "{}") }); res.end("[]"); return }
@@ -104,7 +121,14 @@ async function fakeCall(token, sid = CALL, settle = 400) {
 }
 
 const good = (exp, sid = CALL) => createHmac("sha256", SECRET).update(`${ARTISAN}.${sid}.${exp}`).digest("hex")
+// 1er appel : aucune fiche en cache et lecture lente (150 ms) alors que xAI est déjà ouvert → l'accueil doit attendre la fiche.
+sbDelay = 150
 const g = await fakeCall(good)
+sbDelay = 0
+check("accueil instantané · WS xAI pré-ouvert dès la connexion Twilio", /\[call\] start CA123 artisan 11111111 \(xAI pré-ouvert\)/.test(logs))
+check("accueil instantané · 1er session.update après la fiche (voix et nom de l'artisan, pas le profil par défaut)", seen.conn.updates[0] === "aurora" && seen.greeting?.startsWith("Plomberie Test"))
+check("logs · voix envoyée, artisan et ms à chaque session.update", /\[session\.update\] initial voice aurora artisan 11111111 \d+ms call CA123/.test(logs) && /\[session\.updated\] voice aurora demandée aurora \d+ms/.test(logs))
+check("logs · [latency] twilio start, xai open, profile, session.updated, first audio delta", ["twilio start", "xai open", "profile", "session.updated", "first audio delta"].every(t => new RegExp(`\\[latency\\] ${t} \\d+ms call`).test(logs)))
 check("session xAI en audio/pcmu des deux côtés", seen.session?.audio?.input?.format?.type === "audio/pcmu" && seen.session?.audio?.output?.format?.type === "audio/pcmu")
 check("même prompt que l'app + contexte téléphone", /CONTEXTE TÉLÉPHONE/.test(seen.session?.instructions || "") && /\+33612345678/.test(seen.session.instructions) && seen.session.tools?.length === 3)
 check("créneaux préchargés dans le prompt", /jeudi 19 novembre/.test(seen.session?.instructions || ""))
@@ -119,7 +143,29 @@ check("update57 · voix choisie passée à xAI", seen.session?.voice === "aurora
 check("update57 · débit choisi (audio.output.speed)", seen.session?.audio?.output?.speed === 1.1 && seen.session?.audio?.output?.format?.type === "audio/pcmu")
 check("update57 · prononciation (session.replace)", seen.session?.replace?.Bouzerda === "Bou-zèr-da")
 check("update57 · prestations, FAQ, métier et horaires dans le prompt", /Recherche de fuite — prix indicatif : dès 89 €/.test(seen.session?.instructions || "") && /Le devis est-il gratuit/.test(seen.session.instructions) && /entreprise de plomberie/.test(seen.session.instructions) && /du lundi au vendredi de 8 h à 18 h/.test(seen.session.instructions))
-check("update57 · accueil personnalisé joué (IA + RGPD ajoutés)", seen.greeting?.startsWith("Plomberie Test, bonjour ! Je suis l'assistante IA de Plomberie Test.") && /enregistré/.test(seen.greeting || ""))
+check("update57 · accueil personnalisé joué (+ annonce d'enregistrement)", seen.greeting === "Plomberie Test, bonjour ! Appel enregistré.")
+
+// ---------- Voix clonée (reception_config.voice intégrée + customVoice, contrainte SQL update57) ----------
+receptionOverride = { v: 1, voice: "ara", customVoice: CUSTOM, speed: 1 }
+let v = await fakeCall(good, "CA-voix-ok")
+check("voix clonée · customVoice envoyée telle quelle dès le 1er session.update (malgré la fiche en cache)", seen.conn.updates[0] === CUSTOM && seen.conn.updates.every(x => x === CUSTOM) && v.media >= 1)
+check("voix clonée · acceptée par xAI : aucun repli", !/\[voice\]/.test(logs))
+
+customMode = "ignore"
+v = await fakeCall(good, "CA-voix-ignore")
+check("voix clonée · ignorée en silence par xAI (voix Ara appliquée) : log explicite + repli, accueil joué", seen.conn.updates[0] === CUSTOM && /\[voice\] xAI a ignoré la voix demandée 3ixfadarbuwy → appliquée ara/.test(logs) && /\[voice\] repli voix intégrée 3ixfadarbuwy → ara \(voix ignorée par xAI\)/.test(logs) && v.media >= 1)
+
+customMode = "error"
+v = await fakeCall(good, "CA-voix-erreur")
+check("voix clonée · refusée par xAI (erreur session) : repli automatique sur la voix intégrée, accueil joué", seen.conn.updates[0] === CUSTOM && seen.conn.updates[1] === "ara" && seen.conn.greetedAfter === 2 && /\[xai\] error .*Unknown voice/.test(logs) && /\(erreur xAI\)/.test(logs) && v.media >= 1)
+check("logs · aucun secret (clé xAI, jeton relais, clé service)", !logs.includes("fake-key") && !logs.includes(SECRET) && !logs.includes("fake-service-role"))
+customMode = "ok"; receptionOverride = null
+
+// Fiche lente alors qu'une fiche est en cache : on n'attend pas plus de ~300 ms, accueil avec le cache.
+sbDelay = 900
+v = await fakeCall(good, "CA-fiche-lente", 900)
+sbDelay = 0
+check("accueil instantané · fiche lente : accueil avec le cache après ~300 ms", /\[call\] fiche lente : accueil avec la fiche en cache/.test(logs) && seen.conn.greetedAfter === 1 && v.media >= 1)
 
 // ---------- update60 : prise de RDV au téléphone ----------
 async function bookCall(name, settle = 700) {

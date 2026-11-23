@@ -19,6 +19,18 @@ const APP_URL = (E.APP_URL || "https://akno-ai-app-v2.vercel.app").replace(/\/$/
 const SB_URL = (E.SUPABASE_URL || "").replace(/\/$/, "")
 const SB_KEY = E.SUPABASE_SERVICE_ROLE_KEY || ""
 const MAX_CALL_S = Number(E.MAX_CALL_SECONDS || 900)
+// Accueil : on attend la fiche de l'artisan (voix résolue, nom annoncé) avant le 1er session.update.
+// Fiche en cache : attente courte, puis on salue avec le cache. Aucune fiche connue : attente plus longue,
+// saluer « Akno » avec la voix par défaut serait faux.
+const PROFILE_WAIT_MS = Number(E.PROFILE_WAIT_MS || 300)
+const PROFILE_WAIT_COLD_MS = Number(E.PROFILE_WAIT_COLD_MS || 1500)
+// Sans réponse de xAI au 1er session.update (voix personnalisée refusée…) : repli sur la voix intégrée.
+const SESSION_ACK_MS = Number(E.SESSION_ACK_MS || 2500)
+// WS xAI pré-ouvert dès la connexion Twilio, avant le « start » (jeton pas encore vérifié) : borné en nombre et en durée.
+const PREAUTH_MS = 5000
+const MAX_PREOPEN = 6
+let preopenPending = 0
+const VOICE_ERR = /(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a)
 
 type Line = { role: "user" | "assistant"; text: string }
@@ -48,7 +60,9 @@ function putProfileCache(artisanId: string, profile: VoiceProfile) {
 
 async function loadProfile(artisanId: string): Promise<VoiceProfile> {
   const rows = await sb(`/rest/v1/artisans?id=eq.${artisanId}&select=*`)
-  const a = Array.isArray(rows) ? rows[0] || {} : {}
+  // Lecture en échec : on ne met pas un profil par défaut en cache (il servirait 10 min aux appels suivants).
+  if (!Array.isArray(rows) || !rows[0]) throw new Error("fiche artisan illisible")
+  const a = rows[0]
   const profile = mergeProfile({
     prenom: a.prenom || "",
     company: companyName(a.nom_entreprise, a.entreprise_nom),
@@ -124,18 +138,24 @@ function handleCall(tw: WebSocket) {
   let bookFailed: string | null = null
   let bookQueue = Promise.resolve()
   let lastBookKey = ""
-  let ringT0 = 0
   let firstAudioLogged = false
   let slotsHintText = ""
   let voiceReverted = false
+  // Session xAI : le 1er session.update part quand le WS xAI est ouvert ET que la fiche (voix résolue) est là.
+  let profileReady = false, sessionSent = false, slotsPending = false, lastSession = ""
+  let preopened = false, preopenHeld = false
+  let profileTimer: NodeJS.Timeout | null = null, ackTimer: NodeJS.Timeout | null = null
+  /** Voix demandées dans les session.update pas encore acquittés (xAI répond dans l'ordre). */
+  const askedVoices: string[] = []
 
-  const latency = (tag: string) => {
-    if (!ringT0) return
-    log("[latency]", tag, `${Date.now() - ringT0}ms`, "call", callSid ? callSid.slice(-8) : "?")
-  }
+  // Mesures [latency] : origine = connexion du flux Twilio (upgrade WS), avant même l'événement « start ».
+  const since = () => `${Date.now() - startedAt}ms`
+  const tag = () => (callSid ? callSid.slice(-8) : "?")
+  const latency = (name: string) => log("[latency]", name, since(), "call", tag())
 
   const toTwilio = (m: Json) => { if (tw.readyState === WebSocket.OPEN) tw.send(JSON.stringify(m)) }
   const toXai = (m: Json) => { if (xai?.readyState === WebSocket.OPEN) xai.send(JSON.stringify(m)) }
+  const releasePreopen = () => { if (preopenHeld) { preopenHeld = false; preopenPending-- } }
 
   async function upsertCall(fields: Json) {
     const row = { artisan_id: artisanId, twilio_call_sid: callSid, source: "ia_telephone", ...fields }
@@ -250,28 +270,75 @@ function handleCall(tw: WebSocket) {
     toXai({ type: "response.create" })
   }
 
-  const fallbackBuiltinVoice = (detail: unknown) => {
-    if (voiceReverted) return
+  const withBuiltinVoice = (p: VoiceProfile): VoiceProfile => ({ ...p, reception: { ...normalizeConfig(p.reception), voice: DEFAULT_VOICE } })
+  /** Fiche relue : garde le repli si xAI a déjà refusé la voix pendant cet appel. */
+  const applyProfile = (p: VoiceProfile) => { profile = voiceReverted ? withBuiltinVoice(p) : p }
+
+  /** Envoie la session courante à xAI et logue la voix réellement envoyée (jamais de clé ni de prompt). */
+  const sendSession = (why: string) => {
+    if (closed || !xai || xai.readyState !== WebSocket.OPEN) return false
+    const session = twilioSession(profile, slotsHintText, from)
+    const body = JSON.stringify(session)
+    if (body === lastSession) return true
+    lastSession = body
+    const voice = String(session.voice || "")
+    askedVoices.push(voice)
+    toXai({ type: "session.update", session })
+    log("[session.update]", why, "voice", voice, "artisan", artisanId.slice(0, 8), since(), "call", tag())
+    return true
+  }
+
+  /** Repli sur la voix intégrée par défaut (une seule fois par appel). true = le profil vient de changer. */
+  const fallbackBuiltinVoice = (why: string) => {
+    if (voiceReverted) return false
     const cur = normalizeConfig(profile.reception).voice
-    if (cur === DEFAULT_VOICE) return
-    const msg = typeof detail === "string" ? detail : JSON.stringify(detail || "").slice(0, 280)
-    if (!/(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i.test(msg)) return
+    if (cur === DEFAULT_VOICE) return false
     voiceReverted = true
-    log("[voice] repli voix intégrée", String(cur).slice(0, 12), "→", DEFAULT_VOICE)
-    profile = { ...profile, reception: { ...normalizeConfig(profile.reception), voice: DEFAULT_VOICE } }
-    if (closed || !xai || xai.readyState !== WebSocket.OPEN) return
-    if (ready) patchSession()
-    else toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
+    log("[voice] repli voix intégrée", cur, "→", DEFAULT_VOICE, `(${why})`, "artisan", artisanId.slice(0, 8), since(), "call", tag())
+    profile = withBuiltinVoice(profile)
+    return true
+  }
+
+  /** 1er session.update : seulement quand le WS xAI est ouvert et la fiche chargée (ou son délai écoulé). */
+  const startSession = () => {
+    if (sessionSent || !profileReady || !artisanId) return
+    if (!sendSession("initial")) return
+    sessionSent = true
+    ackTimer = setTimeout(() => {
+      if (ready || closed) return
+      log("[xai] pas de session.updated après", `${SESSION_ACK_MS}ms`, "call", tag())
+      askedVoices.length = 0
+      if (fallbackBuiltinVoice("xAI ne répond pas")) sendSession("repli")
+    }, SESSION_ACK_MS)
+  }
+
+  /** Mise à jour de session en cours d'appel. urgent = à appliquer avant l'accueil (voix, nom annoncé) ;
+      sinon elle part juste après l'accueil, pour ne pas le retarder. */
+  const patchSession = (why: string, urgent = false) => {
+    if (!sessionSent) return // le 1er session.update emportera l'état courant
+    if (!ready && !urgent) { slotsPending = true; return }
+    sendSession(why)
   }
 
   function onXai(raw: WebSocket.RawData) {
     let ev: Json
     try { ev = JSON.parse(raw.toString()) } catch { return }
     const type = String(ev.type || "")
-    if (type === "session.updated" && !ready) {
+    if (type === "session.updated") {
+      const asked = askedVoices.shift() || ""
+      const applied = String(ev.session?.voice || "").toLowerCase()
+      log("[session.updated] voice", applied || "?", "demandée", asked || "?", since(), "call", tag())
+      if (asked && applied && applied !== asked.toLowerCase()) {
+        // xAI ne renvoie pas d'erreur pour une voix inconnue de l'équipe : il applique sa voix par défaut en silence.
+        log("[voice] xAI a ignoré la voix demandée", asked, "→ appliquée", applied, "(voix absente de l'équipe de cette clé API ?)", "call", tag())
+        if (fallbackBuiltinVoice("voix ignorée par xAI") && applied !== DEFAULT_VOICE) sendSession("repli")
+      }
+      if (ready) return
       ready = true
+      if (ackTimer) clearTimeout(ackTimer)
       latency("session.updated")
       toXai({ type: "conversation.item.create", item: { type: "force_message", role: "assistant", interruptible: false, content: [{ type: "output_text", text: welcomeLine(profile) }] } })
+      if (slotsPending) { slotsPending = false; sendSession("créneaux") }
       return
     }
     if (type === "response.output_audio.delta" || type === "response.audio.delta") {
@@ -305,54 +372,76 @@ function handleCall(tw: WebSocket) {
     if (type === "response.done" || type === "response.output_audio.done") { greeting = false; return }
     if (type === "response.function_call_arguments.done") { void handleTool(ev); return }
     if (type === "error") {
+      // Message d'erreur xAI tronqué : jamais la clé ni le prompt.
       const snippet = JSON.stringify(ev.error || ev).slice(0, 300)
-      log("[xai] error", snippet)
-      fallbackBuiltinVoice(snippet)
+      log("[xai] error", snippet, since(), "call", tag())
+      // Avant l'accueil, une erreur bloque le décroché : on retente avec la voix intégrée. Ensuite, seulement si l'erreur parle de la voix.
+      if ((!ready || VOICE_ERR.test(snippet)) && !voiceReverted && normalizeConfig(profile.reception).voice !== DEFAULT_VOICE) {
+        askedVoices.length = 0
+        if (fallbackBuiltinVoice("erreur xAI")) sendSession("repli")
+      }
     }
   }
 
-  const patchSession = () => {
-    if (closed || !xai || xai.readyState !== WebSocket.OPEN || !ready) return
-    toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
+  /** Ouvre le WS xAI. Appelé dès la connexion Twilio (avant « start ») pour gagner le temps de connexion. */
+  function openXai() {
+    if (xai || closed) return
+    const ws = new WebSocket(XAI_URL, { headers: { Authorization: `Bearer ${E.XAI_API_KEY || ""}` } })
+    xai = ws
+    ws.on("open", () => { latency("xai open"); startSession() })
+    ws.on("message", onXai)
+    ws.on("close", (c) => { log("[xai] close", c, "call", tag()); if (!closed) tw.close() })
+    ws.on("error", e => log("[xai] ws error", e.message, "call", tag()))
   }
 
   async function start(params: Json) {
     if (!verifyToken(E.BRIDGE_SECRET || "", params)) { log("[call] jeton invalide, raccroche"); tw.close(); return }
     artisanId = params.artisan_id; from = params.from || ""
-    ringT0 = Date.now()
+    clearTimeout(preAuthTimer); releasePreopen()
     latency("twilio start")
-    log("[call] start", callSid, "artisan", artisanId.slice(0, 8))
+    log("[call] start", callSid, "artisan", artisanId.slice(0, 8), preopened ? "(xAI pré-ouvert)" : "")
 
-    profile = profileFromCache(artisanId) || mergeProfile()
+    const cached = profileFromCache(artisanId)
+    if (cached) profile = cached
     slotsHintText = ""
+    const profileDone = () => { if (profileReady) return; profileReady = true; if (profileTimer) clearTimeout(profileTimer); startSession() }
+    profileTimer = setTimeout(() => {
+      if (profileReady || closed) return
+      log("[call] fiche lente : accueil avec", cached ? "la fiche en cache" : "le profil par défaut", since(), "call", tag())
+      profileDone()
+    }, cached ? PROFILE_WAIT_MS : PROFILE_WAIT_COLD_MS)
     void loadProfile(artisanId).then(p => {
-      profile = p
-      if (!ready && xai?.readyState === WebSocket.OPEN) {
-        toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
-      } else if (ready) patchSession()
-    }).catch(e => log("[call] profile", e))
+      applyProfile(p)
+      latency("profile")
+      if (profileReady) patchSession("fiche", true)
+      else profileDone()
+    }).catch(e => { log("[call] profile", (e as Error)?.message || e, "call", tag()); profileDone() })
     void akno("/api/booking", artisanId, { action: "slots" }).then(b => {
       const slots = (Array.isArray(b.slots) ? b.slots : []) as SlotHint[]
       slotsHintText = formatSlotsHint(slots)
-      patchSession()
+      patchSession("créneaux")
     }).catch(() => { /* warm agenda en arrière-plan */ })
 
     if (closed) return
-    xai = new WebSocket(XAI_URL, { headers: { Authorization: `Bearer ${E.XAI_API_KEY || ""}` } })
-    xai.on("open", () => {
-      latency("xai open")
-      toXai({ type: "session.update", session: twilioSession(profile, slotsHintText, from) })
-    })
-    xai.on("message", onXai)
-    xai.on("close", (c) => { log("[xai] close", c); if (!closed) tw.close() })
-    xai.on("error", e => log("[xai] ws error", e.message))
+    openXai()
     maxTimer = setTimeout(() => { log("[call] durée max atteinte"); tw.close() }, MAX_CALL_S * 1000)
   }
+
+  // Pré-ouverture : la connexion xAI (~350 ms) démarre avant le « start » Twilio. Le session.update, lui, attend le jeton vérifié.
+  if (preopenPending < MAX_PREOPEN) { preopenPending++; preopenHeld = true; preopened = true; openXai() }
+  const preAuthTimer = setTimeout(() => {
+    if (artisanId || closed) return
+    log("[call] aucun start Twilio valide, fermeture")
+    tw.close()
+  }, PREAUTH_MS)
 
   async function finish() {
     if (closed) return
     closed = true
+    clearTimeout(preAuthTimer); releasePreopen()
     if (maxTimer) clearTimeout(maxTimer)
+    if (profileTimer) clearTimeout(profileTimer)
+    if (ackTimer) clearTimeout(ackTimer)
     try { xai?.close() } catch { /* */ }
     if (!artisanId || !callSid) return
     const duration = Math.round((Date.now() - startedAt) / 1000)
@@ -416,4 +505,6 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(PORT, () => {
   const miss = ["XAI_API_KEY", "BRIDGE_SECRET", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter(k => !E[k])
   log(`[bridge] écoute sur :${PORT}${miss.length ? ` — variables manquantes : ${miss.join(", ")}` : ""}`)
+  // Démarrage à froid : ouvre tout de suite la connexion Supabase (DNS + TLS), la fiche du 1er appel arrive plus vite. Lecture seule.
+  if (SB_URL && SB_KEY) void sb("/rest/v1/artisans?select=id&limit=1").catch(() => null)
 })
