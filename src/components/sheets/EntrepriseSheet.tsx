@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { AnimatePresence } from "motion/react"
 import { Building2, ImageIcon, Search } from "lucide-react"
 import { Btn, F, Sheet, Tg, inp, tx, useC } from "../ui"
 import { useProfile } from "../../lib/profile"
 import { api } from "../../lib/accountApi"
 import { supabase } from "../../lib/supabase"
-import { missingLegal } from "../../lib/devisDoc"
+import { CO, missingLegal } from "../../lib/devisDoc"
+import PhotoCropper from "../photo/PhotoCropper"
 
 /* update44 · Écran « Entreprise » : toutes les mentions légales des devis et factures. */
 const FIELDS = ["entreprise_nom", "entreprise_forme", "entreprise_capital", "entreprise_adresse", "entreprise_cp_ville", "entreprise_telephone", "entreprise_email", "entreprise_siret", "entreprise_tva", "entreprise_rcs_rm", "entreprise_ape", "entreprise_mediateur", "assurance_nom", "assurance_numero", "assurance_zone", "assurance_adresse", "iban", "avis_url"] as const
@@ -18,6 +20,14 @@ export default function EntrepriseSheet({ close }: { close: () => void }) {
   const { p, save } = useProfile()
   const [f, setF] = useState<Form | null>(null)
   const [busy, setBusy] = useState(false), [look, setLook] = useState(false), [err, setErr] = useState(""), [logoBusy, setLogoBusy] = useState(false)
+  const [crop, setCrop] = useState<File | null>(null), [logoTick, setLogoTick] = useState(0)
+  const logoIn = useRef<HTMLInputElement>(null)
+  useEffect(() => { const f = () => setLogoTick(x => x + 1); addEventListener("akno-logo", f); return () => removeEventListener("akno-logo", f) }, [])
+  useEffect(() => {
+    if (!crop) return
+    const f = (e: KeyboardEvent) => { if (e.key !== "Escape") return; e.stopImmediatePropagation(); setCrop(null) }
+    addEventListener("keydown", f, true); return () => removeEventListener("keydown", f, true)
+  }, [crop])
   useEffect(() => {
     if (!p || f) return
     const o = Object.fromEntries([...FIELDS, ...EXTRA].map(k => [k, String(p[k] ?? "")])) as unknown as Form
@@ -50,14 +60,19 @@ export default function EntrepriseSheet({ close }: { close: () => void }) {
     })
     toast("Informations récupérées depuis l'annuaire des entreprises")
   }
-  const uploadLogo = async (file?: File) => {
+  // Même recadrage circulaire que la photo employé (PhotoCropper) ; sortie carrée 512 px JPEG pour l'aperçu et les PDF (object-contain / cadre carré).
+  const pickLogo = (file?: File | null) => {
     if (!file) return
-    if (!/^image\/(png|jpeg)$/.test(file.type)) { setErr("Logo : PNG ou JPEG uniquement."); return }
+    if (!/^image\//.test(file.type)) { setErr("Logo : PNG ou JPEG uniquement."); return }
+    setErr(""); setCrop(file)
+  }
+  const uploadLogo = async (file: File) => {
+    setCrop(null)
     if (file.size > 1_000_000) { setErr("Logo : 1 Mo maximum."); return }
     setLogoBusy(true)
     const { data: { user } } = await supabase.auth.getUser()
-    const path = `${user?.id}/logo-${Date.now()}.${file.type === "image/png" ? "png" : "jpg"}`
-    const { error } = await supabase.storage.from("logos").upload(path, file, { upsert: true, contentType: file.type })
+    const path = `${user?.id}/logo-${Date.now()}.jpg`
+    const { error } = await supabase.storage.from("logos").upload(path, file, { upsert: true, contentType: "image/jpeg" })
     if (error) { setLogoBusy(false); setErr("Envoi du logo impossible."); return }
     const e2 = await save({ logo_path: path })
     setLogoBusy(false)
@@ -113,11 +128,14 @@ export default function EntrepriseSheet({ close }: { close: () => void }) {
       <F l="Pied de page (facultatif)"><input className={inp} maxLength={240} placeholder="Ex. Merci de votre confiance · www.monentreprise.fr" {...v("devis_pied")} /></F>
       <F l="Lien de VOTRE fiche d'avis Google"><input className={inp} placeholder="https://g.page/r/…/review" {...v("avis_url")} /></F>
       <div className="flex items-center gap-3 rounded-[16px] bg-white/[.04] p-3">
-        <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-[12px] bg-white/[.06]">{p?.logo_path ? <Building2 size={20} /> : <ImageIcon size={20} className="text-white/40" />}</span>
+        <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-[12px] bg-white/[.06]">
+          {CO.logo ? <img key={logoTick} src={CO.logo} alt="" className="h-full w-full object-contain" /> : p?.logo_path ? <Building2 size={20} /> : <ImageIcon size={20} className="text-white/40" />}
+        </span>
         <div className="min-w-0 flex-1 text-[14px]"><div className="font-medium">Logo</div><div className={tx.cap}>{p?.logo_path ? "Logo enregistré · imprimé sur vos PDF" : "PNG ou JPEG, 1 Mo max."}</div></div>
-        <label className="flex h-10 cursor-pointer items-center rounded-full bg-white/[.08] px-4 text-[14px] font-medium hover:bg-white/[.12]">{logoBusy ? "Envoi…" : p?.logo_path ? "Changer" : "Ajouter"}<input type="file" accept="image/png,image/jpeg" className="hidden" onChange={e => void uploadLogo(e.target.files?.[0])} /></label>
+        <label className="flex h-10 cursor-pointer items-center rounded-full bg-white/[.08] px-4 text-[14px] font-medium hover:bg-white/[.12]">{logoBusy ? "Envoi…" : p?.logo_path ? "Changer" : "Ajouter"}<input ref={logoIn} type="file" accept="image/*" className="hidden" onChange={e => { pickLogo(e.target.files?.[0]); e.target.value = "" }} /></label>
       </div>
     </div>
     {err && <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{err}</p>}
+    <AnimatePresence>{crop && <PhotoCropper key="crop" file={crop} z={61} onCancel={() => setCrop(null)} onDone={f => void uploadLogo(f)} />}</AnimatePresence>
   </Sheet>
 }
