@@ -45,7 +45,11 @@ export function useProfile() {
     const user = await getAuthUser()
     if (!user) return "Session expirée."
     const { error } = await supabase.from("artisans").update(patch).eq("id", user.id)
-    if (error) return "Enregistrement impossible."
+    if (error) {
+      const m = String(error.message || "")
+      if (/reception_config_check|check constraint/i.test(m)) return "Enregistrement refusé (configuration réceptionniste). Réessayez dans un instant."
+      return m ? `Enregistrement impossible : ${m}` : "Enregistrement impossible."
+    }
     dispatchEvent(new Event("akno-refresh"))
     return ""
   }, [])

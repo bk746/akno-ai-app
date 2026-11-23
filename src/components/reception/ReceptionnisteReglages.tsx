@@ -98,7 +98,7 @@ export function ReceptionnisteControls({ className = "" }: { className?: string 
   const voice = voiceInfo(c.voice)
   const num = a?.integrations.twilio_number || ""
 
-  const patch = async (part: Partial<ReceptionConfig>, ok: string) => {
+  const patch = async (part: Partial<ReceptionConfig>, ok: string, afterOk?: () => void) => {
     if (busy || !p) return
     setBusy(true)
     const next = { ...c, ...part }
@@ -109,8 +109,9 @@ export function ReceptionnisteControls({ className = "" }: { className?: string 
     }
     const e = await save({ reception_config: serializeConfig(next) })
     setBusy(false)
-    if (e) toast(e)
-    else toast(ok)
+    if (e) { toast(e); return }
+    toast(ok)
+    afterOk?.()
   }
 
   return <div data-rec-reglages className={className}>
@@ -143,7 +144,7 @@ export function ReceptionnisteControls({ className = "" }: { className?: string 
     {voices && <div role="radiogroup" aria-label="Voix de la réceptionniste" className="mt-2 grid grid-cols-2 gap-2">
       {VOICES.map(v => {
         const on = c.voice === v.id
-        return <button key={v.id} type="button" role="radio" aria-checked={on} aria-label={`Voix ${v.name}`} disabled={busy} onClick={() => { void patch({ voice: v.id }, `Voix : ${v.name}`); setVoices(false) }} className={`rounded-[16px] px-3 py-2.5 text-left ${on ? "bg-white/[.09] shadow-[inset_0_0_0_1.5px_rgba(255,255,255,.85)]" : "bg-white/[.035] shadow-[inset_0_0_0_1px_rgba(255,255,255,.06)]"}`}>
+        return <button key={v.id} type="button" role="radio" aria-checked={on} aria-label={`Voix ${v.name}`} disabled={busy} onClick={() => { void patch({ voice: v.id }, `Voix : ${v.name}`, () => setVoices(false)) }} className={`rounded-[16px] px-3 py-2.5 text-left ${on ? "bg-white/[.09] shadow-[inset_0_0_0_1.5px_rgba(255,255,255,.85)]" : "bg-white/[.035] shadow-[inset_0_0_0_1px_rgba(255,255,255,.06)]"}`}>
           <div className="truncate text-[14px] font-medium">{v.name}</div>
           <div className="truncate text-[11.5px] text-white/45">{v.gender === "female" ? "Féminine" : "Masculine"}</div>
         </button>

@@ -8,6 +8,7 @@ export type VoiceInfo = { id: string; name: string; gender: VoiceGender; tone: s
 
 /** Voix clonée xAI (custom voice) — absente de GET /v1/tts/voices, id connu côté compte xAI. */
 export const CUSTOM_VOICE_KERYAN = "3ixfadarbuwy"
+export const isCustomVoiceId = (id: string) => id.toLowerCase() === CUSTOM_VOICE_KERYAN
 
 /** Les 28 voix intégrées de Grok Voice (même liste pour le temps réel et la synthèse vocale).
  *  Source : https://docs.x.ai/developers/model-capabilities/audio/voice (tableau « Voices ») + GET /v1/tts/voices (genre).
@@ -96,12 +97,21 @@ const line = (v: unknown, max: number) => clean(v, max).replace(/\s*\n\s*/g, " "
 const arr = (v: unknown) => Array.isArray(v) ? v : []
 
 /** Lit une config (jsonb en base, saisie UI…) : toujours valide, jamais d'exception. */
+function resolveVoice(raw: Record<string, unknown>, fallback: string): string {
+  const cv = typeof raw.customVoice === "string" ? raw.customVoice.toLowerCase().trim() : ""
+  if (cv === CUSTOM_VOICE_KERYAN) return CUSTOM_VOICE_KERYAN
+  const v = typeof raw.voice === "string" ? raw.voice.toLowerCase().trim() : ""
+  if (v === CUSTOM_VOICE_KERYAN || (v && isVoiceId(v) && isCustomVoiceId(v))) return CUSTOM_VOICE_KERYAN
+  if (v && isVoiceId(v) && !isCustomVoiceId(v)) return v
+  return fallback
+}
+
 export function normalizeConfig(raw: unknown): ReceptionConfig {
   const o = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>
   const base = emptyConfig()
   const sp = Number(o.speed)
   return {
-    voice: isVoiceId(o.voice) ? String(o.voice).toLowerCase() : base.voice,
+    voice: resolveVoice(o, base.voice),
     speed: Number.isFinite(sp) && sp > 0 ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, sp)) * 100) / 100 : 1,
     enabled: o.enabled !== false,
     pickup: o.pickup === "direct" ? "direct" : DEFAULT_PICKUP,
@@ -122,10 +132,18 @@ export function normalizeConfig(raw: unknown): ReceptionConfig {
   }
 }
 
-/** Version compacte pour l'enregistrement en base (champs vides retirés des listes). */
+/** Version compacte pour l'enregistrement en base (champs vides retirés des listes).
+ *  La voix custom est stockée dans customVoice : reception_config.voice reste une voix intégrée (contrainte Postgres update57). */
 export function serializeConfig(c: ReceptionConfig) {
   const n = normalizeConfig(c)
-  return { v: 1, ...n, services: n.services.map(s => ({ nom: s.nom, ...(s.prix ? { prix: s.prix } : {}), ...(s.duree ? { duree: s.duree } : {}) })) }
+  const custom = isCustomVoiceId(n.voice)
+  return {
+    v: 1,
+    ...n,
+    voice: custom ? DEFAULT_VOICE : n.voice,
+    ...(custom ? { customVoice: CUSTOM_VOICE_KERYAN } : {}),
+    services: n.services.map(s => ({ nom: s.nom, ...(s.prix ? { prix: s.prix } : {}), ...(s.duree ? { duree: s.duree } : {}) })),
+  }
 }
 
 /** L'IA décroche-t-elle sur la ligne Akno ? Absent ou invalide = oui (comportement historique). */

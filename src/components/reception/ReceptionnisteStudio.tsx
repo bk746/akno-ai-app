@@ -183,7 +183,7 @@ export function StudioView({ p, save, close, onHoraires, initialSection, setup, 
     setBusy(true); setErr("")
     const e = await save({ message_accueil: greet.trim().slice(0, 300) || null, reception_config: serializeConfig(c) })
     setBusy(false)
-    if (e) { setErr(e); return }
+    if (e) { setErr(e); toast(e); return }
     setBase(JSON.stringify([serializeConfig(c), greet.trim()])); setSavedAt(Date.now()); toast("Réceptionniste enregistrée · active au prochain appel")
   }
   const tryClose = () => { pv.stop(); if (dirty || setup) setAskClose(true); else close() }
@@ -218,7 +218,7 @@ export function StudioView({ p, save, close, onHoraires, initialSection, setup, 
     setBusy(true); setErr("")
     const t = mergeTarifs(p.tarifs)
     const e = await save({ [companyKey(p)]: sx.nom.trim(), message_accueil: greet.trim().slice(0, 300) || null, reception_config: serializeConfig(c), horaires: sx.h, telephone_urgence: digitsFr(sx.urg) || null, tarifs: mergeTarifs({ ...t, zoneKm: sx.zone }) })
-    if (e) { setBusy(false); setErr(e); return }
+    if (e) { setBusy(false); setErr(e); toast(e); return }
     const e2 = await markSetupDone("rec")
     setBusy(false)
     if (e2) { setErr(e2); return }

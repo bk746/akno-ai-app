@@ -12,6 +12,8 @@ const base = { company: "Plomberie Bouzerda", city: "Lyon", email: "contact@bouz
 T("29 voix, identifiants uniques", VOICES.length === 29 && new Set(VOICES.map(v => v.id)).size === 29)
 T("voix custom Keryan en première", VOICES[0].id === CUSTOM_VOICE_KERYAN && VOICES[0].name === "Ma voix (Keryan)")
 T("voix custom autorisée (TTS + session)", isVoiceId(CUSTOM_VOICE_KERYAN) && normalizeConfig({ voice: CUSTOM_VOICE_KERYAN }).voice === CUSTOM_VOICE_KERYAN)
+T("serialize custom : voice intégrée + customVoice (contrainte SQL)", (() => { const z = serializeConfig(normalizeConfig({ voice: CUSTOM_VOICE_KERYAN })); return z.voice === DEFAULT_VOICE && (z as { customVoice?: string }).customVoice === CUSTOM_VOICE_KERYAN })())
+T("roundtrip base customVoice → voix effective", normalizeConfig({ voice: "ara", customVoice: CUSTOM_VOICE_KERYAN }).voice === CUSTOM_VOICE_KERYAN)
 T("voix par défaut = ara (féminine)", DEFAULT_VOICE === "ara" && VOICE_ID === "ara" && VOICES.find(v => v.id === "ara")?.gender === "female")
 T("9 voix féminines / 20 masculines (intégrées + custom)", VOICES.filter(v => v.gender === "female").length === 9 && VOICES.filter(v => v.gender === "male").length === 20)
 

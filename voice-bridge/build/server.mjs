@@ -80,6 +80,7 @@ function hasEmergencyPhone(raw) {
 
 // ../src/lib/voice/receptionist.ts
 var CUSTOM_VOICE_KERYAN = "3ixfadarbuwy";
+var isCustomVoiceId = (id) => id.toLowerCase() === CUSTOM_VOICE_KERYAN;
 var VOICES = [
   { id: CUSTOM_VOICE_KERYAN, name: "Ma voix (Keryan)", gender: "male", tone: "Voix personnalis\xE9e", use: "R\xE9ceptionniste", reco: true },
   { id: "celeste", name: "Celeste", gender: "female", tone: "Empathique, assur\xE9e, rassurante", use: "Accueil, assistance", reco: true },
@@ -140,12 +141,20 @@ var emptyConfig = () => ({
 var clean = (v, max) => typeof v !== "string" ? "" : v.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, " ").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, max);
 var line = (v, max) => clean(v, max).replace(/\s*\n\s*/g, " ");
 var arr = (v) => Array.isArray(v) ? v : [];
+function resolveVoice(raw, fallback) {
+  const cv = typeof raw.customVoice === "string" ? raw.customVoice.toLowerCase().trim() : "";
+  if (cv === CUSTOM_VOICE_KERYAN) return CUSTOM_VOICE_KERYAN;
+  const v = typeof raw.voice === "string" ? raw.voice.toLowerCase().trim() : "";
+  if (v === CUSTOM_VOICE_KERYAN || v && isVoiceId(v) && isCustomVoiceId(v)) return CUSTOM_VOICE_KERYAN;
+  if (v && isVoiceId(v) && !isCustomVoiceId(v)) return v;
+  return fallback;
+}
 function normalizeConfig(raw) {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const base = emptyConfig();
   const sp = Number(o.speed);
   return {
-    voice: isVoiceId(o.voice) ? String(o.voice).toLowerCase() : base.voice,
+    voice: resolveVoice(o, base.voice),
     speed: Number.isFinite(sp) && sp > 0 ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, sp)) * 100) / 100 : 1,
     enabled: o.enabled !== false,
     pickup: o.pickup === "direct" ? "direct" : DEFAULT_PICKUP,
