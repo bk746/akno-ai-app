@@ -81,6 +81,14 @@ import { devisDeleteReason, factureSwipeAction } from "../lib/docDelete"
 /* Visuels repris à l'identique de Desktop.tsx (/desktop) et Mobile.tsx (/mobile). */
 const agents = ["rec", "ag", "rel", "dev"] as const
 const SLUG: Record<string, P> = { reception: "rec", agenda: "ag", relance: "rel", devis: "dev", parametres: "set", factures: "fac", chantiers: "ch", equipe: "eq", clients: "cl" }
+const APP_TAB_PATHS = new Set(Object.keys(SLUG))
+const SESSION_KEY = "akno-app-session"
+/** Au cold start, la WebView rouvre la dernière URL : on ramène l'app connectée sur Réception (liens publics inchangés). */
+const goHomeIfStaleTab = (pathname: string, search: string) => {
+  const seg = (pathname || "").replace(/^\/+/, "").split("/")[0] || ""
+  if (APP_TAB_PATHS.has(seg) && seg !== "reception") return `/reception${search}`
+  return ""
+}
 const slugOf = (p: P) => p === "set" ? "parametres" : p === "fac" ? "factures" : p === "ch" ? "chantiers" : p === "eq" ? "equipe" : p === "cl" ? "clients" : A[p].slug
 /** update62 · titre lisible d'une page (Factures et Chantiers ne sont pas des agents) */
 const pageTitle = (p: P) => p === "set" ? "Paramètres" : p === "fac" ? "Factures" : p === "ch" ? "Chantiers" : p === "eq" ? "Équipe" : p === "cl" ? "Clients" : A[p].tab
@@ -1489,6 +1497,19 @@ function AknoApp() {
   // update48 · page d'arrivée : sans l'option Réceptionniste IA, on arrive sur l'Agenda (et non sur /reception).
   const rr = useRights(), landed = useRef(false), role = useAppRole()
   const isEmploye = role?.kind === "employe"
+  const homeBoot = useRef(false)
+  useEffect(() => {
+    if (homeBoot.current) return
+    homeBoot.current = true
+    let fresh = false
+    try {
+      fresh = !sessionStorage.getItem(SESSION_KEY)
+      sessionStorage.setItem(SESSION_KEY, "1")
+    } catch { fresh = true }
+    if (!fresh) return
+    const home = goHomeIfStaleTab(pathname, location.search)
+    if (home) navigate(home, { replace: true })
+  }, [navigate, pathname])
   useEffect(() => {
     if (landed.current || !rr.ready) return
     landed.current = true
