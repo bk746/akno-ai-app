@@ -3,7 +3,10 @@
       (gesture* + touchmove à plusieurs doigts, passive:false) sans toucher au défilement à un doigt.
    2. Clavier virtuel : --kb = hauteur cachée par le clavier (visualViewport), utilisée par les feuilles
       pour remonter au-dessus du clavier ; le champ actif est recentré dans sa zone de défilement. */
+import { initPress } from "./press"
+
 export function initMobile() {
+  initPress()
   if (typeof window === "undefined" || typeof document === "undefined") return
   const block = (e: Event) => { if (e.cancelable) e.preventDefault() }
   // Safari (iOS / iPadOS) : événements de geste propriétaires
@@ -52,6 +55,10 @@ export function initMobile() {
     const kbRaw = typingNow ? Math.max(0, layoutH - vvH - vvTop) : 0
     const kb = kbRaw > 80 ? kbRaw : 0
     // < 80 px : barres d'outils Safari qui bougent, pas un clavier
+    // update84 · saut important (ouverture/fermeture) : la feuille suit en 280 ms (courbe iOS).
+    // petits pas (visualViewport / rAF) : pas de transition, on colle au clavier.
+    const prev = parseFloat(root.style.getPropertyValue("--kb") || "0") || 0
+    root.classList.toggle("kb-ease", Math.abs(kb - prev) > 60)
     root.style.setProperty("--kb", `${kb}px`)
     root.classList.toggle("kb-open", kb > 0)
     root.style.setProperty("--vvh", `${vvH}px`)
@@ -74,6 +81,6 @@ export function initMobile() {
       if (document.activeElement !== el) return
       const r = el.getBoundingClientRect(), bottom = vv.height + vv.offsetTop
       if (r.top < 64 || r.bottom > bottom - 24) el.scrollIntoView({ block: "center", behavior: "smooth" })
-    }, 320)
+    }, 300)
   })
 }

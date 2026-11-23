@@ -11,6 +11,7 @@ import { Field, Group, inp } from "../chantiers/EquipeSheet"
 import { deleteClient, displayName, saveClient, useClients, type ClientInput, type NewClientSeed } from "../../lib/clients"
 import { ORIGINS, boldMatch, ficheKey, fromPicker, frPhone, parseVcf, phoneKey, sirenOf, validEmail, type Client, type Kind, type Picked } from "../../lib/clientsCalc"
 import { searchAddress, type Place } from "../../lib/geo"
+import { SuggestPop } from "../form/grouped"
 
 const SPRING = { type: "spring" as const, stiffness: 420, damping: 36 }
 type Draft = ClientInput & { pro: "pro" | "syndic" }
@@ -136,12 +137,14 @@ export function ClientForm({ initial, seed, directory, desk, onClose, onSaved, o
           </div></motion.div>}</AnimatePresence>
         <Group className="mt-4">
           <Field label="Adresse" htmlFor="cf-addr"><input id="cf-addr" className={inp} autoComplete="off" role="combobox" aria-expanded={sug.length > 0} aria-controls="cf-addr-list" placeholder="Rue, ville…" maxLength={240} value={d.adresse} onFocus={() => setAddrFocus(true)} onBlur={() => setTimeout(() => setAddrFocus(false), 180)} onChange={e => set({ adresse: e.target.value, lat: null, lng: null, ville: "" })} /></Field>
-          <AnimatePresence initial={false}>{sug.length > 0 && <motion.ul id="cf-addr-list" role="listbox" aria-label="Suggestions d'adresse" key="sug" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ height: SPRING, opacity: { duration: .12 } }} className="overflow-hidden">
+          <SuggestPop show={sug.length > 0} id="cf-addr-list" label="Suggestions d'adresse">
+            <ul>
             {sug.map(p => { const top = p.name || p.label.split(/\s\d{5}\s/)[0], [a, b, c] = boldMatch(top, d.adresse), bottom = [p.postcode, p.city].filter(Boolean).join(" ") + (p.label.includes(",") ? "" : ""); return <li key={p.label} role="option" aria-selected={false}>
               <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => pick(p)} className="eq-sep flex w-full items-center gap-3 px-4 py-2.5 text-left active:bg-white/[.05]">
                 <MapPin size={16} className="shrink-0 text-white/45" /><span className="min-w-0 flex-1"><span className="block truncate text-[15px] text-white/70">{a}<b className="font-semibold text-white">{b}</b>{c}</span><span className="block truncate text-[12.5px] text-white/45">{bottom || p.label}</span></span>
               </button></li> })}
-          </motion.ul>}</AnimatePresence>
+            </ul>
+          </SuggestPop>
         </Group>
         <Group className="mt-4"><div className="eq-sep flex gap-3 pl-4"><label htmlFor="cf-notes" className="w-[100px] shrink-0 pt-[15px] text-[16px] text-white/50">Notes</label>
           <textarea id="cf-notes" rows={2} className="min-h-[52px] w-full min-w-0 resize-none bg-transparent py-[14px] pr-4 text-[16px] leading-[22px] text-white outline-none caret-[#30D158] placeholder:text-white/28" placeholder="Code portail, étage, accès…" maxLength={4000} value={d.notes} onChange={e => { set({ notes: e.target.value }); e.target.style.height = "auto"; e.target.style.height = `${Math.min(180, e.target.scrollHeight)}px` }} /></div></Group>

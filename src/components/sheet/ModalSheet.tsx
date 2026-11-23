@@ -152,19 +152,19 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
     ? { initial: { opacity: 0, scale: .96, y: 8 }, animate: { opacity: 1, scale: 1, y: 0, transition: SNAP }, exit: { opacity: 0, scale: .97, transition: { duration: .16 } } }
     : reduce
       ? { initial: { opacity: 0 }, animate: { opacity: 1, transition: { duration: .2 } }, exit: { opacity: 0, transition: { duration: .16 } } }
-      : { initial: { y: "100%" }, animate: { y: 0, transition: SHEET }, exit: { y: "100%", transition: { type: "spring" as const, stiffness: 420, damping: 46, restDelta: 1 } } }
+      : { initial: { y: "100%" }, animate: { y: 0, transition: SHEET }, exit: { y: "100%", transition: { ...SHEET, restDelta: 1 } } }
 
   const node = <div data-sheet-root className={`fixed inset-0 flex ${desk ? (deskAlign === "top" ? "items-start justify-center pt-[12vh]" : "items-center justify-center p-6") : "items-end justify-center"}`} style={{ zIndex: z }}>
     <motion.div aria-hidden data-sheet-backdrop className="absolute inset-0" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: .28, ease: [.22, 1, .36, 1] } }} exit={{ opacity: 0, transition: { duration: .24 } }}
       onClick={() => { if (canDismiss.current) close.current() }}>
       <motion.div className={`absolute inset-0 ${under ? "bg-black/70" : backdrop}`} style={{ opacity: dim }} />
     </motion.div>
-    <div className={desk ? "relative flex w-full justify-center" : "pointer-events-none absolute inset-x-0 top-0 flex items-end justify-center"}
-      style={desk ? undefined : { bottom: isTop ? "var(--kb, 0px)" : 0 }}>
+    <div className={desk ? "relative flex w-full justify-center" : `pointer-events-none absolute inset-x-0 top-0 flex items-end justify-center${isTop ? (size === "full" || size === "large" ? " kb-follow-pad" : " kb-follow") : ""}`}
+      style={desk ? undefined : { bottom: 0 }}>
       <motion.div ref={panel} role={role} aria-modal="true" aria-label={labelledBy ? undefined : label} aria-labelledby={labelledBy} tabIndex={-1}
         {...anim} style={desk ? style : mobile}
-        onAnimationComplete={() => { if (!entered.current) { entered.current = true; onEntered?.() } }}
-        className={`pointer-events-auto relative flex w-full flex-col overflow-hidden text-white outline-none ${desk ? `max-h-[88dvh] rounded-[24px] border border-white/[.08] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${deskClass}` : `max-w-[640px] will-change-transform ${size === "full" ? "" : "rounded-t-[22px] shadow-[0_-24px_60px_-18px_rgba(0,0,0,.9)]"}`} ${className}`}>
+        onAnimationStart={() => { if (panel.current) panel.current.style.willChange = "transform" }} onAnimationComplete={() => { if (panel.current) panel.current.style.willChange = "auto"; if (!entered.current) { entered.current = true; onEntered?.() } }}
+        className={`pointer-events-auto relative flex w-full flex-col overflow-hidden text-white outline-none ${desk ? `max-h-[88dvh] rounded-[24px] border border-white/[.08] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${deskClass}` : `max-w-[640px] ${size === "full" ? "" : "rounded-t-[22px] shadow-[0_-24px_60px_-18px_rgba(0,0,0,.9)]"}`} ${className}`}>
         {!desk && handle && <div aria-hidden data-sheet-grab className="pointer-events-none absolute left-1/2 top-[6px] z-30 h-[5px] w-9 -translate-x-1/2 rounded-full bg-white/25" />}
         {children}
       </motion.div>

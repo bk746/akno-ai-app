@@ -2,10 +2,7 @@
 /* update83 · WebKit 393 px : carte de ligne pleine largeur, valeurs à droite, padding sous le footer. */
 import { webkit } from "playwright"
 import { mkdirSync } from "node:fs"
-import { join } from "node:path"
 import { harness } from "./pw-harness.mjs"
-
-const SHOTS = process.env.SHOTS_DIR || join(process.cwd(), "node_modules/.cache/akno-shots")
 
 const H = harness({ port: 5187 }), W = 393, HT = 852
 let ok = 0, ko = 0
@@ -79,13 +76,13 @@ async function main() {
     })
     check("ligne libre accessible au-dessus du footer", !overlap.hidden, JSON.stringify(overlap))
 
-    mkdirSync(SHOTS, { recursive: true })
+    mkdirSync("/workspace/akno-docs", { recursive: true })
     const shot = await page.evaluate(() => {
       const card = document.querySelector("[data-line-form]")
       const r = card.getBoundingClientRect()
       return { x: Math.max(0, r.x - 16), y: Math.max(0, r.y - 24), width: Math.min(innerWidth, r.width + 32), height: Math.min(innerHeight - 8, r.height + 48) }
     })
-    await page.screenshot({ path: join(SHOTS, "update83-ligne.png"), clip: { x: 0, y: Math.max(0, shot.y), width: W, height: Math.min(HT, Math.max(420, shot.height + 80)) } })
+    await page.screenshot({ path: "/workspace/akno-docs/update83-ligne.png", clip: { x: 0, y: Math.max(0, shot.y), width: W, height: Math.min(HT, Math.max(420, shot.height + 80)) } })
   } finally {
     await browser.close()
     H.stop()

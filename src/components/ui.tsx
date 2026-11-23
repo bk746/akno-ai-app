@@ -1,7 +1,8 @@
 /* Système visuel partagé d'Akno (extrait d'AknoApp.tsx à l'update44, à l'identique)
    pour que les nouveaux écrans (Entreprise, Abonnement, Factures, Conformité, Demandes) gardent le même style. */
 import React, { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react"
+import { LIST } from "../lib/motion"
 import { PhoneCall, CalendarDays, Repeat2, Receipt, Search, X, ChevronRight } from "lucide-react"
 import type { St } from "../lib/store"
 import ModalSheet from "./sheet/ModalSheet"
@@ -81,7 +82,25 @@ export const Row = ({ lead, t, s, r, rs, onClick, first, label, className = "" }
   {lead}<div className={`flex min-h-[64px] min-w-0 flex-1 items-center gap-3 py-3 pr-4 ${first ? "" : "border-t border-white/[.07]"}`}>
     <div className="min-w-0 flex-1"><div className={`truncate ${tx.body}`}>{t}</div>{s && <div className={`mt-0.5 truncate ${tx.cap}`}>{s}</div>}</div>
     {(r !== undefined || rs) && <div className="flex shrink-0 flex-col items-end">{typeof r === "string" || typeof r === "number" ? <div className={tx.body}>{r}</div> : r}{rs && <div className="mt-0.5">{typeof rs === "string" ? <span className={tx.cap}>{rs}</span> : rs}</div>}</div>}</div></div>
-export const List = ({ children, empty = "Aucun résultat", I = Search }: any) => { const xs = (Array.isArray(children) ? children.flat() : [children]).filter(Boolean); return <Card className="overflow-hidden">{xs.length ? xs : <div className="flex h-[96px] flex-col items-center justify-center gap-1 text-center"><I size={IS} strokeWidth={SW} className="text-white/30" /><div className={tx.cap}>{empty}</div></div>}</Card> }
+export const SheetSkeleton = () => <div data-sheet-skeleton className="space-y-3 px-1 pt-2" aria-hidden>
+  <div className="h-3.5 w-[38%] rounded-full bg-white/[.08]" />
+  <div className="h-[72px] rounded-[16px] bg-white/[.06]" />
+  <div className="h-[72px] rounded-[16px] bg-white/[.06]" />
+  <div className="h-[52px] rounded-[16px] bg-white/[.05]" />
+</div>
+function ListItem({ id, reduce, children }: { id: string | number; reduce: boolean; children: any }) {
+  const present = useIsPresent()
+  return <motion.div data-list-item data-exiting={present ? undefined : ""} layout={!reduce || undefined} initial={false}
+    exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
+    transition={reduce ? { duration: .12 } : LIST} style={{ overflow: "hidden" }}>{children}</motion.div>
+}
+export const List = ({ children, empty = "Aucun résultat", I = Search }: any) => {
+  const xs = (Array.isArray(children) ? children.flat() : [children]).filter(Boolean)
+  const reduce = useReducedMotion()
+  return <Card className="overflow-hidden">{xs.length ? <AnimatePresence initial={false}>
+    {xs.map((child: any, i: number) => <ListItem key={child?.key ?? i} id={child?.key ?? i} reduce={!!reduce}>{child}</ListItem>)}
+  </AnimatePresence> : <div className="flex h-[96px] flex-col items-center justify-center gap-1 text-center"><I size={IS} strokeWidth={SW} className="text-white/30" /><div className={tx.cap}>{empty}</div></div>}</Card>
+}
 export const rise = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: .42, ease: [.22, 1, .36, 1] as const } } }
 export const Section = ({ t, more, moreL, aside, children }: any) => <motion.section variants={rise} className="min-w-0"><div className="mb-3 flex h-6 items-center justify-between px-1"><h2 className={tx.title}>{t}</h2>{more ? <button onClick={more} className="text-[15px] font-medium text-white/50 hover:text-white">{moreL || "Voir tout"}</button> : aside && <span className={tx.cap}>{aside}</span>}</div>{children}</motion.section>
 export const Col = ({ children }: any) => { const { desk } = useC(); return <div className={desk ? "flex min-w-0 flex-col gap-8" : "contents"}>{children}</div> }

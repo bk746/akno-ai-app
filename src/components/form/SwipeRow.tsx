@@ -25,7 +25,7 @@ export function SwipeRow({ id, first, label, tone = "danger", onAction, children
   const snap = (toOpen: boolean) => {
     setOpen(toOpen)
     if (toOpen) bus.dispatchEvent(new CustomEvent("open", { detail: id }))
-    void animate(x, toOpen ? -SWIPE : 0, { type: "spring", stiffness: 420, damping: 38 })
+    void animate(x, toOpen ? -SWIPE : 0, { type: "spring", stiffness: 400, damping: 38 })
   }
 
   useEffect(() => {
@@ -52,7 +52,7 @@ export function SwipeRow({ id, first, label, tone = "danger", onAction, children
         className={`flex w-[88px] items-center justify-center px-2 text-center text-[13px] font-semibold leading-tight text-white ${tone === "danger" ? "bg-[#FF453A]" : "bg-[#2F6BFF]"}`}>{label}</button>
     </div>
     <motion.div drag="x" dragDirectionLock dragListener={false} dragControls={controls}
-      dragConstraints={{ left: -SWIPE, right: 0 }} dragElastic={{ left: .12, right: 0 }} dragMomentum={false}
+      dragConstraints={{ left: -SWIPE, right: 0 }} dragElastic={{ left: .22, right: .04 }} dragMomentum={false}
       style={{ x, touchAction: "pan-y" }}
       onPointerDown={e => {
         dragged.current = false
@@ -63,7 +63,8 @@ export function SwipeRow({ id, first, label, tone = "danger", onAction, children
       onDrag={() => { dragged.current = true }}
       onDragEnd={(_, i) => {
         if (Math.abs(i.offset.x) > 8 || Math.abs(i.velocity.x) > 80) dragged.current = true
-        snap(i.offset.x < -44 || i.velocity.x < -350)
+        const pos = x.get()
+        snap(i.velocity.x < -420 || (i.velocity.x > 420 ? false : pos < -SWIPE * .45) || i.offset.x < -44)
         window.setTimeout(() => { dragged.current = false }, 80)
       }}
       onClickCapture={e => {

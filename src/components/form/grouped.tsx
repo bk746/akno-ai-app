@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { POP } from "../../lib/motion"
 import ModalSheet from "../sheet/ModalSheet"
 import { Check, ChevronDown, ChevronRight, MapPin, Search, UserPlus, X } from "lucide-react"
 
@@ -62,6 +63,17 @@ export function Reveal({ open, children }: { open: boolean; children: ReactNode 
   const rm = useReducedMotion()
   return <AnimatePresence initial={false}>{open && <motion.div key="r" className="overflow-hidden" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={rm ? { duration: 0 } : { height: { type: "spring", stiffness: 420, damping: 40 }, opacity: { duration: .16 } }}>{children}</motion.div>}</AnimatePresence>
 }
+/** update84 · suggestions / autocomplétion : fade + scale 0,96 → 1, origine en haut. */
+export function SuggestPop({ show, id, label, children }: { show: boolean; id?: string; label?: string; children: ReactNode }) {
+  const reduce = useReducedMotion()
+  return <AnimatePresence initial={false}>{show && <motion.div key="sug" data-suggest-pop id={id} role="listbox" aria-label={label}
+    initial={reduce ? { opacity: 0 } : { opacity: 0, scale: .96 }} animate={{ opacity: 1, scale: 1 }}
+    exit={reduce ? { opacity: 0 } : { opacity: 0, scale: .98 }}
+    transition={reduce ? { duration: .12 } : POP} style={{ transformOrigin: "top center" }} className="origin-top">
+    {children}
+  </motion.div>}</AnimatePresence>
+}
+
 export function DisclosureRow({ open, onToggle, title, sub }: { open: boolean; onToggle: () => void; title: ReactNode; sub?: ReactNode }) {
   return <button type="button" aria-expanded={open} onClick={onToggle} className="ig-row flex min-h-12 w-full items-center gap-3 pl-4 pr-3 text-left active:bg-white/[.04]">
     <span className="min-w-0 flex-1 py-2"><span className="block text-[15px] text-white/50">{title}</span>{sub && !open && <span className="mt-0.5 block truncate text-[13.5px] text-white/75">{sub}</span>}</span>
@@ -161,7 +173,8 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
           </button>
         </div>
         {list.length === 0 ? <div className="px-2 py-6 text-center text-[14px] text-white/40">{clients.length ? "Aucun contact ne correspond." : "Aucun contact pour l'instant."}</div>
-          : <>{!q.trim() && <div className="px-4 pb-1.5 text-[13px] uppercase tracking-[.04em] text-white/40">Vos clients</div>}
+          : <SuggestPop show label="Contacts">
+            {!q.trim() && <div className="px-4 pb-1.5 text-[13px] uppercase tracking-[.04em] text-white/40">Vos clients</div>}
           <div className="ig overflow-hidden rounded-[14px] bg-white/[.05]">
             {list.map((c, i) => <button key={c.name} type="button" role="option" aria-selected={i === sel} onClick={() => pick(i)} onMouseMove={() => setSel(i)}
               className={`ig-row flex w-full items-center gap-3 py-2.5 pl-3 pr-3 text-left transition-colors ${i === sel && desk ? "bg-white/[.06]" : ""} active:bg-white/[.06]`}>
@@ -172,7 +185,7 @@ export function ContactSheet({ open, clients, current, onPick, onClose, desk }: 
               </span>
               {current && c.name.toLowerCase() === current.trim().toLowerCase() && <Check size={17} className="shrink-0 text-[#7EA6FF]" />}
             </button>)}
-          </div></>}
+          </div></SuggestPop>}
       </div></>}
   </ModalSheet>}</AnimatePresence>
 }

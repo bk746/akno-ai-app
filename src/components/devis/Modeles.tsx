@@ -1,7 +1,8 @@
 /* update61 · Modèles de devis réutilisables (par artisan, table devis_modeles) :
    enregistrer le devis en cours comme modèle, l'appliquer (remplacer ou ajouter), le mettre à jour, le renommer, le supprimer. */
 import { useEffect, useState } from "react"
-import { motion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
+import { LIST } from "../../lib/motion"
 import { X, LayoutTemplate, Plus, Pencil, Trash2, RefreshCw, Loader2 } from "lucide-react"
 import { supabase } from "../../lib/supabase"
 import { fmtE, type StoredLine } from "../../lib/devisCalc"
@@ -15,7 +16,7 @@ const MIG = "Modèles indisponibles : la migration 20261121_10 n'est pas encore 
 
 export default function Modeles({ desk, current, onApply, onClose }: { desk: boolean; current: { objet: string; lignes: StoredLine[] }; onApply: (m: Modele, mode: "replace" | "append") => void; onClose: () => void }) {
   const [rows, setRows] = useState<Modele[] | null>(null), [err, setErr] = useState(""), [busy, setBusy] = useState("")
-  const [nom, setNom] = useState(current.objet || ""), [edit, setEdit] = useState<string | null>(null), [rename, setRename] = useState("")
+  const [nom, setNom] = useState(current.objet || ""), [edit, setEdit] = useState<string | null>(null), [rename, setRename] = useState(""), [tried, setTried] = useState(false)
   const hasCurrent = countOf(current.lignes) > 0
   const load = async () => {
     const { data, error } = await supabase.from("devis_modeles").select("id, nom, objet, lignes, updated_at").order("updated_at", { ascending: false }).limit(200)
@@ -25,6 +26,7 @@ export default function Modeles({ desk, current, onApply, onClose }: { desk: boo
   useEffect(() => { void load() }, [])
   const run = async (k: string, fn: () => Promise<string | void>) => { setBusy(k); setErr(""); const e = await fn(); if (e) setErr(e); setBusy("") }
   const create = () => run("new", async () => {
+    setTried(true)
     const n = nom.trim()
     if (!n) return "Donnez un nom au modèle."
     if (!hasCurrent) return "Ajoutez d'abord des lignes au devis."
@@ -61,10 +63,10 @@ export default function Modeles({ desk, current, onApply, onClose }: { desk: boo
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <div className="rounded-[18px] border border-white/[.06] bg-white/[.03] p-3">
         <div className="text-[13px] font-medium text-white/80">Enregistrer le devis en cours comme modèle</div>
-        <div className="mt-2 flex gap-2"><input className={field + " !h-11"} placeholder="Ex. Remplacement chauffe-eau 200 L" value={nom} maxLength={120} onChange={e => setNom(e.target.value)} /><button type="button" disabled={!!busy} onClick={() => void create()} className="flex h-11 shrink-0 items-center gap-1.5 rounded-full px-4 text-[14px] font-semibold text-white disabled:opacity-40" style={{ background: TEAL }}>{busy === "new" ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}Créer</button></div>
+        <div className="mt-2 flex gap-2"><input className={field + " !h-11"} placeholder="Ex. Remplacement chauffe-eau 200 L" value={nom} maxLength={120} onChange={e => { setNom(e.target.value); if (err) setErr("") }} onBlur={() => { if (tried && !nom.trim()) setErr("Donnez un nom au modèle.") }} /><button type="button" disabled={!!busy} onClick={() => void create()} className="flex h-11 shrink-0 items-center gap-1.5 rounded-full px-4 text-[14px] font-semibold text-white disabled:opacity-40" style={{ background: TEAL }}>{busy === "new" ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}Créer</button></div>
         {!hasCurrent && <div className="mt-1.5 text-[12px] text-white/40">Le devis en cours n'a pas encore de lignes.</div>}
       </div>
-      {err && <div className="mt-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{err}</div>}
+      <AnimatePresence initial={false}>{err ? <motion.div key={err} role="alert" data-form-err initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ height: LIST, opacity: { duration: .16 } }} className="overflow-hidden"><div className="mt-3 rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{err}</div></motion.div> : null}</AnimatePresence>
       <div className="mt-4 space-y-2">
         {rows === null && <div className="py-6 text-center text-[13px] text-white/45">Chargement…</div>}
         {rows?.length === 0 && !err && <div className="py-6 text-center text-[13px] text-white/45">Aucun modèle pour l'instant. Préparez un devis type puis enregistrez-le ici.</div>}

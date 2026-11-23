@@ -79,11 +79,12 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate, onInte
   const hide = useCallback((after?: () => void) => {
     if (!openRef.current || closing.current) return
     pending.current = after || null
+    closing.current = true
+    setOpen(false) // update84 · la fermeture s'anime tout de suite, même si on navigue (Clients, etc.)
     if (pushed.current) {
-      closing.current = true
-      history.back() // l'entrée « feuille ouverte » est retirée ; popstate termine la fermeture
-      setTimeout(() => { if (closing.current) finish() }, 450) // filet de sécurité si popstate n'arrive pas
-    } else finish()
+      try { history.back() } catch { /* */ }
+      setTimeout(() => { if (closing.current || pending.current) finish() }, 280)
+    } else setTimeout(finish, 40)
   }, [finish])
   // Bouton retour Android / geste retour : ferme la feuille au lieu de quitter la page
   useEffect(() => {
@@ -105,7 +106,7 @@ export default function MobileNav({ page, go, badge, recLocked, onCreate, onInte
   }, [open])
   // Changement de page venu d'ailleurs (notification, lien) : on ferme sans toucher à l'historique
   const pageRef = useRef(page)
-  useEffect(() => { if (pageRef.current !== page) { pageRef.current = page; if (openRef.current && !closing.current) { pushed.current = false; pending.current = null; setOpen(false) } } }, [page])
+  useEffect(() => { if (pageRef.current !== page) { pageRef.current = page; if (openRef.current) { setOpen(false); if (!closing.current) { pushed.current = false } } } }, [page])
   const toggle = () => { const now = Date.now(); if (now - lastToggle.current < 220) return; lastToggle.current = now; if (openRef.current) hide(); else show() }
   // update63 · l'onglet Factures rouvre le dernier mode choisi (Devis ou Factures) ; déjà dans l'onglet : rien ne bouge
   const dest = (t: Tab): P => t === "fac" ? lastDocMode() : t

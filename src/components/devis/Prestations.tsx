@@ -1,6 +1,7 @@
 /* update52 · Bibliothèque de prestations : gestion (Réglages / page Devis), formulaire, et palette d'ajout rapide dans l'éditeur. */
 import { useEffect, useMemo, useRef, useState } from "react"
-import { motion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
+import { LIST } from "../../lib/motion"
 import ModalSheet from "../sheet/ModalSheet"
 import { Search, Plus, Check, ChevronDown, Trash2, Clock, Package, Tag, Sparkles, CloudOff } from "lucide-react"
 import { Sheet, Btn, useC } from "../ui"
@@ -23,12 +24,13 @@ const blank = (tv?: number): PrestaInput => ({ libelle: "", description: "", cat
 /** Formulaire de prestation (création, modification, ou « enregistrer cette ligne comme prestation »). */
 export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?: Partial<PrestaInput>; id?: string; onDone: (p?: Prestation) => void; onCancel: () => void; title?: string }) {
   const { s, desk } = useC(), lib = usePrestations(), taux = tauxDef(s.settings.tarifs?.tauxHoraire)
-  const [v, setV] = useState<PrestaInput>({ ...blank(), ...initial } as PrestaInput), [busy, setBusy] = useState(false), [err, setErr] = useState("")
+  const [v, setV] = useState<PrestaInput>({ ...blank(), ...initial } as PrestaInput), [busy, setBusy] = useState(false), [err, setErr] = useState(""), [tried, setTried] = useState(false)
   const up = (p: Partial<PrestaInput>) => { setV(x => ({ ...x, ...p })); setErr("") }
   const setType = (t: LineKind) => up({ type: t, unite: t === "mo" ? "h" : t === "fft" ? "forfait" : v.unite === "h" || v.unite === "forfait" ? "u" : v.unite, duree_h: t === "mo" ? v.duree_h ?? 1 : v.duree_h })
   const cats = [...new Set(lib.items.map(x => x.categorie).filter(Boolean))]
   const price = prestaPrice(v, taux), marge = v.cout_achat != null && v.type !== "mo" ? r2(price - v.cout_achat) : null
   const save = async () => {
+    setTried(true)
     if (!v.libelle.trim()) { setErr("Donnez un nom à la prestation."); return }
     if (v.type !== "mo" && !(v.prix_unitaire >= 0)) { setErr("Indiquez un prix."); return }
     setBusy(true)
@@ -49,7 +51,7 @@ export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?:
       <div className={`grid gap-2 ${id ? "grid-cols-[52px_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]"}`}>{id ? <Btn aria-label="Supprimer la prestation" disabled={busy} onClick={del} className="!px-0"><Trash2 size={16} strokeWidth={1.6} /></Btn> : <Btn disabled={busy} onClick={onCancel} className="w-full">Annuler</Btn>}<Btn primary c={TEAL} disabled={busy} className="w-full" onClick={save}>{busy ? "Enregistrement…" : id ? "Enregistrer" : "Ajouter à mes prestations"}</Btn></div>
     </div>}>
     <div className="space-y-4">
-      <label className="block"><L>Libellé</L><input autoFocus={desk} className={field + " !h-11 text-[15px]"} placeholder="Ex. Pose de ballon d'eau chaude" value={v.libelle} maxLength={200} onChange={e => up({ libelle: e.target.value })} /></label>
+      <label className="block"><L>Libellé</L><input autoFocus={desk} className={field + " !h-11 text-[15px]"} placeholder="Ex. Pose de ballon d'eau chaude" value={v.libelle} maxLength={200} onChange={e => up({ libelle: e.target.value })} onBlur={() => { if (tried && !v.libelle.trim()) setErr("Donnez un nom à la prestation.") }} /></label>
       <label className="block"><L>Description <span className="text-white/30">· facultatif, imprimée sous le libellé</span></L><textarea className={field + " !h-20 resize-none py-2.5 leading-5"} placeholder="Détail des travaux compris" value={v.description} maxLength={1000} onChange={e => up({ description: e.target.value })} /></label>
       <div><L>Type</L><Seg label="Type de prestation" value={v.type} onChange={setType} opts={[["mo", "À l'heure"], ["fo", "Fourniture"], ["fft", "Forfait"]]} /></div>
       {v.type === "mo" ? <div className="grid grid-cols-2 gap-3">
@@ -66,7 +68,7 @@ export function PrestaForm({ initial, id, onDone, onCancel, title }: { initial?:
       <div><L>TVA</L><Seg label="Taux de TVA" value={v.tva == null ? "def" : String(v.tva)} onChange={x => up({ tva: x === "def" ? null : Number(x) })} opts={[["def", "Défaut"], ["5.5", "5,5 %"], ["10", "10 %"], ["20", "20 %"]]} />
         {v.tva == null && <span className="mt-1.5 block px-0.5 text-[12.5px] text-white/40">Défaut = {fmtN(s.settings.tva)} %, le taux de vos réglages</span>}</div>
       {v.type === "mo" && v.taux_horaire == null && taux == null && <p className="px-1 text-[12.5px] text-[#FFB340]">Aucun taux horaire dans vos réglages : indiquez-en un ici.</p>}
-      {err && <div role="alert" className="rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{err}</div>}
+      <AnimatePresence initial={false}>{err ? <motion.div key={err} role="alert" data-form-err initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ height: LIST, opacity: { duration: .16 } }} className="overflow-hidden"><div className="rounded-[14px] bg-[#FF453A]/12 px-4 py-3 text-[13px] text-[#FF9B96]">{err}</div></motion.div> : null}</AnimatePresence>
     </div>
   </Sheet>
 }

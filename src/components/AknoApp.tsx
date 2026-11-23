@@ -66,7 +66,7 @@ import { billingHidden, isNative, webOrigin } from "../lib/native"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
 import MobileNav, { type CreateKind } from "./nav/MobileNav"
-import { PUSH, SNAP, TAB, idle, lazyPage } from "../lib/motion"
+import { CROSSFADE, PUSH, SNAP, TAB, TOAST, idle, lazyPage } from "../lib/motion"
 import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
 import ModalSheet from "./sheet/ModalSheet"
 import { SwipeRow, askConfirm, ConfirmHost } from "./form/SwipeRow"
@@ -425,14 +425,46 @@ const monthGrid = (x: string) => { const d = dd(x), first = iso(new Date(d.getFu
 const cap = (w: string) => w[0].toUpperCase() + w.slice(1)
 const LONG = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 const H0 = 7, H1 = 21
-function TimeGrid({ days, evs, onEv, onSlot }: { days: string[]; evs: Ev[]; onEv: (e: Ev) => void; onSlot: (d: string, h: number) => void }) {
-  const { desk } = useC(), c = A.ag.c, HH = desk ? 56 : 52, one = days.length === 1
+
+/** update84 · semaines en carrousel (scroll-snap, transform GPU) : un coup de doigt change de semaine sans saccade. */
+function WeekSlider({ cur, evs, onEv, onSlot, onWeek }: { cur: string; evs: Ev[]; onEv: (e: Ev) => void; onSlot: (d: string, h: number) => void; onWeek: (d: string) => void }) {
+  const mon = monOf(cur)
+  const weeks = [addDays(mon, -7), mon, addDays(mon, 7)]
+  const sc = useRef<HTMLDivElement>(null)
+  const timer = useRef(0)
+  const go = useRef(onWeek); go.current = onWeek
+  const curRef = useRef(cur); curRef.current = cur
+  useLayoutEffect(() => {
+    const el = sc.current
+    if (!el) return
+    const prev = el.style.scrollBehavior
+    el.style.scrollBehavior = "auto"
+    el.scrollLeft = el.clientWidth
+    el.style.scrollBehavior = prev
+  }, [cur])
+  const settle = () => {
+    const el = sc.current
+    if (!el || !el.clientWidth) return
+    const i = Math.round(el.scrollLeft / el.clientWidth)
+    if (i === 0) go.current(weeks[0])
+    else if (i === 2) go.current(weeks[2])
+    else { el.style.scrollBehavior = "auto"; el.scrollLeft = el.clientWidth }
+  }
+  return <div data-week-slider onScroll={() => { window.clearTimeout(timer.current); timer.current = window.setTimeout(settle, 90) }} ref={sc}>
+    {weeks.map(w => <div key={w} data-week-slide>
+      <TimeGrid fit days={Array.from({ length: 7 }, (_, i) => addDays(w, i))} evs={evs} onEv={onEv} onSlot={onSlot} />
+    </div>)}
+  </div>
+}
+function TimeGrid({ days, evs, onEv, onSlot, fit }: { days: string[]; evs: Ev[]; onEv: (e: Ev) => void; onSlot: (d: string, h: number) => void; fit?: boolean }) {
+  const { desk } = useC(), c = A.ag.c, HH = desk ? 56 : 48, one = days.length === 1
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => { ref.current?.scrollTo({ top: Math.max(0, (Math.min(8, NOW - 1) - H0) * HH) }) }, [])
   const hours = Array.from({ length: H1 - H0 }, (_, i) => H0 + i)
   const wk = (d: string) => (dd(d).getDay() + 6) % 7 >= 5
+  const tight = !desk && !one
   return <div className="overflow-hidden rounded-[16px] border border-white/[.05] bg-black/40">
-    <div className={one ? "" : "overflow-x-auto"}><div style={{ minWidth: one ? undefined : desk ? 0 : 580 }}>
+    <div className={one || fit || desk ? "" : "overflow-x-auto"}><div style={{ minWidth: one || fit || desk ? undefined : 580 }}>
       {!one && <div className="flex border-b border-white/[.06]"><div className="w-14 shrink-0" />{days.map(d => { const td = d === TODAY; return <div key={d} className={`flex flex-1 flex-col items-center py-3 ${wk(d) ? "opacity-45" : ""}`}><span className="text-[11px] font-medium uppercase tracking-[.06em] text-white/40">{DAYS[(dd(d).getDay() + 6) % 7].slice(0, 3)}</span><span className={`mt-1 flex h-8 w-8 items-center justify-center rounded-full text-[16px] ${td ? "font-semibold text-white" : "text-white/85"}`} style={td ? { background: c } : {}}>{dd(d).getDate()}</span></div> })}</div>}
       <div ref={ref} className="relative overflow-y-auto" style={{ maxHeight: desk ? "calc(100dvh - 300px)" : 560 }}>
         <div className="relative flex" style={{ height: (H1 - H0) * HH }}>
@@ -440,8 +472,10 @@ function TimeGrid({ days, evs, onEv, onSlot }: { days: string[]; evs: Ev[]; onEv
           {days.map(d => { const list = evs.filter(e => e.date === d)
             return <div key={d} className={`relative flex-1 border-l border-white/[.06] ${wk(d) ? "bg-white/[.015]" : ""}`} onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onSlot(d, Math.floor(H0 + (e.clientY - r.top) / HH * 2) / 2) }}>
               {hours.map(h => <div key={h} className="border-t border-white/[.05] first:border-t-0" style={{ height: HH }} />)}
-              {list.map(e => { const past = e.date < TODAY || (e.date === TODAY && e.start + e.dur <= NOW); const col = kindColor(e.kind); return <button key={e.id} data-kind={e.kind || "rdv"} onClick={x => { x.stopPropagation(); onEv(e) }} aria-label={`${e.name} · ${e.topic} · ${hh(e.start)}`} className={`absolute left-1 right-1 overflow-hidden rounded-[10px] px-2 py-1.5 text-left transition hover:brightness-125 ${past ? "opacity-50" : ""} ${wk(d) ? "opacity-60" : ""}`} style={{ top: (e.start - H0) * HH + 1, height: Math.max(22, e.dur * HH - 3), background: `${col}24`, boxShadow: `inset 3px 0 0 ${col}` }}>
-                <div className="truncate text-[12.5px] font-semibold leading-tight" style={{ color: col }}>{e.name}</div>{e.dur * HH > 34 && <div className="truncate text-[11.5px] leading-tight text-white/55">{e.topic} · {hh(e.start)}</div>}</button> })}
+              {list.map(e => { const past = e.date < TODAY || (e.date === TODAY && e.start + e.dur <= NOW); const col = kindColor(e.kind); return <button key={e.id} data-kind={e.kind || "rdv"} onClick={x => { x.stopPropagation(); onEv(e) }} aria-label={`${e.name} · ${e.topic} · ${hh(e.start)}`} className={`absolute overflow-hidden rounded-[8px] text-left transition hover:brightness-125 ${tight ? "left-0.5 right-0.5 px-1 py-0.5" : "left-1 right-1 px-2 py-1.5"} ${past ? "opacity-50" : ""} ${wk(d) ? "opacity-60" : ""}`} style={{ top: (e.start - H0) * HH + 1, height: Math.max(22, e.dur * HH - 3), background: `${col}24`, boxShadow: `inset 3px 0 0 ${col}` }}>
+                <div className={`font-semibold leading-[1.15] ${tight ? "truncate text-[11px]" : "truncate text-[12.5px] leading-tight"}`} style={{ color: col }}>{e.name}</div>
+                {e.topic ? <div className={`text-white/55 ${tight ? "line-clamp-2 text-[10px] leading-[1.2]" : e.dur * HH > 34 ? "truncate text-[11.5px] leading-tight" : "hidden"}`}>{e.topic}</div> : null}
+              </button> })}
               {d === TODAY && NOW >= H0 && NOW <= H1 && <div className="pointer-events-none absolute -left-px right-0 z-10" style={{ top: (NOW - H0) * HH }}><span className="absolute -left-[5px] -top-[4.5px] h-[9px] w-[9px] rounded-full bg-[#FF453A]" /><div className="h-[1.5px] bg-[#FF453A]" /></div>}
             </div> })}
         </div></div></div></div></div>
@@ -483,7 +517,7 @@ function AgCal() {
   const view = v === "a" ? <YearGrid cur={cur} evs={evs} onMonth={f => { setCur(f); setV("m") }} />
     : v === "m" ? <MonthGrid cur={cur} evs={evs} onDay={x => { setCur(x); setV("j") }} />
     : v === "e" ? <TeamView date={cur} evs={evs} onEv={onEv} onAssign={(ev, employeId) => { const id = String(ev.id).split("~")[0]; set(x => ({ ...x, events: x.events.map(y => y.id === id ? { ...y, employeId: employeId || undefined } : y) })); toast("Assignation mise à jour") }} onSlot={(emp, h) => modal({ kind: "rdv", data: { date: cur, start: h, employeId: emp } })} />
-    : v === "s" ? <TimeGrid days={wkD} evs={evs} onEv={onEv} onSlot={onSlot} />
+    : v === "s" ? (desk ? <TimeGrid days={wkD} evs={evs} onEv={onEv} onSlot={onSlot} /> : <WeekSlider cur={cur} evs={evs} onEv={onEv} onSlot={onSlot} onWeek={setCur} />)
     : <TimeGrid days={[cur]} evs={evs} onEv={onEv} onSlot={onSlot} />
   const strip = v === "j" && <div className="mb-4 grid grid-cols-7 gap-1">{wkD.map(x => { const on = x === cur, td = x === TODAY, n = evs.filter(e => e.date === x).length, we = (dd(x).getDay() + 6) % 7 >= 5
     return <button key={x} onClick={() => setCur(x)} className={`flex flex-col items-center gap-1 rounded-[14px] py-2 transition-colors ${on ? "bg-white/[.08]" : "hover:bg-white/[.04]"} ${we && !on ? "opacity-50" : ""}`}><span className="text-[11px] font-medium uppercase text-white/40">{DAYS[(dd(x).getDay() + 6) % 7].slice(0, 1)}</span><span className={`flex h-8 w-8 items-center justify-center rounded-full text-[15px] ${on || td ? "font-semibold" : "text-white/80"}`} style={on ? { background: td ? c : "#fff", color: td ? "#fff" : "#000" } : td ? { color: c } : {}}>{dd(x).getDate()}</span><span className="h-[4px] w-[4px] rounded-full" style={{ background: n ? c : "transparent" }} /></button> })}</div>
@@ -715,11 +749,18 @@ function DevFac() {
   useEffect(() => { setList(null) }, [mode])
   const dv = useDevisView(own && mode === "dev", () => setList("dev")), fv = useFacturesView(() => setList("fac")), v = mode === "dev" ? dv : fv, o = mode === "dev" ? fv : dv
   useEffect(() => { if (own) rememberDocMode(mode) }, [mode, own])
-  if (list) {
-    const cur = list === "dev" ? dv : fv
-    return <DocAllPage title={cur.allTitle} onBack={() => setList(null)}>{cur.all}</DocAllPage>
-  }
-  return <Shell k="dev" fig={v.fig} sub={v.sub} actions={v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alt={{ key: mode === "dev" ? "fac" : "dev", actions: o.actions, children: o.body }}>{v.body}</Shell>
+  const reduce = useReducedMotion()
+  const curAll = list === "dev" ? dv : fv
+  return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+    <motion.div className="flex min-h-0 min-w-0 flex-1 flex-col" initial={false} animate={!reduce && list ? { x: "-28%", opacity: .85 } : { x: 0, opacity: 1 }} transition={reduce ? { duration: .16 } : PUSH} style={{ pointerEvents: list ? "none" : undefined }}>
+      <Shell k="dev" fig={v.fig} sub={v.sub} actions={v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alt={{ key: mode === "dev" ? "fac" : "dev", actions: o.actions, children: o.body }}>{v.body}</Shell>
+    </motion.div>
+    <AnimatePresence>
+      {list && <motion.div key="doc-all" data-doc-list-push className="absolute inset-0 z-20 flex flex-col bg-black" initial={reduce ? { opacity: 0 } : { x: "100%" }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "100%" }} transition={reduce ? { duration: .16 } : PUSH}>
+        <DocAllPage title={curAll.allTitle} onBack={() => setList(null)}>{curAll.all}</DocAllPage>
+      </motion.div>}
+    </AnimatePresence>
+  </div>
 }
 function DocSwitch({ mode, onPick }: { mode: "dev" | "fac"; onPick?: (m: "dev" | "fac") => void }) {
   const navigate = useNavigate(), { desk } = useC(), timer = useRef(0)
@@ -731,12 +772,11 @@ function DocSwitch({ mode, onPick }: { mode: "dev" | "fac"; onPick?: (m: "dev" |
     timer.current = window.setTimeout(() => { const cur = location.pathname.split("/")[1]; if ((cur === "devis" || cur === "factures") && location.pathname !== url) startTransition(() => navigate(url + location.search, { replace: true })) }, 380)
   }
   const items: ["dev" | "fac", string, string][] = [["dev", "Devis", "/devis"], ["fac", "Factures", "/factures"]]
-  // update67 : une seule pilule qui glisse en ressort (plus de layoutId, qui sautait quand la page était défilée)
+  // update84 : pastille layoutId sous l'onglet actif (tablist non transformé)
   return <div role="tablist" aria-label="Devis ou factures" className={`relative grid h-11 grid-cols-2 rounded-full bg-white/[.07] p-1 ${desk ? "w-[280px]" : "mx-auto w-full max-w-[340px]"}`}>
-    <motion.span aria-hidden data-doc-pill className="absolute bottom-1 left-1 top-1 w-[calc(50%-4px)] rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,.10)]" style={{ background: `linear-gradient(180deg, ${A.dev.c}55, ${A.dev.c}33)` }}
-      initial={false} animate={{ x: mode === "fac" ? "100%" : "0%" }} transition={SNAP} />
     {items.map(([id, l, url]) => { const on = mode === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => { if (!on) pick(id, url) }}
       className={`relative rounded-full text-[15px] font-semibold outline-none transition-colors duration-200 [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-white/40 ${on ? "text-white" : "text-white/55 hover:text-white/80"}`}>
+      {on && <motion.span layoutId="akno-doc-pill" aria-hidden data-doc-pill className="absolute inset-0 rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,.10)]" style={{ background: `linear-gradient(180deg, ${A.dev.c}55, ${A.dev.c}33)` }} transition={SNAP} />}
       <span className="relative">{l}</span></motion.button> })}
   </div>
 }
@@ -1390,8 +1430,6 @@ const ORDER: Partial<Record<string, number>> = { rec: 0, ag: 1, ch: 2, dev: 3, e
 const isPushP = (p: string) => p === "set" || p === "rel"
 type PT = { kind: "fade" | "push" | "pop"; dir: number }
 const OPA = { duration: .24, ease: [.22, 1, .36, 1] as const }
-/** update70 · fondu enchaîné des onglets : court et sans déplacement (la page entrante, opaque, se pose sur l'ancienne) */
-const TAB_FADE = { duration: .18, ease: [.25, .1, .25, 1] as const }
 /* update69 · Pages conservées (Réception, Agenda, Chantiers, Devis | Factures) : une fois ouvertes (ou préparées au repos),
    elles restent montées et sont seulement masquées. Changer d'onglet ne recrée donc plus la page : aucun rendu lourd au
    moment du tap, la carte des chantiers n'est pas recréée, chaque onglet garde sa position de défilement.
@@ -1443,13 +1481,11 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
       pt.current = !desk && isPushP(b) && !isPushP(a) ? { kind: "push", dir: 1 } : !desk && isPushP(a) && !isPushP(b) ? { kind: "pop", dir: -1 } : { kind: "fade", dir: (ORDER[b] ?? 9) >= (ORDER[a] ?? 9) ? 1 : -1 }
       fromSet.current = false
     }
-    // update71 · mobile : Réglages / Relance s'ouvrent et se ferment aussi en fondu court sur place (plus de glissement des
-    // deux pages pendant le retour, qui coupait l'écran et faisait un effet bizarre)
-    if (!desk) pt.current = { kind: "fade", dir: 1 }
+    // update84 · navbar (rec/ag/ch/dev) : crossfade 180 ms. Relance / Réglages / sous-pages : push iOS.
     prev.current = b
   }
   const run = useRef<{ token: number; anims: { stop: () => void }[]; from: string | null }>({ token: 0, anims: [], from: null })
-  const rest = (el: HTMLElement | undefined, hide: boolean) => { if (!el) return; el.style.transform = ""; el.style.opacity = ""; el.style.boxShadow = ""; el.style.zIndex = hide ? "0" : "1"; el.style.visibility = hide ? "hidden" : "" }
+  const rest = (el: HTMLElement | undefined, hide: boolean) => { if (!el) return; el.style.transform = ""; el.style.opacity = ""; el.style.boxShadow = ""; el.style.willChange = "auto"; el.style.zIndex = hide ? "0" : "1"; el.style.visibility = hide ? "hidden" : "" }
   const drop = (k: string) => { if (!KEEP.has(k) && k !== cur.current) setSlots(l => l.includes(k) && k !== cur.current ? l.filter(x => x !== k) : l) }
   useLayoutEffect(() => {
     const from = shown.current, to = pkey
@@ -1465,26 +1501,25 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
     const reduce = prefersReduced()
     const zIn = t.kind === "pop" && !reduce ? "1" : "2", zOut = zIn === "2" ? "1" : "2"
     // état de départ posé immédiatement (aucune image de la nouvelle page à sa place finale avant l'animation)
-    const fromIn: Record<string, string> = reduce ? { opacity: "0" } : t.kind === "push" ? { transform: "translateX(100%)" } : t.kind === "pop" ? { transform: "translateX(-28%)", opacity: ".55" } : { opacity: "0" }
-    elIn.style.visibility = ""; elIn.style.zIndex = zIn; elIn.style.transform = fromIn.transform || ""; elIn.style.opacity = fromIn.opacity || ""
+    const dx = t.dir >= 0 ? 10 : -10
+    const fromIn: Record<string, string> = reduce ? { opacity: "0" } : t.kind === "push" ? { transform: "translateX(100%)" } : t.kind === "pop" ? { transform: "translateX(-28%)", opacity: ".55" } : { opacity: "0", transform: `translateX(${dx}px)` }
+    elIn.style.visibility = ""; elIn.style.zIndex = zIn; elIn.style.transform = fromIn.transform || ""; elIn.style.opacity = fromIn.opacity || ""; elIn.style.willChange = "transform, opacity"
     if (!reduce && (t.kind === "push")) elIn.style.boxShadow = PAGE_SHADOW
-    if (elOut) { elOut.style.visibility = ""; elOut.style.zIndex = zOut; if (!reduce && t.kind === "pop") elOut.style.boxShadow = PAGE_SHADOW }
+    if (elOut) { elOut.style.visibility = ""; elOut.style.zIndex = zOut; elOut.style.willChange = "transform, opacity"; if (!reduce && t.kind === "pop") elOut.style.boxShadow = PAGE_SHADOW }
     const xT = t.kind === "fade" ? TAB : PUSH
     // lancement à l'image suivante : la page entrante est mise en page avant que l'horloge de l'animation parte
     const raf = requestAnimationFrame(() => {
       if (run.current.token !== token) return
       const list: any[] = []
-      if (reduce) list.push(animate(elIn, { opacity: [0, 1] }, { duration: .26, ease: [.22, 1, .36, 1] }))
+      if (reduce) { list.push(animate(elIn, { opacity: [0, 1] }, { duration: .26, ease: [.22, 1, .36, 1] })); if (elOut) list.push(animate(elOut, { opacity: [1, 0] }, { duration: .2 })) }
       else if (t.kind === "push") { list.push(animate(elIn, { x: ["100%", "0%"] }, xT)); if (elOut) list.push(animate(elOut, { x: ["0%", "-28%"], opacity: [1, .55] }, { x: xT, opacity: xT })) }
       else if (t.kind === "pop") { list.push(animate(elIn, { x: ["-28%", "0%"], opacity: [.55, 1] }, { x: xT, opacity: xT })); if (elOut) list.push(animate(elOut, { x: ["0%", "100%"] }, xT)) }
-      // update70 · onglets : remplacement sur place, fondu court (≈180 ms), sans glissement ni chevauchement décalé (façon Revolut)
-      else list.push(animate(elIn, { opacity: [0, 1] }, TAB_FADE))
-      // opacité finale posée tout de suite (l'animation à images-clés explicites prime pendant qu'elle tourne) : sur WebKit, la fin
-      // de l'animation laissait réapparaître l'opacité de départ une image avant le nettoyage → éclair de l'ancienne page
-      elIn.style.opacity = ""
+      // update84 · onglets navbar : crossfade 180 ms + léger translate, les deux pages restent visibles (KEEP monté)
+      else { list.push(animate(elIn, { opacity: [0, 1], x: [dx, 0] }, CROSSFADE)); if (elOut) list.push(animate(elOut, { opacity: [1, 0], x: [0, -dx] }, CROSSFADE)) }
       run.current.anims = list
       Promise.all(list.map(a => a.finished ?? a)).then(() => {
         if (run.current.token !== token) return
+        elIn.style.opacity = "1"; elIn.style.transform = "none"
         rest(elIn, false); if (elOut && from !== cur.current) { rest(elOut, true); drop(from) }
         run.current.anims = []; run.current.from = null
       }, () => {})
@@ -1613,7 +1648,7 @@ function AknoApp() {
     <UpgradeHost />
     <ConfirmHost />
     <AnimatePresence>{pushNote && <motion.div key={pushNote.k} role="status" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} onClick={() => { const raw = pushNote.url || "/reception"; let slug = "reception"; try { const path = raw.startsWith("http") ? new URL(raw).pathname : raw; slug = path.replace(/^\//, "").split("/")[0] || "reception" } catch { /* */ } navigate(`/${slugOf(SLUG[slug] || "rec")}`, { replace: true }); setPushNote(null) }} className={`fixed left-1/2 z-[70] w-[calc(100vw-32px)] max-w-[420px] -translate-x-1/2 cursor-pointer rounded-[20px] border border-white/[.1] bg-[#1C1C1F]/95 px-4 py-3 shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${desk ? "top-6" : "top-[max(12px,env(safe-area-inset-top))]"}`}><div className="text-[15px] font-semibold tracking-[-0.02em]">{pushNote.title}</div>{pushNote.body && <div className="mt-1 text-[13px] leading-5 text-white/70">{pushNote.body}</div>}</motion.div>}</AnimatePresence>
-    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/95 py-2 pl-3 text-[14px] shadow-[0_20px_40px_-10px_rgba(0,0,0,.9)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(94px+max(var(--sab)-10px,12px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : toastT.info ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/[.12] text-white/85"><Clock size={13} strokeWidth={2.2} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
+    <AnimatePresence>{toastT && <motion.div key={toastT.k} role="status" data-toast initial={{ opacity: 0, y: 16, scale: .96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: .98 }} transition={TOAST} className={`fixed left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 ${toastT.err ? "max-w-[min(520px,calc(100vw-32px))] rounded-[20px]" : "whitespace-nowrap rounded-full"} border border-white/[.08] bg-[#1C1C1F]/90 py-2 pl-3 text-[14px] shadow-[0_16px_40px_-8px_rgba(0,0,0,.72),0_2px_8px_rgba(0,0,0,.35)] backdrop-blur-xl ${toastT.undo ? "pr-2" : "pr-4"} ${desk ? "bottom-8" : "bottom-[calc(94px+max(var(--sab)-10px,12px))]"}`}>{toastT.err ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FF453A]/20 text-[#FF7A72]"><X size={14} strokeWidth={2.4} /></span> : toastT.info ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/[.12] text-white/85"><Clock size={13} strokeWidth={2.2} /></span> : <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30D158]/20 text-[#30D158]"><Check size={14} strokeWidth={2.2} /></span>}<span className={toastT.err ? "whitespace-normal py-0.5 leading-5" : "truncate"}>{toastT.t}</span>{toastT.undo && <button onClick={() => { toastT.undo?.(); setToastT({ t: "Action annulée", k: Date.now() }) }} className="h-8 shrink-0 rounded-full bg-white/10 px-3 text-[13px] font-semibold hover:bg-white/15">Annuler</button>}</motion.div>}</AnimatePresence>
   </div></MotionConfig></C.Provider>
 }
 

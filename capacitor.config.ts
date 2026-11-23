@@ -15,6 +15,8 @@ const config: CapacitorConfig = {
   plugins: {
     SplashScreen: { launchShowDuration: 1500, launchAutoHide: false, backgroundColor: "#000000", showSpinner: false, androidScaleType: "CENTER_CROP", splashFullScreen: true, splashImmersive: false },
     StatusBar: { style: "LIGHT", backgroundColor: "#00000000", overlaysWebView: true },
+    /* update84 · le WebView ne doit pas redimensionner le layout : --kb (visualViewport) suit le clavier. Plugin optionnel. */
+    Keyboard: { resize: "none" },
   },
 }
 

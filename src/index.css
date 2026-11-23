@@ -271,8 +271,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: man
 .ig > .ig-row, .ig > * > .ig-row, .ig .ig-row { position: relative; }
 .ig .ig-row + .ig-row::before, .ig > * + * > .ig-row:first-child::before, .ig > * + .ig-row::before, .ig > :not(:first-child) > div > .ig-row:first-child::before { content: ""; position: absolute; left: 16px; right: 0; top: 0; height: 1px; transform: scaleY(.5); transform-origin: top; background: rgba(255, 255, 255, .16); pointer-events: none; }
 /* barre du bas des éditeurs : s'efface quand le clavier est ouvert (pas de saut de mise en page) */
-.kb-hide { transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .18s ease; }
-.kb-open .kb-hide, .sheet-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; visibility: hidden; }
+.kb-hide { transition: transform .28s cubic-bezier(.32, .72, 0, 1), opacity .2s ease; will-change: auto; }
+.kb-open .kb-hide, .sheet-open .kb-hide { transform: translateY(110%); opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .kb-hide { transition: none; } }
 /* update80 · repli CSS si l'orientation n'a pas pu être verrouillée (Safari) */
 html.akno-portrait-only::after {
@@ -354,3 +354,72 @@ input.akno-dt, select.akno-dt {
 
 /* update73 · listes déroulantes compactes (unité, TVA) : flèche discrète collée au texte, mêmes marges que les autres champs */
 select.sel { -webkit-appearance: none; appearance: none; padding-right: 28px !important; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-opacity='.45' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 12px; }
+
+
+/* update84 · fluide 120 fps : --kb interpolé, touch, press, listes, snap */
+@property --kb {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+.kb-follow {
+  transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0);
+}
+.kb-follow-pad {
+  padding-bottom: var(--kb, 0px);
+}
+.kb-ease .kb-follow {
+  transition: transform .28s cubic-bezier(.2, .8, .2, 1);
+}
+.kb-ease .kb-follow-pad {
+  transition: padding-bottom .28s cubic-bezier(.2, .8, .2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-follow, .kb-follow-pad, .kb-ease .kb-follow, .kb-ease .kb-follow-pad { transition: none; }
+}
+
+[data-week-slider] {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+[data-week-slider]::-webkit-scrollbar { display: none; }
+[data-week-slide] {
+  flex: 0 0 100%;
+  width: 100%;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+}
+
+html, body, button, a, [role="button"], [role="tab"], [data-press], [data-hit], [data-qa] {
+  -webkit-tap-highlight-color: transparent;
+}
+button, a, [role="button"], [role="tab"], [data-press], [data-hit], [data-qa], [data-create-btn] {
+  touch-action: manipulation;
+}
+
+.is-pressed {
+  transform: scale(0.97);
+  opacity: .88;
+  transition: transform 80ms ease, opacity 80ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-pressed { transform: none; }
+}
+
+[data-list-item] { content-visibility: auto; contain-intrinsic-size: auto 72px; }
+[data-list-item][data-exiting] { content-visibility: visible; }
+
+.ch-carousel {
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scroll-padding-inline: 28px;
+  -webkit-overflow-scrolling: touch;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ch-carousel { scroll-behavior: auto; }
+}

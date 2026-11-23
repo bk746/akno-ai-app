@@ -236,7 +236,7 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
         {draft ? <div key="dr" className="px-4">{draftCard}</div>
           : stateCard ? <motion.div key="st" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="pointer-events-auto px-4">{stateCard}</motion.div>
             : <motion.div key="car" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <div ref={sc} className="ch-carousel pointer-events-auto flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-7" style={{ touchAction: "pan-x" }} aria-roledescription="carrousel" aria-label="Chantiers">
+              <div ref={sc} className="ch-carousel pointer-events-auto flex snap-x snap-mandatory snap-always gap-2.5 overflow-x-auto scroll-smooth px-7" style={{ touchAction: "pan-x" }} aria-roledescription="carrousel" aria-label="Chantiers">
                 {list.map((c, i) => <motion.div key={c.id} data-ch={c.id} aria-roledescription="diapositive" aria-label={`${i + 1} sur ${list.length}`} className="w-[calc(100%-6px)] shrink-0 snap-center snap-always py-1"
                   onPanEnd={(_, p) => { if (p.offset.y < -36 && Math.abs(p.offset.y) > Math.abs(p.offset.x) * 1.2) openSheet(c.id) }}>
                   <ChCard c={c} team={team(c)} active={c.id === sel} onOpen={() => openSheet(c.id)} />

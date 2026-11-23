@@ -22,6 +22,7 @@ import Modeles, { type Modele } from "./Modeles"
 import { ClientRow, ContactSheet, DisclosureRow, IGroup, IRow, IToggleRow, Pill, Reveal, ival } from "../form/grouped"
 import { createPortal } from "react-dom"
 import ModalSheet from "../sheet/ModalSheet"
+import { askConfirm } from "../form/SwipeRow"
 
 export type EditorReq = { initial?: Devis; prefill?: { client?: string; objet?: string; amount?: number; phone?: string; addr?: string; email?: string; parentId?: string } }
 export type CtInfo = { name: string; phone?: string; email?: string; addr?: string }
@@ -123,9 +124,23 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, cli
   const close = async () => {
     if (st === "dirty" || st === "saving" || st === "error") {
       const ok = await saveNow()
-      if (!ok && (idRef.current || canCreate(docRef.current)) && !confirm(`Le devis n'est pas enregistré${err ? ` (${err})` : ""}.\nFermer quand même ? Le brouillon reste gardé sur cet appareil.`)) return
+      if (!ok && (idRef.current || canCreate(docRef.current))) {
+        askConfirm({
+          title: "Fermer le devis ?",
+          text: `Le devis n'est pas enregistré${err ? ` (${err})` : ""}. Fermer quand même ? Le brouillon reste gardé sur cet appareil.`,
+          confirmLabel: "OK", cancelLabel: "Annuler",
+          onConfirm: () => onClose(),
+        })
+        return
+      }
     } else if (st === "new" && (doc.client.trim() || doc.items.length) && !canCreate(doc)) {
-      if (!confirm("Ce devis n'est pas encore enregistré : il faut un client et au moins une ligne.\nFermer quand même ? Le brouillon reste gardé sur cet appareil.")) return
+      askConfirm({
+        title: "Fermer le devis ?",
+        text: "Ce devis n'est pas encore enregistré : il faut un client et au moins une ligne. Fermer quand même ? Le brouillon reste gardé sur cet appareil.",
+        confirmLabel: "OK", cancelLabel: "Annuler",
+        onConfirm: () => onClose(),
+      })
+      return
     }
     onClose()
   }

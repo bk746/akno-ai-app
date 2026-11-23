@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { BellRing, Download, FileCode2, FileText, Plus, Receipt, Send, ShieldCheck, Trash2 } from "lucide-react"
-import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, Tg, inp, tx, useC } from "../ui"
+import { AMBER, Btn, Card, Chip, F, GREEN, GREY, Ic, List, RED, Row, Sheet, SheetSkeleton, Tg, inp, tx, useC } from "../ui"
 import { SwipeRow, askConfirm } from "../form/SwipeRow"
 import { factureSwipeAction } from "../../lib/docDelete"
-import { refreshFactures } from "../../lib/facturesLite"
+import { factureState, refreshFactures } from "../../lib/facturesLite"
 import { supabase } from "../../lib/supabase"
 import { api } from "../../lib/accountApi"
 import { CO, e2, missingLegal } from "../../lib/devisDoc"
@@ -120,17 +120,22 @@ export default function FacturesSheet({ close, openId, startNew, clients = [] }:
   }
   // Entrée directe (une facture ou « Nouvelle ») : jamais la liste « Toutes / À traiter / Payées » en dessous.
   if (!fromList.current) {
-    return <Sheet title="Facture" sub={err || "Chargement…"} c="#FFFFFF" onClose={close}><div className={tx.cap}>{err || "Chargement…"}</div></Sheet>
+    const want = open || openId
+    const cached = want ? factureState().rows?.find(x => x.id === want || (x.numero && x.numero === want)) : undefined
+    const title = cached ? (cached.numero || "Brouillon") : "Facture"
+    const sub = err || cached?.client_nom || ""
+    return <Sheet title={title} sub={sub} c="#FFFFFF" onClose={close}>{err ? <div className={tx.cap}>{err}</div> : <SheetSkeleton />}</Sheet>
   }
   const unpaid = (rows || []).filter(x => (x.statut === "emise" || x.statut === "envoyee") && x.type !== "avoir")
   const list = (rows || []).filter(x => tab === "all" ? true : tab === "paid" ? x.statut === "payee" : late(x) || rels.some(r => r.facture_id === x.id) || x.statut === "brouillon")
-  return <Sheet title="Factures" sub={rows ? `${unpaid.length} à encaisser · ${e2(unpaid.reduce((a, x) => a + due(x), 0))}` : "Chargement…"} c="#FFFFFF" onClose={close} footer={<Btn primary className="w-full" data-factures-new onClick={newBlank}><Plus size={18} />Nouvelle facture</Btn>}>
-    <div data-factures-list hidden />{rels.length > 0 && <Card className="mb-4 p-4"><div className="flex items-center gap-2 text-[15px] font-medium"><BellRing size={17} className="text-[#FFB340]" />{rels.length} relance{rels.length > 1 ? "s" : ""} d'impayé à valider</div><div className={`mt-1 ${tx.cap}`}>Akno prépare le texte, vous relisez et envoyez. Rien ne part sans vous.</div></Card>}
+  return <Sheet title="Factures" sub={rows ? `${unpaid.length} à encaisser · ${e2(unpaid.reduce((a, x) => a + due(x), 0))}` : ""} c="#FFFFFF" onClose={close} footer={<Btn primary className="w-full" data-factures-new onClick={newBlank}><Plus size={18} />Nouvelle facture</Btn>}>
+    <div data-factures-list hidden />
+    {!rows && !err ? <SheetSkeleton /> : <>{rels.length > 0 && <Card className="mb-4 p-4"><div className="flex items-center gap-2 text-[15px] font-medium"><BellRing size={17} className="text-[#FFB340]" />{rels.length} relance{rels.length > 1 ? "s" : ""} d'impayé à valider</div><div className={`mt-1 ${tx.cap}`}>Akno prépare le texte, vous relisez et envoyez. Rien ne part sans vous.</div></Card>}
     <div className="mb-3 flex gap-2">{([["all", "Toutes"], ["todo", "À traiter"], ["paid", "Payées"]] as const).map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`h-9 rounded-full px-4 text-[14px] font-medium ${tab === k ? "bg-white text-black" : "bg-white/[.07] text-white/70"}`}>{l}</button>)}</div>
     <List empty="Aucune facture. Créez-en une depuis un devis accepté ou avec « Nouvelle facture »." I={Receipt}>
       {list.map((x, i) => { const [l, c] = late(x) ? ["En retard", RED] : ST[x.statut] || ST.brouillon; const act = factureSwipeAction(x); return <SwipeRow key={x.id} id={"sheet-" + x.id} first={!i} label={act === "avoir" ? "Avoir" : "Supprimer"} tone={act === "avoir" ? "accent" : "danger"} onAction={() => swipeFacture(x)}><Row className="!rounded-none" first={!i} lead={<Ic I={x.type === "avoir" ? FileText : Receipt} />} t={`${label(x)} ${x.numero || "(brouillon)"}`} s={x.client_nom || "Client à renseigner"} r={e2(x.type === "avoir" ? -Number(x.total_ttc) : due(x))} rs={<Chip c={c}>{rels.some(r => r.facture_id === x.id) ? "Relance à valider" : l}</Chip>} onClick={() => setOpen(x.id)} label={`Ouvrir ${x.numero || "brouillon"}`} /></SwipeRow> })}
     </List>
-    {err && <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{err}</p>}
+    {err && <p className="mt-3 px-1 text-[13px] text-[#FF9B96]">{err}</p>}</>}
   </Sheet>
 }
 const FRow = ({ l, v, strong }: { l: string; v: string; strong?: boolean }) => <div className={`ig-row flex min-h-11 items-center justify-between gap-3 py-2 pl-4 pr-4 ${strong ? "text-[16px] font-semibold" : "text-[15px]"}`}><span className={strong ? "text-white" : "text-white/55"}>{l}</span><span className={`tabular-nums ${strong ? "text-white" : "text-white/85"}`}>{v}</span></div>

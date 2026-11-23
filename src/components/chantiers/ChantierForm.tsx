@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import ModalSheet from "../sheet/ModalSheet"
 import { Check, Loader2, MapPin, Search, Trash2, Users } from "lucide-react"
-import { ClientRow, ContactSheet, IGroup, IRow, IToggleRow, Reveal, ival, type Contact } from "../form/grouped"
+import { ClientRow, ContactSheet, IGroup, IRow, IToggleRow, Reveal, SuggestPop, ival, type Contact } from "../form/grouped"
 import { Seg } from "../devis/fields"
 import { PinMap } from "./ChMap"
 import EquipeSheet from "./EquipeSheet"
@@ -104,9 +104,9 @@ export default function ChantierForm({ req, clients, devis, desk, onClose, onSav
                 onKeyDown={e => { if (e.key === "Enter" && sugg[0]) { e.preventDefault(); choose(sugg[0]) } }} />
               {geoBusy && <Loader2 size={15} className="shrink-0 animate-spin text-white/40" />}
             </div>
-            <Reveal open={addrFocus && sugg.length > 0}><div role="listbox" aria-label="Adresses proposées">
+            <SuggestPop show={addrFocus && sugg.length > 0} label="Adresses proposées">
               {sugg.map(p => <button key={p.label} type="button" role="option" aria-selected={false} onMouseDown={e => e.preventDefault()} onClick={() => choose(p)} className="ig-row flex w-full items-center gap-3 py-2.5 pl-4 pr-3 text-left active:bg-white/[.05]"><MapPin size={16} className="shrink-0 text-[#7EA6FF]" /><span className="min-w-0 flex-1 truncate text-[15.5px]">{p.label}</span></button>)}
-            </div></Reveal>
+            </SuggestPop>
             {d.lat != null && d.lng != null && <div className="ig-row relative h-[190px] overflow-hidden"><PinMap lat={d.lat} lng={d.lng} onMove={movePin} /></div>}
           </IGroup>
           <IGroup title="Dates" id="cf-g-dt">
