@@ -21,9 +21,9 @@ T("sans config : pas de bloc INFOS DE L'ARTISAN ni replace", !/INFOS DE L'ARTISA
 T("sans config : vouvoiement", /Français, vouvoiement/.test(s0.instructions))
 T("métier « Plombier » → « plomberie » dans le prompt", /entreprise de plomberie à Lyon/.test(s0.instructions) && metierActivite("Électricien") === "électricité")
 T("sans horaires : semaine 8 h–18 h", /Horaires : semaine, 8 h–18 h/.test(s0.instructions))
-T("accueil standard avec IA + RGPD", /Plomberie Bouzerda, bonjour, je suis l'assistante IA\. Cet appel peut être enregistré/.test(welcomeLine(p0)))
+T("accueil standard court + enregistrement", /Plomberie Bouzerda, bonjour, je vous écoute\. Appel enregistré\./.test(welcomeLine(p0)))
 
-T("accueil personnalisé : « ! » conservé, IA + RGPD ajoutés", welcomeLine(mergeProfile({ ...base, accueil: "Plomberie Bouzerda, bonjour !" })) === "Plomberie Bouzerda, bonjour ! Je suis l'assistante IA de Plomberie Bouzerda. Cet appel peut être enregistré pour le suivi de votre demande.")
+T("accueil personnalisé : « ! » conservé, enregistrement seul", welcomeLine(mergeProfile({ ...base, accueil: "Plomberie Bouzerda, bonjour !" })) === "Plomberie Bouzerda, bonjour ! Appel enregistré.")
 
 // 3) Config complète
 const cfg = {
@@ -48,17 +48,17 @@ T("session : replace (prononciation)", (s1 as { replace?: Record<string, string>
 T("prompt : présentation", ins.includes("Entreprise familiale depuis 1998"))
 T("prompt : prestation + prix indicatif + durée", /- Recherche de fuite — prix indicatif : dès 89 € — durée habituelle : 1 h/.test(ins))
 T("prompt : prestations dans le champ métier", /Champ : plomberie — prestations listées par l'artisan : Recherche de fuite, Débouchage/.test(ins))
-T("prompt : prix indicatifs autorisés seulement s'ils existent", /frais fixes listés plus bas et les prix indicatifs des prestations/.test(ins))
-T("prompt : zone personnalisée", /Zone : Lyon et 20 km autour\./.test(ins))
+T("prompt : prix indicatifs autorisés seulement s'ils existent", /tarifs listés plus bas et les prix indicatifs des prestations/.test(ins))
+T("prompt : zone personnalisée", /Zone : Lyon et 20 km autour \(hors zone/.test(ins))
 T("prompt : horaires réels", /Horaires : du lundi au jeudi de 8 h à 18 h, le vendredi de 8 h à 17 h 30, le samedi de 9 h à 12 h, fermé dimanche/.test(ins))
 T("prompt : urgences, interdits, FAQ, consignes", /rappel sous 30 minutes/.test(ins) && /À NE JAMAIS PROMETTRE[\s\S]*jour même/.test(ins) && /Q : Le devis est-il gratuit \?\nR : Oui/.test(ins) && /contrat d'entretien/.test(ins))
-T("prompt : règles de sécurité prioritaires", /la sécurité \(gaz, 112\)[^\n]*priment toujours/.test(ins) && /GRDF au 0 800 47 33 33/.test(ins))
-T("prompt : bloc artisan avant FIN D'APPEL, contexte téléphone à la fin", ins.indexOf("INFOS DE L'ARTISAN") < ins.indexOf("FIN D'APPEL") && ins.trimEnd().endsWith("CONTEXTE TÉLÉPHONE : test"))
+T("prompt : consignes gaz / GRDF en urgence", /GRDF 0 800 47 33 33/.test(ins) && /la sécurité \(gaz, 112\)[^\n]*priment toujours/.test(ins))
+T("prompt : save_call avant au revoir, contexte téléphone à la fin", /save_call AVANT de dire au revoir/.test(ins) && ins.trimEnd().endsWith("CONTEXTE TÉLÉPHONE : test"))
 T("même prompt app / relais (fonction partagée)", buildInstructions(p1) === ins.replace("\n\nCONTEXTE TÉLÉPHONE : test", ""))
 
 // 4) Tutoiement
 const p2 = mergeProfile({ ...base, reception: normalizeConfig({ tutoiement: true }) })
-T("tutoiement : ton + consigne + accueil", /Français, tutoiement/.test(buildInstructions(p2)) && /TON CHOISI PAR L'ARTISAN : tutoiement/.test(buildInstructions(p2)) && /Comment puis-je t'aider \?/.test(welcomeLine(p2)))
+T("tutoiement : ton + accueil", /Français, tutoiement/.test(buildInstructions(p2)) && /je t'écoute\. Appel enregistré\./.test(welcomeLine(p2)))
 
 // 5) Robustesse (données en base corrompues / hostiles)
 const bad = normalizeConfig({ voice: "voix-inventee", speed: 9, services: "x", faq: [null, 3], presentation: "a\u0000b".repeat(1000) })
