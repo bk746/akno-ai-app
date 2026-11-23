@@ -3,6 +3,7 @@ import { getAuthUser, supabase } from "./supabase"
 import { setCO } from "./devisDoc"
 import { loadRole } from "./role"
 import { mergeTarifs, tarifsEqual, type Tarifs } from "./tarifs"
+import { formatPhonePairs } from "./phone"
 export type Call = { id: string; name: string; topic: string; time: string; note: string; urgent: boolean; callback: boolean; rappelAt?: string; addr?: string; suite?: string; transcript?: [string, string][]; dur?: string; tag?: string; besoin?: string; urgence?: string; at?: string; short?: string; day?: string; phone?: string; email?: string; recording?: string; createdAt?: string; wantDevis?: boolean }
 export type EvKind = "chantier" | "rdv" | "visite" | "sav" | "urgence" | "absence"
 export type Ev = { id: string; date: string; start: number; dur: number; name: string; topic: string; addr?: string; created: number; ai?: boolean; callId?: string; phone?: string; notes?: string; kind?: EvKind; absenceKind?: "conges" | "maladie" | "formation"; employeId?: string; clientId?: string; devisId?: string; factureId?: string; chantierId?: string; status?: "prevu" | "en_route" | "arrive" | "termine" | "annule"; lat?: number; lng?: number; rrule?: string; parentId?: string; email?: string; notesTerrain?: string; arrivedAt?: string; departedAt?: string; travelMin?: number; photos?: string[]; signature?: string; virtual?: boolean }
@@ -94,7 +95,7 @@ type Row = Record<string, any>
 /** Numéros réels des appelants, par nom (utilisé par les boutons Appeler / SMS). */
 export const PHONES = new Map<string, string>()
 const toCall = (r: Row): Call => {
-  const d = new Date(r.created_at), today = isoDay(d) === isoDay(new Date()), yest = isoDay(d) === isoDay(new Date(Date.now() - 864e5)), name = r.nom_client || r.telephone_client || "Inconnu", note = r.resume || r.besoin_detail || r.notes || ""
+  const d = new Date(r.created_at), today = isoDay(d) === isoDay(new Date()), yest = isoDay(d) === isoDay(new Date(Date.now() - 864e5)), name = /^client inconnu$/i.test(String(r.nom_client || "").trim()) ? (r.telephone_client ? `Client inconnu · ${formatPhonePairs(r.telephone_client)}` : "Client inconnu") : r.nom_client || r.telephone_client || "Inconnu", note = r.resume || r.besoin_detail || r.notes || ""
   if (r.telephone_client) PHONES.set(name, String(r.telephone_client).replace(/\s/g, ""))
   const u = String(r.urgence || "").toLowerCase(), sec = r.duration || 0
   const tr = typeof r.transcript === "string" ? r.transcript.split("\n").map((l: string) => l.match(/^\s*(Agent|User|Client|Akno)\s*:\s*(.*)$/i)).filter((m: RegExpMatchArray | null): m is RegExpMatchArray => !!m).map((m: RegExpMatchArray) => [/agent|akno/i.test(m[1]) ? "Akno" : "Client", m[2]] as [string, string]) : undefined

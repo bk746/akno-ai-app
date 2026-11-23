@@ -30,7 +30,7 @@ export const norm = (s: string) => (s || "").normalize("NFD").replace(/[\u0300-\
 export const ficheKey = (n: string) => (n || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^(m\.|mme|mr|monsieur|madame)\s+/, "").replace(/\s+/g, " ").trim()
 /** Téléphone comparable : 9 derniers chiffres (06…, +33 6…, 0033 6… donnent la même clé). "" si trop court. */
 export const phoneKey = (p?: string | null) => { const d = (p || "").replace(/\D/g, ""); return d.length >= 9 ? d.slice(-9) : "" }
-const realName = (n?: string | null) => { const t = (n || "").trim(); return !!t && !/^(inconnu|client|appelant)$/i.test(t) && !/^[+\d\s.()-]+$/.test(t) }
+const realName = (n?: string | null) => { const t = (n || "").trim(); return !!t && !/^(inconnu|client|appelant|client inconnu\b.*)$/i.test(t) && !/^[+\d\s.()-]+$/.test(t) }
 /** Ville d'une adresse française (« …, 74960 Cran-Gevrier » → « Cran-Gevrier »). */
 export const cityOf = (a?: string | null) => { const m = (a || "").match(/\b\d{5}\s+([^,]+?)\s*(?:,|$)/); return m ? m[1].trim() : "" }
 /** Adresse sur deux lignes : rue / « CP Ville ». */

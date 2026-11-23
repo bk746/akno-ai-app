@@ -1,5 +1,6 @@
 /* update74 · Réglages rapides de la réceptionniste (voix, IA on/off, mode de décrochage).
    update75 · Renvoi depuis le portable de l'artisan (codes GSM, confirmation, copie si iOS bloque tel:).
+              IA désactivée : « Couper aussi le renvoi <opérateur> » ; réactivée : « Réactiver le renvoi » ; « Vérifier le renvoi » (*#61#).
    update76 · Activation autonome de la ligne (achat du numéro), puis étape de renvoi.
    Même source : artisans.reception_config, via useProfile().save. */
 import { useState, type ChangeEvent } from "react"
@@ -8,7 +9,7 @@ import { A, Btn, Card, Chev, Chip, GREY, Row, Sheet, Tg, tx, useC } from "../ui"
 import { useProfile } from "../../lib/profile"
 import { api, reloadAccount, useAccount } from "../../lib/accountApi"
 import { DEFAULT_VOICE, VOICES, normalizeConfig, serializeConfig, voiceInfo, type PickupMode, type ReceptionConfig } from "../../lib/voice/receptionist"
-import { FORWARD_DELAY_SEC, OPERATORS, forwardSteps, intendedForward, nationalFr, type ForwardOperator } from "../../lib/voice/forward"
+import { FORWARD_DELAY_SEC, OPERATORS, forwardCheck, forwardSteps, intendedForward, nationalFr, type ForwardOperator } from "../../lib/voice/forward"
 import { enablePush, pushNeedsActivation } from "../../lib/push"
 
 
@@ -157,12 +158,21 @@ function ForwardCard({ c, num, busy, onPatch }: { c: ReceptionConfig; num: strin
   const { toast } = useC()
   const want = intendedForward(c.enabled, c.pickup)
   const dest = nationalFr(num)
-  const steps = forwardSteps(c.operator, num || dest, c.forwardApplied, want)
+  const steps = forwardSteps(c.operator, num || dest, c.forwardApplied, want, c.pickup)
+  const check = forwardCheck(c.pickup)
   const ok = c.forwardApplied === want
   const copy = async (code: string) => {
-    try { await navigator.clipboard.writeText(code); toast("Code copié. Compose-le, puis appuie sur Appeler.") }
+    try { await navigator.clipboard.writeText(code); toast("Code copié. Colle-le dans Téléphone puis appelle.") }
     catch { toast("Copie impossible. Compose le code à la main.") }
   }
+  // iOS peut refuser d'ouvrir un lien tel: qui contient # ou * : le code reste affiché, avec Copier.
+  const paste = (id: string, code: string) => <div data-forward-fallback={id} className="mt-3 rounded-[14px] bg-white/[.05] p-3">
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1 select-all break-all font-mono text-[15px] tracking-wide" data-forward-code={id}>{code}</div>
+      <button type="button" aria-label={`Copier ${code}`} onClick={() => void copy(code)} className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white/[.1] px-4 text-[14px] font-medium"><Copy size={15} strokeWidth={1.8} />Copier</button>
+    </div>
+    <p className={`mt-2 ${tx.cap}`}>Si le bouton n'ouvre pas l'appel : copie le code. Colle-le dans Téléphone puis appelle.</p>
+  </div>
   return <div data-forward className="mt-5">
     <div className={`mb-2 px-1 ${tx.cap}`}>Renvoi depuis votre portable</div>
     <Card className="p-4">
@@ -178,20 +188,22 @@ function ForwardCard({ c, num, busy, onPatch }: { c: ReceptionConfig; num: strin
       {steps.map(s => <div key={s.id} data-forward-step={s.id} className="mt-3 rounded-[16px] bg-white/[.05] p-3">
         <div className="text-[13.5px] font-medium">{s.label}</div>
         <p className={`mt-1 ${tx.cap}`}>{s.hint}</p>
-        <div className="mt-2 select-all font-mono text-[15px] tracking-wide" data-forward-code={s.id}>{s.code}</div>
-        <div className="mt-3 flex gap-2">
-          <a href={s.tel} data-forward-tel={s.id} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-full bg-white text-[14px] font-medium text-black">Composer le code</a>
-          <button type="button" aria-label={`Copier ${s.code}`} onClick={() => void copy(s.code)} className="flex h-11 items-center gap-1.5 rounded-full bg-white/[.1] px-4 text-[14px] font-medium"><Copy size={15} strokeWidth={1.8} />Copier</button>
-        </div>
-        <p className={`mt-2 ${tx.cap}`}>Si le bouton n'ouvre pas l'appel, copie le code, compose-le, puis appuie sur Appeler.</p>
+        <a href={s.tel} data-forward-tel={s.id} className="mt-3 flex h-11 items-center justify-center gap-2 rounded-full bg-white px-4 text-[14px] font-medium text-black"><Phone size={15} strokeWidth={2} />{s.cta}</a>
+        {paste(s.id, s.code)}
       </div>)}
       {!ok && (dest || want === "off") && steps.length > 0 && <div data-forward-confirm className="mt-4">
-        <div className="text-[14px] font-medium">Renvoi activé ?</div>
+        <div className="text-[14px] font-medium">{want === "off" ? "Renvoi coupé ?" : "Renvoi activé ?"}</div>
         <div className="mt-2 flex gap-2">
           <Btn primary className="h-11 flex-1" disabled={busy} onClick={() => onPatch({ forwardApplied: want }, want === "off" ? "Renvoi annulé" : "Renvoi confirmé")}>Oui</Btn>
           <Btn className="h-11 flex-1" disabled={busy} onClick={() => toast("Compose le code sur ton portable, puis reviens ici.")}>Pas encore</Btn>
         </div>
       </div>}
+      <div data-forward-check className="mt-4 border-t border-white/[.06] pt-4">
+        <div className="text-[13.5px] font-medium">Un doute sur le renvoi ?</div>
+        <p className={`mt-1 ${tx.cap}`}>Ton téléphone affiche si le renvoi est actif, et vers quel numéro.</p>
+        <a href={check.tel} data-forward-tel="check" className="mt-3 flex h-11 items-center justify-center gap-2 rounded-full bg-white/[.1] px-4 text-[14px] font-medium"><Phone size={15} strokeWidth={2} />Vérifier le renvoi</a>
+        {paste("check", check.code)}
+      </div>
     </Card>
   </div>
 }

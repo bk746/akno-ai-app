@@ -1,6 +1,6 @@
 /* update75 · Codes de renvoi GSM selon le mode et l'opérateur, lien tel:, risque de boucle.
    Usage : npm run test:forward (aucun appel réseau). */
-import { DEFAULT_OPERATOR, FORWARD_DELAY_SEC, destForCodes, forwardLoopRisk, forwardSteps, intendedForward, nationalFr, telHref } from "../src/lib/voice/forward"
+import { DEFAULT_OPERATOR, FORWARD_DELAY_SEC, destForCodes, forwardCheck, forwardLoopRisk, forwardSteps, intendedForward, nationalFr, telHref } from "../src/lib/voice/forward"
 import { normalizeConfig, serializeConfig } from "../src/lib/voice/receptionist"
 
 let ok = 0, ko = 0
@@ -16,9 +16,23 @@ T("IA coupée → intention off", intendedForward(false, "direct") === "off" && 
 T("IA on + à ma place → direct", intendedForward(true, "direct") === "direct")
 T("IA on + si je ne décroche pas → fallback", intendedForward(true, "fallback") === "fallback")
 
-const offO = forwardSteps("orange", dest, "direct", "off")
-T("Orange, IA coupée : un seul code ##002#", offO.length === 1 && offO[0].code === "##002#")
-T("lien tel: encode chaque dièse en %23", offO[0].tel === "tel:%23%23002%23")
+// Réceptionniste désactivée : « Couper aussi le renvoi Orange » avec le code du renvoi qui était en place.
+const offO = forwardSteps("orange", dest, "", "off", "fallback")
+T("Orange, IA désactivée (si je ne décroche pas) : un seul code ##61#", offO.length === 1 && offO[0].code === "##61#")
+T("bouton « Couper aussi le renvoi Orange »", offO[0].cta === "Couper aussi le renvoi Orange" && forwardSteps("sfr", dest, "", "off")[0].cta === "Couper aussi le renvoi SFR")
+T("lien tel: encode chaque dièse en %23", offO[0].tel === "tel:%23%2361%23")
+T("Orange, IA désactivée après un renvoi confirmé « si je ne décroche pas » : ##61#", forwardSteps("orange", dest, "fallback", "off", "direct")[0].code === "##61#")
+T("Orange, IA désactivée (à ma place) : ##21#", forwardSteps("orange", dest, "direct", "off")[0].code === "##21#" && forwardSteps("orange", dest, "", "off", "direct")[0].code === "##21#")
+T("renvoi déjà coupé et confirmé : aucun code", forwardSteps("orange", dest, "off", "off").length === 0)
+
+// Réceptionniste réactivée : « Réactiver le renvoi » avec **61*<numéro Akno>**10#.
+const onO = forwardSteps("orange", dest, "", "fallback", "fallback")
+T("Orange, IA réactivée : **61*<numéro Akno>**10#", onO.length === 1 && onO[0].code === `**61*${e164}**10#` && onO[0].tel === `tel:**61*${e164}**10%23`)
+T("bouton « Réactiver le renvoi »", onO[0].cta === "Réactiver le renvoi" && forwardSteps("orange", dest, "off", "direct")[0].cta === "Réactiver le renvoi")
+
+// « Vérifier le renvoi »
+T("vérifier le renvoi : *#61# (tel:*%2361%23)", forwardCheck().code === "*#61#" && forwardCheck("fallback").tel === "tel:*%2361%23")
+T("vérifier le renvoi immédiat : *#21#", forwardCheck("direct").code === "*#21#" && forwardCheck("direct").tel === "tel:*%2321%23")
 
 const dirO = forwardSteps("orange", dest, "off", "direct")
 T("Orange, à ma place : **21*+33…#", dirO.length === 1 && dirO[0].code === `**21*${e164}#` && dirO[0].tel === `tel:**21*${e164}%23`)
@@ -32,7 +46,7 @@ T(`SFR, si je ne décroche pas : *61*+33…**${FORWARD_DELAY_SEC}#`, forwardStep
 
 T("Bouygues, à ma place : *21*+33…#", forwardSteps("bouygues", dest, "off", "direct")[0].code === `*21*${e164}#`)
 T(`Bouygues, si je ne décroche pas : *61*+33…**${FORWARD_DELAY_SEC}#`, forwardSteps("bouygues", dest, "off", "fallback")[0].code === `*61*${e164}**${FORWARD_DELAY_SEC}#`)
-T("Bouygues, IA coupée : #002#", forwardSteps("bouygues", dest, "direct", "off")[0].code === "#002#")
+T("Bouygues, IA désactivée : #61# (ou #21# en renvoi immédiat)", forwardSteps("bouygues", dest, "", "off")[0].code === "#61#" && forwardSteps("bouygues", dest, "direct", "off")[0].code === "#21#")
 
 T("Free, à ma place : *21*+33…#", forwardSteps("free", dest, "off", "direct")[0].code === `*21*${e164}#`)
 T(`Free, si je ne décroche pas : **61*+33…**${FORWARD_DELAY_SEC}#`, forwardSteps("free", dest, "off", "fallback")[0].code === `**61*${e164}**${FORWARD_DELAY_SEC}#`)
@@ -41,7 +55,7 @@ const sw = forwardSteps("orange", dest, "direct", "fallback")
 T("passage à ma place → si je ne décroche pas : 2 étapes (annuler puis activer)", sw.length === 2 && sw[0].code === "##21#" && sw[1].code === `**61*${e164}**${FORWARD_DELAY_SEC}#`)
 T("déjà confirmé : aucun code à composer", forwardSteps("orange", dest, "fallback", "fallback").length === 0)
 T("sans numéro Akno, pas de code d'activation", forwardSteps("orange", "", "off", "direct").length === 0)
-T("sans numéro Akno, on peut quand même annuler", forwardSteps("orange", "", "direct", "off")[0].code === "##002#")
+T("sans numéro Akno, on peut quand même couper le renvoi", forwardSteps("orange", "", "direct", "off")[0].code === "##21#" && forwardSteps("orange", "", "", "off")[0].code === "##61#")
 T("opérateur par défaut = Orange", DEFAULT_OPERATOR === "orange")
 T("telHref laisse les étoiles, encode seulement #", telHref(`**21*${e164}#`) === `tel:**21*${e164}%23`)
 

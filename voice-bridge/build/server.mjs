@@ -576,28 +576,59 @@ function pickPhone(lines, fallbackFrom = "") {
   if (fb.length >= 11 && fb.startsWith("+")) return fb;
   return "";
 }
-function pickName(lines) {
-  const patts = [
-    /(?:je m['’]?appelle|mon nom est|c'est|je suis)\s+([A-ZÀ-ÖØ-Þ][\p{L}'-]+(?:\s+[A-ZÀ-ÖØ-Þ][\p{L}'-]+){0,2})/iu,
-    /(?:nom|prénom)\s*[,:]?\s*([A-ZÀ-ÖØ-Þ][\p{L}'-]+(?:\s+[A-ZÀ-ÖØ-Þ][\p{L}'-]+){0,2})/iu
-  ];
-  for (const l of lines) {
-    if (l.role !== "user") continue;
-    for (const p of patts) {
-      const m = l.text.match(p);
-      if (m?.[1] && m[1].length > 2 && !/^(oui|non|bonjour|merci)$/i.test(m[1])) return m[1].trim();
-    }
-  }
-  return "";
+var UNKNOWN_CLIENT = "Client inconnu";
+var isUnknownClient = (v) => /^(client inconnu|inconnue?|appelant|appel téléphonique|appel test)?$/i.test(String(v ?? "").trim());
+var NOT_A_NAME = new RegExp("^(?:client|cliente|inconnue?|anonyme|appelant|appelante|n\\/?a|non (?:communiqu|renseign|pr[\xE9e]cis|donn|fourni|identifi)\\p{L}*|pas (?:de nom|donn[\xE9e]|communiqu[\xE9e])|aucun|nom|pr[\xE9e]nom|monsieur|madame|m\\.|mme)$", "iu");
+function cleanClientName(raw) {
+  const s = String(raw ?? "").replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").replace(/^[\s,;:.\-–—]+|[\s,;:\-–—]+$/g, "").trim();
+  if (!s || s.length > 60) return "";
+  if (NOT_A_NAME.test(s) || isUnknownClient(s)) return "";
+  if (!new RegExp("\\p{L}{2}", "u").test(s)) return "";
+  if (/[?!…«»"()@]|\d{3}/.test(s)) return "";
+  const words = norm(s).split(" ");
+  if (words.length > 5) return "";
+  if (/^(c'est|c’est|cest|ce|je|j'|j’|il|elle|on|quel|quelle|quoi|oui|non|euh|heu|bonjour|bonsoir|allo|merci|pour|alors|ben|bah|voila)$/.test(words[0]) || words.some((w) => /^(est|suis|sais|pas|c'est|c’est|m'appelle|m’appelle)$/.test(w) && words.length > 2)) return "";
+  return s;
 }
-function pickAddress(lines) {
-  for (const l of [...lines].reverse()) {
-    const t = l.text;
-    if (/^\d+\s+(rue|avenue|boulevard|impasse|place|chemin|allée)/i.test(t) || /\d{5}\s+[A-Za-zÀ-ÿ]/.test(t)) return t.slice(0, 220);
-    const m = t.match(/(?:adresse|habite|situé)[^.]*?(\d+[^.]{8,80})/i);
-    if (m?.[1]) return m[1].trim();
+function cleanAddress(raw) {
+  let s = String(raw ?? "").replace(/\s+/g, " ").trim();
+  const spelled = s.search(new RegExp("(?:(?<![\\p{L}\\d'\u2019])\\p{L}[\\s,.\\-]+){3,}", "u"));
+  if (spelled > 0) {
+    const head = s.slice(0, spelled), dot = head.lastIndexOf(".");
+    s = dot > 5 ? head.slice(0, dot) : head;
   }
-  return "";
+  return s.replace(/[\s,;:.\-–—]+$/g, "").slice(0, 200);
+}
+var rdvParts = (iso) => {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "long", day: "2-digit", month: "2-digit", hour: "numeric", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
+  const g = (t) => parts.find((x) => x.type === t)?.value || "";
+  return { weekday: g("weekday"), day: g("day"), month: g("month"), hour: String(Number(g("hour"))), minute: g("minute") };
+};
+function rdvShort(iso) {
+  const p = rdvParts(iso);
+  return p ? `${p.weekday} ${p.day}/${p.month} \xE0 ${p.hour}h${p.minute === "00" ? "" : p.minute}` : "";
+}
+function rdvSpoken(iso) {
+  const p = rdvParts(iso);
+  return p ? `${p.weekday} \xE0 ${p.hour} h${p.minute === "00" ? "" : ` ${p.minute}`}` : "";
+}
+function closingLine(rdvIso) {
+  const when = rdvSpoken(rdvIso);
+  return `C'est not\xE9, rendez-vous confirm\xE9${when ? ` ${when}` : ""}. Merci, au revoir.`;
+}
+function rdvNote(rdvIso) {
+  const when = rdvShort(rdvIso);
+  return `Rendez-vous confirm\xE9${when ? ` ${when}` : ""}.`;
+}
+function sameUtterance(a, b) {
+  const x = norm(a).replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim(), y = norm(b).replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  if (!x || !y) return false;
+  let i = 0;
+  const short = Math.min(x.length, y.length);
+  while (i < short && x[i] === y[i]) i++;
+  return i === short || i >= Math.max(3, Math.ceil(short * 0.6));
 }
 function pickMotif(lines) {
   const user = lines.filter((l) => l.role === "user").map((l) => l.text).join(" ");
@@ -612,22 +643,19 @@ function pickSlot(lines) {
   return "";
 }
 function debriefFromTranscript(lines, from, booked) {
-  const nom = pickName(lines);
   const tel = pickPhone(lines, from);
   const email = pickEmail(lines);
-  const adresse = pickAddress(lines);
   const motif = pickMotif(lines) || "Demande d'intervention";
   const slot = pickSlot(lines);
   const rdv = booked?.start ? new Date(booked.start).toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : slot;
   const issue = booked ? `Rendez-vous confirm\xE9${rdv ? ` : ${rdv}` : ""}.` : /pris|indisponible|alternativ/i.test(lines.slice(-4).map((l) => l.text).join(" ")) ? "Cr\xE9neau demand\xE9 : \xE0 confirmer avec le client." : "\xC0 rappeler pour finaliser.";
-  const resume = [motif, tel ? `T\xE9l. ${tel}` : "", email ? `E-mail ${email}` : "", adresse ? `Adresse : ${adresse}` : "", rdv || slot ? `Cr\xE9neau : ${rdv || slot}` : "", issue].filter(Boolean).join(" \xB7 ").slice(0, 600);
-  const nom_client = nom || (tel ? tel : from ? "Appelant" : "Appel t\xE9l\xE9phonique");
+  const resume = [motif, tel ? `T\xE9l. ${tel}` : "", email ? `E-mail ${email}` : "", !booked && slot ? `Cr\xE9neau : ${slot}` : "", issue].filter(Boolean).join(" \xB7 ").slice(0, 600);
   const type_demande = /devis/i.test(norm(lines.map((l) => l.text).join(" "))) ? "devis" : "autre";
   return {
-    nom_client,
+    nom_client: UNKNOWN_CLIENT,
     telephone_client: tel || from || "",
     email_client: email,
-    adresse,
+    adresse: "",
     ville: "",
     motif,
     resume,
@@ -727,6 +755,8 @@ var SESSION_ACK_MS = Number(E.SESSION_ACK_MS || 2500);
 var PREAUTH_MS = 5e3;
 var MAX_PREOPEN = 6;
 var preopenPending = 0;
+var SAVE_DEFER_MS = Number(E.SAVE_DEFER_MS || 400);
+var rdvStatut = "rdv_confirme";
 var VOICE_ERR = /(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i;
 var log = (...a) => console.log((/* @__PURE__ */ new Date()).toISOString(), ...a);
 async function sb(path, init = {}) {
@@ -823,6 +853,14 @@ function handleCall(tw) {
   let bookFailed = null;
   let bookQueue = Promise.resolve();
   let lastBookKey = "";
+  let bookedClient = "", bookedAddr = "", bookedVille = "";
+  let savedNotes = "", savedRappel = false, savedCreneau = null, rdvSaved = false, linkedAppt = "";
+  let toolsRunning = 0, batchSaved = false, batchBookFailed = false, closingSaid = false;
+  const deferredTools = [];
+  let saving = null;
+  let deferTimer = null;
+  const userItems = /* @__PURE__ */ new Map();
+  let sttLogged = false;
   let firstAudioLogged = false;
   let slotsHintText = "";
   let voiceReverted = false;
@@ -845,47 +883,87 @@ function handleCall(tw) {
       preopenPending--;
     }
   };
-  async function upsertCall(fields) {
-    const row = { artisan_id: artisanId, twilio_call_sid: callSid, source: "ia_telephone", ...fields };
-    const out = await sb(`/rest/v1/calls?on_conflict=twilio_call_sid&select=id`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(row) });
+  async function writeCall(send, fields) {
+    let out = await send(fields);
+    if (!(Array.isArray(out) && out[0]?.id) && fields.statut === "rdv_confirme") {
+      out = await send({ ...fields, statut: "rdv_pris" });
+      if (Array.isArray(out) && out[0]?.id) {
+        rdvStatut = "rdv_pris";
+        log("[call] statut rdv_confirme refus\xE9 par la base \u2192 rdv_pris", "call", tag());
+      }
+    }
     const id = Array.isArray(out) && out[0]?.id;
     if (id) callId = Number(id);
+    return !!id;
+  }
+  async function upsertCall(fields) {
+    await writeCall((f) => sb(`/rest/v1/calls?on_conflict=twilio_call_sid&select=id`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ artisan_id: artisanId, twilio_call_sid: callSid, source: "ia_telephone", ...f }) }), fields);
     return callId;
   }
+  async function patchCall(fields) {
+    if (!callId) return !!await upsertCall(fields);
+    return writeCall((f) => sb(`/rest/v1/calls?id=eq.${callId}&select=id`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(f) }), fields);
+  }
+  async function linkAppointment() {
+    const appt = booked?.appointmentId;
+    if (!appt || !callId || linkedAppt === appt) return;
+    const out = await sb(`/rest/v1/appointments?id=eq.${appt}&select=id`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ call_id: callId }) });
+    if (Array.isArray(out) && out.length) linkedAppt = appt;
+    else log("[call] rendez-vous non reli\xE9 \xE0 la fiche d'appel", "call", tag());
+  }
+  const joinNotes = (...parts) => parts.map((x) => x.trim()).filter(Boolean).join(" \u2014 ") || null;
+  const rdvFields = () => ({
+    statut: rdvStatut,
+    rdv_date: booked.start,
+    rappel_souhaite: savedRappel,
+    rappel_creneau: savedRappel ? savedCreneau : null,
+    notes: joinNotes(savedNotes, rdvNote(booked.start))
+  });
+  async function reconcileRdv() {
+    if (!saved || !booked) return;
+    if (!rdvSaved && await patchCall(rdvFields())) rdvSaved = true;
+    await linkAppointment();
+  }
   async function saveCall(args) {
+    await bookQueue;
     const urgent = args.urgence === "urgent" || args.type_demande === "urgence";
-    let rappel = args.rappel_souhaite === true || args.rappel_souhaite == null && args.a_rappeler === true;
+    const rappelAsked = args.rappel_souhaite === true || args.rappel_souhaite == null && args.a_rappeler === true;
     const wantDevis = args.devis_demande === true || args.type_demande === "devis";
     let type = String(args.type_demande || "").trim() || "autre";
     if (wantDevis && type === "autre") type = "devis";
     const resume = String(args.resume || "").trim() || "Appel t\xE9l\xE9phonique re\xE7u par la r\xE9ceptionniste.";
     const unconfirmed = !booked && (args.rdv_pris === true || !!bookFailed);
-    if (unconfirmed) rappel = true;
+    const rappel = rappelAsked || unconfirmed;
     const noteRdv = unconfirmed ? `RDV demand\xE9 mais NON confirm\xE9${bookFailed ? ` (${bookFailed})` : ""} \u2014 rappeler le client pour le fixer.` : "";
+    savedNotes = String(args.notes || "").trim();
+    savedRappel = rappelAsked;
+    savedCreneau = String(args.rappel_creneau || "").trim() || null;
     const row = {
-      nom_client: String(args.nom_client || "").trim() || "Appel t\xE9l\xE9phonique",
+      nom_client: cleanClientName(args.nom_client) || bookedClient || UNKNOWN_CLIENT,
       telephone_client: String(args.telephone_client || "").trim() || from || null,
       motif: String(args.motif || "").trim() || args.type_demande || "Appel",
       besoin_detail: String(args.besoin_detail || "").trim() || null,
       resume,
       code_postal: String(args.code_postal || "").trim() || null,
-      ville: String(args.ville || "").trim() || null,
-      adresse: String(args.adresse || "").trim() || null,
+      ville: String(args.ville || "").trim() || bookedVille || null,
+      adresse: cleanAddress(args.adresse) || bookedAddr || null,
       type_demande: type,
       urgence: urgent ? "urgent" : "normal",
       email_client: String(args.email_client || "").trim() || null,
-      statut: rappel ? "a_rappeler" : booked ? "rdv_pris" : "renseigne",
+      // Rendez-vous créé → « rdv_confirme », même si l'IA a aussi coché le rappel (il reste dans rappel_souhaite).
+      statut: booked ? rdvStatut : rappel ? "a_rappeler" : "renseigne",
       rdv_date: booked?.start || null,
-      notes: [String(args.notes || "").trim(), noteRdv].filter(Boolean).join(" \u2014 ") || null,
-      rappel_souhaite: rappel,
-      rappel_creneau: rappel ? String(args.rappel_creneau || "").trim() || null : null,
+      notes: booked ? joinNotes(savedNotes, rdvNote(booked.start)) : joinNotes(savedNotes, noteRdv),
+      rappel_souhaite: booked ? rappelAsked : rappel,
+      rappel_creneau: (booked ? rappelAsked : rappel) ? savedCreneau : null,
       transcript: transcriptText(lines) || null,
       duration: Math.round((Date.now() - startedAt) / 1e3)
     };
     const id = await upsertCall(row);
     saved = true;
-    if (id && booked?.appointmentId) void sb(`/rest/v1/appointments?id=eq.${booked.appointmentId}`, { method: "PATCH", body: JSON.stringify({ call_id: id }) });
-    void akno("/api/notify", artisanId, { type: "call", client: row.nom_client, motif: row.motif, resume, besoin_detail: row.besoin_detail, call_id: id, rappel_souhaite: rappel, rappel_creneau: row.rappel_creneau, urgent });
+    rdvSaved = !!booked && !!id;
+    await linkAppointment();
+    void akno("/api/notify", artisanId, { type: "call", client: row.nom_client, telephone: row.telephone_client, motif: row.motif, resume, besoin_detail: row.besoin_detail, call_id: id, rdv_start: booked?.start || null, rappel_souhaite: row.rappel_souhaite, rappel_creneau: row.rappel_creneau, urgent });
     return { ok: true, call_id: id, message: wantDevis ? "Appel enregistr\xE9. Demande de devis not\xE9e \u2014 \xE0 g\xE9n\xE9rer depuis la fiche client." : "Appel enregistr\xE9 dans R\xE9ception." };
   }
   const bookSlotKey = (a) => `${String(a.date || "").trim()}|${String(a.heure || "").trim().toLowerCase().replace("h", ":")}`;
@@ -932,14 +1010,20 @@ function handleCall(tw) {
       booked = { start: start2, appointmentId: appointmentId || null };
       lastBookKey = key;
       bookFailed = null;
-      void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" \xE0 ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId });
+      bookedClient = cleanClientName(client);
+      bookedAddr = cleanAddress(args.adresse);
+      bookedVille = String(args.ville || "").trim();
+      if (saved) {
+        await reconcileRdv();
+        void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" \xE0 ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId });
+      }
       return { ok: true, appointment_id: appointmentId, confirmation: b.confirmation || `Rendez-vous confirm\xE9 pour ${client}.` };
     };
     const p = bookQueue.then(run, run);
     bookQueue = p.catch(() => void 0);
     return p;
   }
-  async function handleTool(ev) {
+  async function runTool(ev) {
     let result = { ok: false, error: "Outil inconnu." };
     try {
       const args = ev.arguments ? JSON.parse(ev.arguments) : {};
@@ -947,14 +1031,63 @@ function handleCall(tw) {
         const b = await akno("/api/booking", artisanId, { action: "slots", ...args });
         result = b.ok ? { ok: true, slots: b.slots || [], timezone: b.timezone } : { ok: false, reason: "technical", slots: [], error: b.error || "Agenda injoignable.", instruction: TECH_SLOTS };
       } else if (ev.name === "book_appointment") result = await book(args);
-      else if (ev.name === "save_call") result = await saveCall(args);
+      else if (ev.name === "save_call") {
+        const p = saveCall(args);
+        saving = p.catch(() => null);
+        result = await p;
+      }
     } catch (e) {
       log("[tool]", ev.name, e);
       result = { ok: false, error: "Erreur pendant l'op\xE9ration." };
     }
+    if (ev.name === "book_appointment" && !result.ok) batchBookFailed = true;
+    if (ev.name === "save_call" && result.ok) batchSaved = true;
     toXai({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(result) } });
+    toolsRunning--;
+    if (toolsRunning > 0) return;
+    const closing = batchSaved && !batchBookFailed && !!booked && !closingSaid;
+    batchSaved = false;
+    batchBookFailed = false;
+    if (closing) {
+      closingSaid = true;
+      toXai({ type: "conversation.item.create", item: { type: "force_message", role: "assistant", interruptible: false, content: [{ type: "output_text", text: closingLine(booked.start) }] } });
+      return;
+    }
     toXai({ type: "response.create" });
   }
+  const flushDeferredTools = () => {
+    if (deferTimer) {
+      clearTimeout(deferTimer);
+      deferTimer = null;
+    }
+    for (const ev of deferredTools.splice(0)) void runTool(ev);
+  };
+  function handleTool(ev) {
+    toolsRunning++;
+    if (ev.name !== "save_call") {
+      void runTool(ev);
+      return;
+    }
+    deferredTools.push(ev);
+    if (deferTimer) clearTimeout(deferTimer);
+    deferTimer = setTimeout(flushDeferredTools, SAVE_DEFER_MS);
+  }
+  const userLine = (itemId, text) => {
+    const known = itemId ? userItems.get(itemId) : void 0;
+    if (known) {
+      known.text = text;
+      return;
+    }
+    const last = lines[lines.length - 1];
+    if (last?.role === "user" && sameUtterance(last.text, text)) {
+      last.text = text;
+      if (itemId) userItems.set(itemId, last);
+      return;
+    }
+    const line2 = { role: "user", text };
+    lines.push(line2);
+    if (itemId) userItems.set(itemId, line2);
+  };
   const withBuiltinVoice = (p) => ({ ...p, reception: { ...normalizeConfig(p.reception), voice: DEFAULT_VOICE } });
   const applyProfile = (p) => {
     profile = voiceReverted ? withBuiltinVoice(p) : p;
@@ -1045,7 +1178,11 @@ function handleCall(tw) {
     }
     if (type === "conversation.item.input_audio_transcription.completed") {
       const t = String(ev.transcript || "").trim();
-      if (t) lines.push({ role: "user", text: t });
+      if (!sttLogged) {
+        sttLogged = true;
+        log("[stt] transcription appelant : item_id", ev.item_id ? "pr\xE9sent" : "absent", "call", tag());
+      }
+      if (t) userLine(String(ev.item_id || ""), t);
       return;
     }
     if (type === "response.output_audio_transcript.delta") {
@@ -1060,10 +1197,11 @@ function handleCall(tw) {
     }
     if (type === "response.done" || type === "response.output_audio.done") {
       greeting = false;
+      if (type === "response.done" && deferredTools.length) flushDeferredTools();
       return;
     }
     if (type === "response.function_call_arguments.done") {
-      void handleTool(ev);
+      handleTool(ev);
       return;
     }
     if (type === "error") {
@@ -1165,19 +1303,28 @@ function handleCall(tw) {
     const duration = Math.round((Date.now() - startedAt) / 1e3);
     try {
       await new Promise((r) => setTimeout(r, 750));
-      const inferred = debriefFromTranscript(lines, from, booked);
+      if (deferTimer) {
+        clearTimeout(deferTimer);
+        deferTimer = null;
+      }
+      const pendingSave = deferredTools.splice(0).filter((ev) => ev.name === "save_call").pop();
+      await Promise.race([bookQueue, new Promise((r) => setTimeout(r, 6e3))]);
+      if (saving) await Promise.race([saving, new Promise((r) => setTimeout(r, 6e3))]);
+      if (!saved && pendingSave) {
+        try {
+          await saveCall(pendingSave.arguments ? JSON.parse(pendingSave.arguments) : {});
+        } catch (e) {
+          log("[call] save_call au raccroch\xE9", e);
+        }
+      }
       if (!saved && duration > 4) {
-        await saveCall({ ...inferred, rdv_pris: !!booked, rappel_souhaite: !booked, type_demande: inferred.type_demande, urgence: "normal" });
+        const inferred = debriefFromTranscript(lines, from, booked);
+        await saveCall({ ...inferred, nom_client: bookedClient, adresse: bookedAddr, ville: bookedVille, rdv_pris: !!booked, rappel_souhaite: !booked, urgence: "normal" });
       } else if (saved) {
         const patch = { transcript: transcriptText(lines) || null, duration };
-        if (inferred.nom_client && inferred.nom_client !== "Appel t\xE9l\xE9phonique") patch.nom_client = inferred.nom_client;
-        if (inferred.resume && lines.length > 2) patch.resume = inferred.resume;
-        if (inferred.telephone_client) patch.telephone_client = inferred.telephone_client;
-        if (inferred.email_client) patch.email_client = inferred.email_client;
-        if (inferred.adresse) patch.adresse = inferred.adresse;
-        if (inferred.motif) patch.motif = inferred.motif;
-        if (booked?.start) patch.rdv_date = booked.start;
-        await upsertCall(patch);
+        if (booked && !rdvSaved) Object.assign(patch, rdvFields());
+        if (await patchCall(patch) && booked) rdvSaved = true;
+        await linkAppointment();
       }
       if (callId && rec.seconds > 1 && SB_URL && SB_KEY) {
         const path = `${artisanId}/${callId}.wav`;

@@ -101,7 +101,7 @@ async function main() {
       check("réglages natif : ligne Abonnement absente", !/\bAbonnement\b/.test(t))
       check("réglages natif : « Supprimer mon compte » présent", /Supprimer mon compte/.test(t))
       check("réglages natif : version affichée", t.includes(`Version ${pkg.version} (build ${pkg.buildNumber})`), t.match(/Version[^\n]*/)?.[0] || "")
-      check("réglages natif : notifications annoncées pour une prochaine version", /prochaine version de l'app/.test(t))
+      check("réglages natif : notifications annoncées comme pas encore disponibles dans l'app installée", /Pas encore dans l'app installée/.test(t))
       check("réglages natif : aucun prix d'abonnement", !/€\s*HT\s*\/|par mois|\/ mois|essai gratuit/i.test(t), (t.match(/.{0,40}€.{0,20}/g) || []).join(" | "))
       await page.evaluate(() => document.querySelector("[data-testid=app-version]")?.scrollIntoView({ block: "end" })); await page.waitForTimeout(400)
       await shot(page, "reglages-natif-bas-suppression-version")

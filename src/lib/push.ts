@@ -68,13 +68,30 @@ function publicKey() {
   return String(import.meta.env.VITE_VAPID_PUBLIC_KEY || "").trim()
 }
 
-async function persistSubscription(sub: PushSubscription) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+/** Enregistre l'abonnement push de cet appareil pour le compte connecté. Renvoie "" si c'est fait, sinon l'erreur à afficher.
+    Passe par le serveur : si l'appareil était déjà inscrit sous un autre compte (même endpoint), l'écriture directe
+    était refusée par la RLS sans rien dire, et le compte courant n'avait aucun appareil (aucune notification). */
+async function persistSubscription(sub: PushSubscription): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
+  if (!user) return "Connectez-vous pour activer les notifications."
   const json = sub.toJSON()
   const p256dh = json.keys?.p256dh || ""
   const auth = json.keys?.auth || ""
-  await supabase.from("push_subscriptions").upsert({
+  if (!sub.endpoint || !p256dh || !auth) return "Abonnement incomplet. Désactivez puis réactivez les notifications."
+  let serverError = ""
+  try {
+    const res = await fetch("/api/notify", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "subscribe", endpoint: sub.endpoint, p256dh, auth, ua: navigator.userAgent }),
+    })
+    const out = await res.json().catch(() => ({})) as { ok?: boolean; error?: string }
+    if (res.ok && out.ok) return ""
+    serverError = out.error || `Inscription refusée (HTTP ${res.status}).`
+  } catch { serverError = "Impossible de joindre le serveur de notifications." }
+  // Secours : écriture directe (suffit quand l'appareil n'a jamais été inscrit sous un autre compte).
+  const { error } = await supabase.from("push_subscriptions").upsert({
     artisan_id: user.id,
     user_id: user.id,
     endpoint: sub.endpoint,
@@ -83,11 +100,21 @@ async function persistSubscription(sub: PushSubscription) {
     keys: { p256dh, auth },
     ua: navigator.userAgent,
   }, { onConflict: "endpoint" })
+  return error ? serverError : ""
+}
+
+/** Abonnement push du navigateur (créé si besoin) puis inscription de l'appareil pour le compte connecté. */
+async function subscribeDevice(key: string): Promise<string> {
+  await registerPushWorker()
+  const reg = await navigator.serviceWorker.ready
+  let sub = await reg.pushManager.getSubscription()
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) })
+  return persistSubscription(sub)
 }
 
 export async function enablePush(): Promise<{ ok: boolean; error?: string }> {
-  // update70 · app native : notifications natives (APNs / FCM) prévues dans une prochaine version
-  if ((window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()) return { ok: false, error: "Les notifications arrivent dans une prochaine version de l'app." }
+  // update70 · app native : le push web n'existe pas dans l'app installée depuis un store (il faut APNs / FCM).
+  if ((window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()) return { ok: false, error: "Les notifications ne sont pas encore disponibles dans l'app installée. Sur iPhone, ouvre Akno dans Safari, ajoute-le à l'écran d'accueil et active-les depuis là." }
   if (isIos() && !isStandalone()) {
     return { ok: false, error: "Ajoute Akno à l’écran d’accueil depuis Safari" }
   }
@@ -95,15 +122,13 @@ export async function enablePush(): Promise<{ ok: boolean; error?: string }> {
   const key = publicKey()
   if (!key) return { ok: false, error: "Notifications non configurées." }
   const perm = await Notification.requestPermission()
-  if (perm !== "granted") return { ok: false, error: "Notifications bloquées par le navigateur." }
-  await registerPushWorker()
-  const reg = await navigator.serviceWorker.ready
-  let sub = await reg.pushManager.getSubscription()
-  if (!sub) {
-    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) })
+  if (perm !== "granted") return { ok: false, error: perm === "denied" ? "Notifications bloquées pour Akno. Autorise-les dans les réglages du téléphone (Réglages › Notifications › Akno), puis réessaie." : "Notifications non autorisées." }
+  try {
+    const error = await subscribeDevice(key)
+    return error ? { ok: false, error } : { ok: true }
+  } catch {
+    return { ok: false, error: "L'abonnement aux notifications a échoué sur cet appareil. Réessaie." }
   }
-  await persistSubscription(sub)
-  return { ok: true }
 }
 
 export async function disablePush() {
@@ -116,24 +141,22 @@ export async function disablePush() {
   }
 }
 
-export async function ensurePush() {
-  if (!pushSupported() || Notification.permission !== "granted") return
-  if (isIos() && !isStandalone()) return
+/** Au lancement et avant un test : réinscrit cet appareil pour le compte connecté (changement de compte, abonnement renouvelé). */
+export async function ensurePush(): Promise<string> {
+  if (!pushSupported() || Notification.permission !== "granted") return ""
+  if (isIos() && !isStandalone()) return ""
   const key = publicKey()
-  if (!key) return
-  try {
-    await registerPushWorker()
-    const reg = await navigator.serviceWorker.ready
-    let sub = await reg.pushManager.getSubscription()
-    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) })
-    await persistSubscription(sub)
-  } catch { /* ignore */ }
+  if (!key) return ""
+  try { return await subscribeDevice(key) } catch { return "L'abonnement aux notifications a échoué sur cet appareil." }
 }
 
 export async function sendTestNotification(): Promise<{ ok: boolean; sent?: number; error?: string }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
   if (!token) return { ok: false, error: "Non authentifié." }
+  // L'appareil est d'abord (ré)inscrit pour ce compte : un test ne doit pas échouer sur un abonnement resté sous un autre compte.
+  const subError = await ensurePush()
+  if (subError) return { ok: false, error: subError }
   try {
     const res = await fetch("/api/notify", {
       method: "POST",

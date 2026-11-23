@@ -32,8 +32,8 @@ try {
   check("le mode « À ma place » est proposé", await dlg.locator("[data-pickup=direct]").count() === 1)
   const codeFb = await dlg.locator("[data-forward-code=fallback]").textContent()
   const telFb = await dlg.locator("[data-forward-tel=fallback]").getAttribute("href")
-  check("mode par défaut : code Orange **61*0973057824*11# (si je ne décroche pas)", (codeFb || "").trim() === "**61*0973057824*11#", JSON.stringify(codeFb))
-  check("le lien tel: encode # en %23", telFb === "tel:**61*0973057824*11%23", String(telFb))
+  check("mode par défaut : code Orange **61*+33973057824**10# (si je ne décroche pas)", (codeFb || "").trim() === "**61*+33973057824**10#", JSON.stringify(codeFb))
+  check("le lien tel: encode # en %23", telFb === "tel:**61*+33973057824**10%23", String(telFb))
   check("le bouton Copier est proposé (repli iOS)", await dlg.getByRole("button", { name: /Copier/ }).count() >= 1)
 
   await dlg.locator("[data-pickup=direct]").click()
@@ -42,11 +42,11 @@ try {
   const last2 = saved2[saved2.length - 1]
   check("choisir « À ma place » enregistre pickup = direct", !!last2 && last2.body.reception_config.pickup === "direct", JSON.stringify(last2?.body?.reception_config))
   const codeDir = await dlg.locator("[data-forward-code=direct]").textContent()
-  check("à ma place : code Orange **21*0973057824*11#", (codeDir || "").trim() === "**21*0973057824*11#", JSON.stringify(codeDir))
+  check("à ma place : code Orange **21*+33973057824#", (codeDir || "").trim() === "**21*+33973057824#", JSON.stringify(codeDir))
 
-  await dlg.getByRole("button", { name: "Voix Celeste" }).click().catch(async () => {
-    // le libellé accessible est « Voix Celeste » via aria-label de la Row
-    await dlg.getByText("Celeste", { exact: true }).first().click()
+  // Voix par défaut : Ara (le libellé accessible de la ligne est « Voix Ara »).
+  await dlg.getByRole("button", { name: /^Voix Ara/ }).first().click({ timeout: 5000 }).catch(async () => {
+    await dlg.getByText("Ara", { exact: true }).first().click({ timeout: 5000 })
   })
   await page.waitForTimeout(400)
   const aurora = dlg.getByRole("radio", { name: "Voix Aurora" })
@@ -65,13 +65,32 @@ try {
   check("couper l'IA enregistre en base (reception_config.enabled = false)", !!last && last.body.reception_config.enabled === false, JSON.stringify(last?.body?.reception_config || writes.slice(before)))
   check("l'interrupteur passe à off", await ia.getAttribute("aria-checked") === "false")
   const codeOff = await dlg.locator("[data-forward-code=off]").textContent()
-  check("IA coupée : code d'annulation ##002#", (codeOff || "").trim() === "##002#", JSON.stringify(codeOff))
-  check("la confirmation « Renvoi activé ? » s'affiche", await dlg.locator("[data-forward-confirm]").count() === 1)
+  // Réceptionniste désactivée : on coupe le renvoi qui était en place (ici « à ma place » → ##21#).
+  check("IA coupée : code du renvoi à couper ##21#", (codeOff || "").trim() === "##21#", JSON.stringify(codeOff))
+  const offBtn = dlg.locator("[data-forward-tel=off]")
+  check("IA coupée : bouton « Couper aussi le renvoi Orange » (lien tel: avec # encodé)", ((await offBtn.textContent()) || "").trim() === "Couper aussi le renvoi Orange" && await offBtn.getAttribute("href") === "tel:%23%2321%23", `${await offBtn.textContent()} ${await offBtn.getAttribute("href")}`)
+  check("secours iOS : code affiché, Copier, « Colle-le dans Téléphone puis appelle »", await dlg.locator("[data-forward-fallback=off]").getByRole("button", { name: /Copier/ }).count() === 1 && /Colle-le dans Téléphone puis appelle/.test((await dlg.locator("[data-forward-fallback=off]").textContent()) || ""))
+  const chk = dlg.locator("[data-forward-tel=check]")
+  check("bouton « Vérifier le renvoi » (code d'interrogation)", ((await chk.textContent()) || "").trim() === "Vérifier le renvoi" && /^tel:\*%23(61|21)%23$/.test((await chk.getAttribute("href")) || ""), String(await chk.getAttribute("href")))
+  check("la confirmation « Renvoi coupé ? » s'affiche", await dlg.locator("[data-forward-confirm]").count() === 1 && /Renvoi coupé \?/.test((await dlg.locator("[data-forward-confirm]").textContent()) || ""))
   await dlg.getByRole("button", { name: "Oui" }).click()
   await page.waitForTimeout(800)
   const saved4 = writes.filter(w => w.table === "artisans" && w.method === "PATCH" && w.body?.reception_config)
   const last4 = saved4[saved4.length - 1]
   check("Oui enregistre forwardApplied = off", !!last4 && last4.body.reception_config.forwardApplied === "off", JSON.stringify(last4?.body?.reception_config))
+
+  // Réceptionniste réactivée : « Réactiver le renvoi », puis retour à l'état désactivé pour la suite du test.
+  await ia.click()
+  await page.waitForTimeout(800)
+  const onBtn = dlg.locator("[data-forward-tel=direct]")
+  check("IA réactivée : bouton « Réactiver le renvoi » avec le numéro Akno", ((await onBtn.textContent()) || "").trim() === "Réactiver le renvoi" && await onBtn.getAttribute("href") === "tel:**21*+33973057824%23", `${await onBtn.textContent()} ${await onBtn.getAttribute("href")}`)
+  await dlg.locator("[data-pickup=fallback]").click()
+  await page.waitForTimeout(800)
+  const fbBtn = dlg.locator("[data-forward-tel=fallback]")
+  check("IA réactivée (si je ne décroche pas) : **61*<numéro Akno>**10#", ((await fbBtn.textContent()) || "").trim() === "Réactiver le renvoi" && await fbBtn.getAttribute("href") === "tel:**61*+33973057824**10%23", String(await fbBtn.getAttribute("href")))
+  await ia.click()
+  await page.waitForTimeout(800)
+  check("IA recoupée (si je ne décroche pas) : ##61# et vérification *#61#", ((await dlg.locator("[data-forward-code=off]").textContent()) || "").trim() === "##61#" && await dlg.locator("[data-forward-tel=off]").getAttribute("href") === "tel:%23%2361%23" && await dlg.locator("[data-forward-tel=check]").getAttribute("href") === "tel:*%2361%23")
 
   const vv0 = await page.evaluate(() => window.visualViewport ? { h: window.visualViewport.height, kb: document.documentElement.style.getPropertyValue("--kb") } : { h: innerHeight, kb: "" })
   const focused = await page.evaluate(() => {

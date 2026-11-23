@@ -1,8 +1,9 @@
 import { nativeCors } from "./_lib/http.js"
 import { createClient } from "@supabase/supabase-js"
-import { env } from "./_lib/mail.js"
-import { sendPushToArtisan, type PushPayload } from "./_lib/push.js"
+import { adminClient, env } from "./_lib/mail.js"
+import { sendPushToArtisan } from "./_lib/push.js"
 import { bridgeArtisan } from "./_lib/twilioVoice.js"
+import { payloadFrom } from "./_lib/pushPayload.js"
 
 type Json = Record<string, unknown>
 type ApiResult = { status: number; body: Json }
@@ -21,53 +22,37 @@ async function authed(authorization?: string): Promise<{ userId: string } | { st
   return { userId: user.id }
 }
 
-function shortDebrief(body: Json) {
-  const raw = [body.resume, body.besoin_detail, body.motif, body.body]
-    .map(v => typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "")
-    .find(Boolean) || ""
-  if (raw.length <= 120) return raw
-  const cut = raw.slice(0, 117)
-  const sp = cut.lastIndexOf(" ")
-  return `${(sp > 80 ? cut.slice(0, sp) : cut).trim()}…`
-}
-
-function payloadFrom(body: Json): PushPayload | null {
-  const type = String(body.type || "")
-  if (type === "test") {
-    return {
-      title: "Test de notification",
-      body: "Si vous voyez ceci, les notifications Akno fonctionnent.",
-      url: "/parametres",
-      tag: "akno-test",
-    }
-  }
-  if (type === "call") {
-    const client = String(body.client || "Client").trim() || "Client"
-    const urgent = body.urgent === true || body.urgence === "urgent" || body.type_demande === "urgence"
-    const rappel = body.rappel_souhaite === true
-    const creneau = String(body.rappel_creneau || "").trim()
-    const debrief = shortDebrief(body) || "Nouvel appel"
-    const extra = rappel ? (creneau ? `À rappeler (${creneau})` : "À rappeler") : ""
-    return {
-      title: urgent ? `URGENT · ${client}` : `Nouvel appel · ${client}`,
-      body: extra ? `${debrief} · ${extra}` : debrief,
-      url: "/reception",
-      tag: `call-${body.call_id || Date.now()}`,
-    }
-  }
-  if (type === "appointment") {
-    const client = String(body.client || "Client")
-    const when = String(body.when || "Nouveau rendez-vous")
-    return { title: "Nouveau rendez-vous", body: `${client} · ${when}`, url: "/agenda", tag: `rdv-${body.appointment_id || Date.now()}` }
-  }
-  return null
+/** Inscrit cet appareil aux notifications du compte connecté. Fait côté serveur : un même appareil (même endpoint)
+    peut avoir été inscrit sous un autre compte ; l'écriture directe depuis l'app était alors refusée par la RLS,
+    en silence, et le compte courant restait sans aucun appareil. L'appareil suit le dernier compte connecté. */
+async function subscribe(userId: string, input: Json): Promise<ApiResult> {
+  const endpoint = String(input.endpoint || "").trim()
+  const p256dh = String(input.p256dh || "").trim(), auth = String(input.auth || "").trim()
+  if (!/^https:\/\/[^\s]{10,2000}$/.test(endpoint) || !p256dh || !auth || p256dh.length > 300 || auth.length > 100) return { status: 400, body: { ok: false, error: "Abonnement de notification invalide. Désactivez puis réactivez les notifications." } }
+  let sb: ReturnType<typeof adminClient>
+  try { sb = adminClient() }
+  catch { return { status: 503, body: { ok: false, error: "Configuration Supabase service (SUPABASE_SERVICE_ROLE_KEY) manquante." } } }
+  const { error } = await sb.from("push_subscriptions").upsert({
+    artisan_id: userId, user_id: userId, endpoint, p256dh, auth, keys: { p256dh, auth },
+    ua: String(input.ua || "").slice(0, 300),
+  }, { onConflict: "endpoint" })
+  if (error) return { status: 502, body: { ok: false, error: "L'appareil n'a pas pu être inscrit aux notifications. Réessayez." } }
+  const { count } = await sb.from("push_subscriptions").select("id", { count: "exact", head: true }).or(`artisan_id.eq.${userId},user_id.eq.${userId}`)
+  return { status: 200, body: { ok: true, devices: count ?? 1 } }
 }
 
 export async function handleNotify(authorization?: string, body?: unknown, bridgeId?: string | null): Promise<ApiResult> {
+  const input = (body && typeof body === "object" ? body : {}) as Json
+  if (input.type === "subscribe") {
+    // Inscription d'un appareil : uniquement l'artisan connecté dans l'app, jamais le relais téléphonique.
+    if (bridgeId) return { status: 403, body: { ok: false, error: "Action réservée à l'application." } }
+    const me = await authed(authorization)
+    if ("status" in me) return me
+    return subscribe(me.userId, input)
+  }
   // update56 : notifications envoyées par le relais téléphonique (BRIDGE_SECRET) pour l'artisan appelé.
   const session = bridgeId ? { userId: bridgeId } : await authed(authorization)
   if ("status" in session) return session
-  const input = (body && typeof body === "object" ? body : {}) as Json
   const payload = payloadFrom(input)
   if (!payload) return { status: 400, body: { error: "Type de notification inconnu." } }
   const result = await sendPushToArtisan(session.userId, payload)

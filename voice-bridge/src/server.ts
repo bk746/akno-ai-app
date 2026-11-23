@@ -2,13 +2,15 @@
    Pont temps réel : appel Twilio (Media Streams, μ-law 8 kHz) ⇄ réceptionniste xAI Grok Voice (realtime, « audio/pcmu »).
    Même prompt / mêmes outils que l'appel vocal de l'app (src/lib/voice/script.ts, importé tel quel au build).
    - prise de RDV : POST {APP_URL}/api/booking (auth serveur BRIDGE_SECRET) + ligne « appointments »
-   - fiche d'appel : table « calls » (upsert par twilio_call_sid), transcription, enregistrement WAV (bucket « recordings »)
-   - notifications push : POST {APP_URL}/api/notify */
+   - fiche d'appel : table « calls » (upsert par twilio_call_sid), transcription, enregistrement WAV (bucket « recordings »).
+     Nom et adresse = ceux de save_call (jamais devinés dans la transcription) ; RDV créé = statut rdv_confirme + appointments.call_id,
+     que le rendez-vous soit créé avant ou après la fiche.
+   - notifications push : POST {APP_URL}/api/notify (une par appel, avec le rendez-vous s'il est créé) */
 import http from "node:http"
 import { WebSocketServer, WebSocket } from "ws"
 import { buildSessionConfig, formatSlotsHint, mergeProfile, welcomeLine, companyName, type SlotHint, type VoiceProfile } from "../../src/lib/voice/script"
 import { DEFAULT_VOICE, normalizeConfig } from "../../src/lib/voice/receptionist"
-import { debriefFromTranscript } from "../../src/lib/voice/callDebrief"
+import { UNKNOWN_CLIENT, cleanAddress, cleanClientName, closingLine, debriefFromTranscript, rdvNote, sameUtterance } from "../../src/lib/voice/callDebrief"
 import { CallRecorder } from "./audio"
 import { verifyToken } from "./token"
 
@@ -30,6 +32,10 @@ const SESSION_ACK_MS = Number(E.SESSION_ACK_MS || 2500)
 const PREAUTH_MS = 5000
 const MAX_PREOPEN = 6
 let preopenPending = 0
+// save_call attend la fin de la réponse xAI qui l'a émis : un book_appointment de la même réponse passe ainsi toujours avant.
+const SAVE_DEFER_MS = Number(E.SAVE_DEFER_MS || 400)
+// Statut d'un appel dont le rendez-vous est créé. Si la base refuse cette valeur (contrainte), repli sur l'ancien « rdv_pris ».
+let rdvStatut = "rdv_confirme"
 const VOICE_ERR = /(^|[^a-z])voice|voice[_-]?id|custom.?voice|invalid.*session|session.*invalid|unknown voice/i
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a)
 
@@ -138,6 +144,19 @@ function handleCall(tw: WebSocket) {
   let bookFailed: string | null = null
   let bookQueue = Promise.resolve()
   let lastBookKey = ""
+  // Coordonnées structurées données à book_appointment (prénom + nom, adresse) : secours si save_call ne les redonne pas.
+  let bookedClient = "", bookedAddr = "", bookedVille = ""
+  // Bilan déjà enregistré : ce qu'il faut pour le recaler si le rendez-vous est créé après (ordre save_call / book_appointment).
+  let savedNotes = "", savedRappel = false, savedCreneau: string | null = null, rdvSaved = false, linkedAppt = ""
+  // Outils d'une même réponse xAI : une seule prise de parole quand tous ont répondu.
+  let toolsRunning = 0, batchSaved = false, batchBookFailed = false, closingSaid = false
+  const deferredTools: Json[] = []
+  /** save_call en cours d'écriture (il peut attendre la fin d'une réservation) : la fin d'appel l'attend. */
+  let saving: Promise<unknown> | null = null
+  let deferTimer: NodeJS.Timeout | null = null
+  /** Transcriptions de l'appelant par item xAI : une transcription partielle est remplacée par la suivante. */
+  const userItems = new Map<string, Line>()
+  let sttLogged = false
   let firstAudioLogged = false
   let slotsHintText = ""
   let voiceReverted = false
@@ -157,51 +176,97 @@ function handleCall(tw: WebSocket) {
   const toXai = (m: Json) => { if (xai?.readyState === WebSocket.OPEN) xai.send(JSON.stringify(m)) }
   const releasePreopen = () => { if (preopenHeld) { preopenHeld = false; preopenPending-- } }
 
-  async function upsertCall(fields: Json) {
-    const row = { artisan_id: artisanId, twilio_call_sid: callSid, source: "ia_telephone", ...fields }
-    const out = await sb(`/rest/v1/calls?on_conflict=twilio_call_sid&select=id`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(row) })
+  /** Écrit la fiche d'appel. Si la base refuse le statut « rdv_confirme » (contrainte), on réécrit avec « rdv_pris ». */
+  async function writeCall(send: (fields: Json) => Promise<any>, fields: Json) {
+    let out = await send(fields)
+    if (!(Array.isArray(out) && out[0]?.id) && fields.statut === "rdv_confirme") {
+      out = await send({ ...fields, statut: "rdv_pris" })
+      if (Array.isArray(out) && out[0]?.id) { rdvStatut = "rdv_pris"; log("[call] statut rdv_confirme refusé par la base → rdv_pris", "call", tag()) }
+    }
     const id = Array.isArray(out) && out[0]?.id
     if (id) callId = Number(id)
+    return !!id
+  }
+
+  async function upsertCall(fields: Json) {
+    await writeCall(f => sb(`/rest/v1/calls?on_conflict=twilio_call_sid&select=id`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ artisan_id: artisanId, twilio_call_sid: callSid, source: "ia_telephone", ...f }) }), fields)
     return callId
   }
 
+  /** Complète une fiche déjà enregistrée (par son id), sans toucher aux autres colonnes. */
+  async function patchCall(fields: Json) {
+    if (!callId) return !!(await upsertCall(fields))
+    return writeCall(f => sb(`/rest/v1/calls?id=eq.${callId}&select=id`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(f) }), fields)
+  }
+
+  /** Relie le rendez-vous créé à la fiche d'appel (Agenda ⇄ Réception), quel que soit l'ordre d'écriture. */
+  async function linkAppointment() {
+    const appt = booked?.appointmentId
+    if (!appt || !callId || linkedAppt === appt) return
+    const out = await sb(`/rest/v1/appointments?id=eq.${appt}&select=id`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ call_id: callId }) })
+    if (Array.isArray(out) && out.length) linkedAppt = appt
+    else log("[call] rendez-vous non relié à la fiche d'appel", "call", tag())
+  }
+
+  const joinNotes = (...parts: string[]) => parts.map(x => x.trim()).filter(Boolean).join(" — ") || null
+  /** Colonnes « rendez-vous » de la fiche quand le RDV est créé : statut, date, note (plus de « NON confirmé »). */
+  const rdvFields = (): Json => ({
+    statut: rdvStatut, rdv_date: booked!.start,
+    rappel_souhaite: savedRappel, rappel_creneau: savedRappel ? savedCreneau : null,
+    notes: joinNotes(savedNotes, rdvNote(booked!.start)),
+  })
+
+  /** Rendez-vous créé alors que la fiche d'appel existe déjà sans lui : statut, date, note et lien corrigés. */
+  async function reconcileRdv() {
+    if (!saved || !booked) return
+    if (!rdvSaved && await patchCall(rdvFields())) rdvSaved = true
+    await linkAppointment()
+  }
+
   async function saveCall(args: Json) {
+    // Un rendez-vous en cours de création (book_appointment de la même réponse) : on attend son issue avant de décider du statut.
+    await bookQueue
     const urgent = args.urgence === "urgent" || args.type_demande === "urgence"
-    let rappel = args.rappel_souhaite === true || (args.rappel_souhaite == null && args.a_rappeler === true)
+    const rappelAsked = args.rappel_souhaite === true || (args.rappel_souhaite == null && args.a_rappeler === true)
     const wantDevis = args.devis_demande === true || args.type_demande === "devis"
     let type = String(args.type_demande || "").trim() || "autre"
     if (wantDevis && type === "autre") type = "devis"
     const resume = String(args.resume || "").trim() || "Appel téléphonique reçu par la réceptionniste."
-    // update60 : « rdv_pris » seulement si book_appointment a vraiment créé le rendez-vous ;
+    // update60 : rendez-vous confirmé seulement si book_appointment l'a vraiment créé ;
     // sinon (souci technique ou RDV annoncé sans réservation) la fiche passe « à rappeler ».
     const unconfirmed = !booked && (args.rdv_pris === true || !!bookFailed)
-    if (unconfirmed) rappel = true
+    const rappel = rappelAsked || unconfirmed
     const noteRdv = unconfirmed ? `RDV demandé mais NON confirmé${bookFailed ? ` (${bookFailed})` : ""} — rappeler le client pour le fixer.` : ""
+    savedNotes = String(args.notes || "").trim()
+    savedRappel = rappelAsked
+    savedCreneau = String(args.rappel_creneau || "").trim() || null
+    // Nom : uniquement celui donné par l'IA (save_call, sinon prénom + nom de book_appointment). Jamais la transcription.
     const row = {
-      nom_client: String(args.nom_client || "").trim() || "Appel téléphonique",
+      nom_client: cleanClientName(args.nom_client) || bookedClient || UNKNOWN_CLIENT,
       telephone_client: String(args.telephone_client || "").trim() || from || null,
       motif: String(args.motif || "").trim() || args.type_demande || "Appel",
       besoin_detail: String(args.besoin_detail || "").trim() || null,
       resume,
       code_postal: String(args.code_postal || "").trim() || null,
-      ville: String(args.ville || "").trim() || null,
-      adresse: String(args.adresse || "").trim() || null,
+      ville: String(args.ville || "").trim() || bookedVille || null,
+      adresse: cleanAddress(args.adresse) || bookedAddr || null,
       type_demande: type,
       urgence: urgent ? "urgent" : "normal",
       email_client: String(args.email_client || "").trim() || null,
-      statut: rappel ? "a_rappeler" : booked ? "rdv_pris" : "renseigne",
+      // Rendez-vous créé → « rdv_confirme », même si l'IA a aussi coché le rappel (il reste dans rappel_souhaite).
+      statut: booked ? rdvStatut : rappel ? "a_rappeler" : "renseigne",
       rdv_date: booked?.start || null,
-      notes: [String(args.notes || "").trim(), noteRdv].filter(Boolean).join(" — ") || null,
-      rappel_souhaite: rappel,
-      rappel_creneau: rappel ? (String(args.rappel_creneau || "").trim() || null) : null,
+      notes: booked ? joinNotes(savedNotes, rdvNote(booked.start)) : joinNotes(savedNotes, noteRdv),
+      rappel_souhaite: booked ? rappelAsked : rappel,
+      rappel_creneau: (booked ? rappelAsked : rappel) ? savedCreneau : null,
       transcript: transcriptText(lines) || null,
       duration: Math.round((Date.now() - startedAt) / 1000),
     }
     const id = await upsertCall(row)
     saved = true
-    // Relie le rendez-vous créé à la fiche d'appel (Agenda ⇄ Réception).
-    if (id && booked?.appointmentId) void sb(`/rest/v1/appointments?id=eq.${booked.appointmentId}`, { method: "PATCH", body: JSON.stringify({ call_id: id }) })
-    void akno("/api/notify", artisanId, { type: "call", client: row.nom_client, motif: row.motif, resume, besoin_detail: row.besoin_detail, call_id: id, rappel_souhaite: rappel, rappel_creneau: row.rappel_creneau, urgent })
+    rdvSaved = !!booked && !!id
+    await linkAppointment()
+    void akno("/api/notify", artisanId, { type: "call", client: row.nom_client, telephone: row.telephone_client, motif: row.motif, resume, besoin_detail: row.besoin_detail, call_id: id, rdv_start: booked?.start || null, rappel_souhaite: row.rappel_souhaite, rappel_creneau: row.rappel_creneau, urgent })
     return { ok: true, call_id: id, message: wantDevis ? "Appel enregistré. Demande de devis notée — à générer depuis la fiche client." : "Appel enregistré dans Réception." }
   }
 
@@ -247,7 +312,15 @@ function handleCall(tw: WebSocket) {
       booked = { start, appointmentId: appointmentId || null }
       lastBookKey = key
       bookFailed = null
-      void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" à ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId })
+      bookedClient = cleanClientName(client)
+      bookedAddr = cleanAddress(args.adresse)
+      bookedVille = String(args.ville || "").trim()
+      if (saved) {
+        // Fiche d'appel déjà enregistrée sans ce rendez-vous : on la recale et on prévient l'artisan du RDV.
+        await reconcileRdv()
+        void akno("/api/notify", artisanId, { type: "appointment", client, when: [args.date, args.heure].filter(Boolean).join(" à ") || b.label || "Nouveau rendez-vous", appointment_id: appointmentId })
+      }
+      // Sinon : une seule notification, celle de la fiche d'appel (save_call ou fin d'appel), qui annonce le rendez-vous.
       return { ok: true, appointment_id: appointmentId, confirmation: b.confirmation || `Rendez-vous confirmé pour ${client}.` }
     }
     const p = bookQueue.then(run, run)
@@ -255,8 +328,8 @@ function handleCall(tw: WebSocket) {
     return p
   }
 
-  async function handleTool(ev: Json) {
-    let result: unknown = { ok: false, error: "Outil inconnu." }
+  async function runTool(ev: Json) {
+    let result: Json = { ok: false, error: "Outil inconnu." }
     try {
       const args = ev.arguments ? JSON.parse(ev.arguments) : {}
       if (ev.name === "get_available_slots") {
@@ -264,10 +337,54 @@ function handleCall(tw: WebSocket) {
         result = b.ok ? { ok: true, slots: b.slots || [], timezone: b.timezone } : { ok: false, reason: "technical", slots: [], error: b.error || "Agenda injoignable.", instruction: TECH_SLOTS }
       }
       else if (ev.name === "book_appointment") result = await book(args)
-      else if (ev.name === "save_call") result = await saveCall(args)
+      else if (ev.name === "save_call") { const p = saveCall(args); saving = p.catch(() => null); result = await p }
     } catch (e) { log("[tool]", ev.name, e); result = { ok: false, error: "Erreur pendant l'opération." } }
+    if (ev.name === "book_appointment" && !result.ok) batchBookFailed = true
+    if (ev.name === "save_call" && result.ok) batchSaved = true
     toXai({ type: "conversation.item.create", item: { type: "function_call_output", call_id: ev.call_id, output: JSON.stringify(result) } })
+    toolsRunning--
+    // Plusieurs outils dans la même réponse (book_appointment + save_call) : une seule prise de parole, quand tous ont répondu.
+    if (toolsRunning > 0) return
+    const closing = batchSaved && !batchBookFailed && !!booked && !closingSaid
+    batchSaved = false; batchBookFailed = false
+    if (closing) {
+      // Fiche enregistrée et rendez-vous créé : une seule phrase de fin, dite telle quelle (pas de 2e réponse du modèle).
+      closingSaid = true
+      toXai({ type: "conversation.item.create", item: { type: "force_message", role: "assistant", interruptible: false, content: [{ type: "output_text", text: closingLine(booked!.start) }] } })
+      return
+    }
     toXai({ type: "response.create" })
+  }
+
+  const flushDeferredTools = () => {
+    if (deferTimer) { clearTimeout(deferTimer); deferTimer = null }
+    for (const ev of deferredTools.splice(0)) void runTool(ev)
+  }
+
+  function handleTool(ev: Json) {
+    toolsRunning++
+    if (ev.name !== "save_call") { void runTool(ev); return }
+    // save_call part à la fin de la réponse xAI (response.done) : le book_appointment émis avec lui est alors déjà lancé.
+    deferredTools.push(ev)
+    if (deferTimer) clearTimeout(deferTimer)
+    deferTimer = setTimeout(flushDeferredTools, SAVE_DEFER_MS)
+  }
+
+  /** Transcription de l'appelant : xAI renvoie le même tour plusieurs fois (texte qui s'allonge, puis le final en double).
+      On ne garde qu'une ligne par tour, avec son dernier texte. */
+  const userLine = (itemId: string, text: string) => {
+    const known = itemId ? userItems.get(itemId) : undefined
+    if (known) { known.text = text; return }
+    // Sans identifiant commun : même tour si le texte prolonge (ou répète) la dernière ligne de l'appelant.
+    const last = lines[lines.length - 1]
+    if (last?.role === "user" && sameUtterance(last.text, text)) {
+      last.text = text
+      if (itemId) userItems.set(itemId, last)
+      return
+    }
+    const line: Line = { role: "user", text }
+    lines.push(line)
+    if (itemId) userItems.set(itemId, line)
   }
 
   const withBuiltinVoice = (p: VoiceProfile): VoiceProfile => ({ ...p, reception: { ...normalizeConfig(p.reception), voice: DEFAULT_VOICE } })
@@ -359,7 +476,8 @@ function handleCall(tw: WebSocket) {
     }
     if (type === "conversation.item.input_audio_transcription.completed") {
       const t = String(ev.transcript || "").trim()
-      if (t) lines.push({ role: "user", text: t })
+      if (!sttLogged) { sttLogged = true; log("[stt] transcription appelant : item_id", ev.item_id ? "présent" : "absent", "call", tag()) }
+      if (t) userLine(String(ev.item_id || ""), t)
       return
     }
     if (type === "response.output_audio_transcript.delta") { assistantBuf += String(ev.delta || ""); return }
@@ -369,8 +487,12 @@ function handleCall(tw: WebSocket) {
       if (t) lines.push({ role: "assistant", text: t })
       return
     }
-    if (type === "response.done" || type === "response.output_audio.done") { greeting = false; return }
-    if (type === "response.function_call_arguments.done") { void handleTool(ev); return }
+    if (type === "response.done" || type === "response.output_audio.done") {
+      greeting = false
+      if (type === "response.done" && deferredTools.length) flushDeferredTools()
+      return
+    }
+    if (type === "response.function_call_arguments.done") { handleTool(ev); return }
     if (type === "error") {
       // Message d'erreur xAI tronqué : jamais la clé ni le prompt.
       const snippet = JSON.stringify(ev.error || ev).slice(0, 300)
@@ -447,19 +569,27 @@ function handleCall(tw: WebSocket) {
     const duration = Math.round((Date.now() - startedAt) / 1000)
     try {
       await new Promise(r => setTimeout(r, 750))
-      const inferred = debriefFromTranscript(lines, from, booked)
+      if (deferTimer) { clearTimeout(deferTimer); deferTimer = null }
+      const pendingSave = deferredTools.splice(0).filter(ev => ev.name === "save_call").pop()
+      // Réservation ou save_call encore en cours au raccroché : on attend leur issue (bornée) pour écrire la bonne fiche.
+      await Promise.race([bookQueue, new Promise(r => setTimeout(r, 6000))])
+      if (saving) await Promise.race([saving, new Promise(r => setTimeout(r, 6000))])
+      if (!saved && pendingSave) {
+        // Raccroché juste après le save_call de l'IA, avant son exécution : c'est ce bilan-là qu'on enregistre.
+        try { await saveCall(pendingSave.arguments ? JSON.parse(pendingSave.arguments) : {}) } catch (e) { log("[call] save_call au raccroché", e) }
+      }
       if (!saved && duration > 4) {
-        await saveCall({ ...inferred, rdv_pris: !!booked, rappel_souhaite: !booked, type_demande: inferred.type_demande, urgence: "normal" })
+        // L'IA n'a pas appelé save_call (appelant qui raccroche) : bilan de secours. Le nom et l'adresse viennent
+        // de book_appointment s'il a eu lieu ; sinon « Client inconnu » + numéro de l'appelant.
+        const inferred = debriefFromTranscript(lines, from, booked)
+        await saveCall({ ...inferred, nom_client: bookedClient, adresse: bookedAddr, ville: bookedVille, rdv_pris: !!booked, rappel_souhaite: !booked, urgence: "normal" })
       } else if (saved) {
+        // Fiche déjà enregistrée par save_call : on ne réécrit que la transcription finale et la durée
+        // (nom, adresse, motif, résumé restent ceux de save_call), plus le rendez-vous s'il a été créé après.
         const patch: Json = { transcript: transcriptText(lines) || null, duration }
-        if (inferred.nom_client && inferred.nom_client !== "Appel téléphonique") patch.nom_client = inferred.nom_client
-        if (inferred.resume && lines.length > 2) patch.resume = inferred.resume
-        if (inferred.telephone_client) patch.telephone_client = inferred.telephone_client
-        if (inferred.email_client) patch.email_client = inferred.email_client
-        if (inferred.adresse) patch.adresse = inferred.adresse
-        if (inferred.motif) patch.motif = inferred.motif
-        if (booked?.start) patch.rdv_date = booked.start
-        await upsertCall(patch)
+        if (booked && !rdvSaved) Object.assign(patch, rdvFields())
+        if (await patchCall(patch) && booked) rdvSaved = true
+        await linkAppointment()
       }
       if (callId && rec.seconds > 1 && SB_URL && SB_KEY) {
         const path = `${artisanId}/${callId}.wav`
