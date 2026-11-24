@@ -59,6 +59,7 @@ export function initNative() {
     } catch { /* plugin absent */ }
     try { await applyStatusBar("light") } catch { /* ignore */ }
     try { const { SplashScreen } = await import("@capacitor/splash-screen"); setTimeout(() => void SplashScreen.hide(), 300) } catch { /* ignore */ }
+    try { const { initNativePushListeners } = await import("./push"); await initNativePushListeners() } catch { /* ignore */ }
   })()
 }
 

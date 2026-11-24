@@ -25,15 +25,33 @@ async function authed(authorization?: string): Promise<{ userId: string } | { st
 /** Inscrit cet appareil aux notifications du compte connecté. Fait côté serveur : un même appareil (même endpoint)
     peut avoir été inscrit sous un autre compte ; l'écriture directe depuis l'app était alors refusée par la RLS,
     en silence, et le compte courant restait sans aucun appareil. L'appareil suit le dernier compte connecté. */
+function iosEndpoint(token: string) {
+  return `https://push.akno.app/ios/${token.replace(/[^a-fA-F0-9]/g, "")}`
+}
+
 async function subscribe(userId: string, input: Json): Promise<ApiResult> {
-  const endpoint = String(input.endpoint || "").trim()
-  const p256dh = String(input.p256dh || "").trim(), auth = String(input.auth || "").trim()
-  if (!/^https:\/\/[^\s]{10,2000}$/.test(endpoint) || !p256dh || !auth || p256dh.length > 300 || auth.length > 100) return { status: 400, body: { ok: false, error: "Abonnement de notification invalide. Désactivez puis réactivez les notifications." } }
+  const platform = String(input.platform || "web").trim().toLowerCase()
   let sb: ReturnType<typeof adminClient>
   try { sb = adminClient() }
   catch { return { status: 503, body: { ok: false, error: "Configuration Supabase service (SUPABASE_SERVICE_ROLE_KEY) manquante." } } }
+  if (platform === "ios") {
+    const deviceToken = String(input.device_token || "").trim().replace(/[^a-fA-F0-9]/g, "")
+    if (deviceToken.length < 32 || deviceToken.length > 200) return { status: 400, body: { ok: false, error: "Jeton de notification iOS invalide. Réactivez les notifications." } }
+    const endpoint = iosEndpoint(deviceToken)
+    const { error } = await sb.from("push_subscriptions").upsert({
+      artisan_id: userId, user_id: userId, platform: "ios", device_token: deviceToken, endpoint,
+      p256dh: null, auth: null, keys: null,
+      ua: String(input.ua || "").slice(0, 300),
+    }, { onConflict: "endpoint" })
+    if (error) return { status: 502, body: { ok: false, error: "L'appareil n'a pas pu être inscrit aux notifications. Réessayez." } }
+    const { count } = await sb.from("push_subscriptions").select("id", { count: "exact", head: true }).or(`artisan_id.eq.${userId},user_id.eq.${userId}`)
+    return { status: 200, body: { ok: true, devices: count ?? 1 } }
+  }
+  const endpoint = String(input.endpoint || "").trim()
+  const p256dh = String(input.p256dh || "").trim(), auth = String(input.auth || "").trim()
+  if (!/^https:\/\/[^\s]{10,2000}$/.test(endpoint) || !p256dh || !auth || p256dh.length > 300 || auth.length > 100) return { status: 400, body: { ok: false, error: "Abonnement de notification invalide. Désactivez puis réactivez les notifications." } }
   const { error } = await sb.from("push_subscriptions").upsert({
-    artisan_id: userId, user_id: userId, endpoint, p256dh, auth, keys: { p256dh, auth },
+    artisan_id: userId, user_id: userId, platform: "web", endpoint, p256dh, auth, keys: { p256dh, auth },
     ua: String(input.ua || "").slice(0, 300),
   }, { onConflict: "endpoint" })
   if (error) return { status: 502, body: { ok: false, error: "L'appareil n'a pas pu être inscrit aux notifications. Réessayez." } }

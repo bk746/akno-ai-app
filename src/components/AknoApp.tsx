@@ -40,7 +40,7 @@ import { draftDevisFromCall, sendDevisEmail } from "../lib/devisApi"
 import { signedRecordingUrl } from "../lib/recordings"
 import { supabase } from "../lib/supabase"
 import { ClientFactures, FicheEditor, ficheKey, useFiche } from "./sheets/ClientFiche"
-import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, pushNeedsActivation, registerPushWorker, sendTestNotification, updateAppBadge } from "../lib/push"
+import { attentionCount, disablePush, enablePush, ensurePush, isIos, isStandalone, nativeIosPush, nativePushPermission, pushNeedsActivation, registerPushWorker, sendTestNotification, updateAppBadge } from "../lib/push"
 import Login from "./Login"
 import Flow from "./onboarding/Flow"
 import { LockScreen, LockSetup } from "./Lock"
@@ -814,17 +814,19 @@ function SetP() {
   useEffect(() => { if (!chS.ready) void loadChantiers() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const uidL: string = (window as any).__aknoUid || "", lk = hasLock(uidL), [bio, setBio] = useState(() => !!getLock(uidL)?.cred), [canBio, setCanBio] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
+  const [nativePushOk, setNativePushOk] = useState(false)
   const [testBusy, setTestBusy] = useState(false)
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [voiceDbg, setVoiceDbg] = useState(isVoiceDebugEnabled)
   const [moreSet, setMoreSet] = useState(false)
   const [voiceLog, setVoiceLog] = useState(() => formatVoiceTimings())
   useEffect(() => { bioAvailable().then(setCanBio) }, [])
+  useEffect(() => { if (nativeIosPush()) void nativePushPermission().then(setNativePushOk) }, [])
   useEffect(() => subscribeVoiceTimings(() => setVoiceLog(formatVoiceTimings())), [])
   const bioTg = async () => { if (!lk) { toast("Créez d'abord un code d'accès"); return } if (bio) { disableBio(uidL); setBio(false); toast("Face ID désactivé") } else { try { await enableBio(uidL, (window as any).__aknoEmail || ""); setBio(true); toast("Face ID activé") } catch { toast("Face ID non activé") } } }
   const up = (f: (x: St["settings"]) => St["settings"]) => set(x => ({ ...x, settings: f(x.settings) }))
   const iosHint = !isNative && isIos() && !isStandalone() // update70 : sans objet dans l'app native
-  const pushOn = !!st.push && typeof Notification !== "undefined" && Notification.permission === "granted"
+  const pushOn = nativeIosPush() ? !!st.push && nativePushOk : !!st.push && typeof Notification !== "undefined" && Notification.permission === "granted"
   const togglePush = async () => {
     if (pushBusy) return
     if (iosHint) { toast("Ajoute Akno à l’écran d’accueil depuis Safari"); return }
@@ -832,6 +834,7 @@ function SetP() {
       setPushBusy(true)
       await disablePush()
       up(x => ({ ...x, push: false }))
+      if (nativeIosPush()) setNativePushOk(false)
       setPushBusy(false)
       toast("Notifications désactivées")
       return
@@ -839,7 +842,7 @@ function SetP() {
     setPushBusy(true)
     const res = await enablePush()
     setPushBusy(false)
-    if (res.ok) { up(x => ({ ...x, push: true })); toast("Notifications activées"); setTestMsg(null) }
+    if (res.ok) { up(x => ({ ...x, push: true })); if (nativeIosPush()) setNativePushOk(true); toast("Notifications activées"); setTestMsg(null) }
     else { toast(res.error || "Notifications non activées"); setTestMsg({ ok: false, text: res.error || "Notifications non activées." }) }
   }
   const testNotif = async () => {
@@ -878,7 +881,7 @@ function SetP() {
       {recLock ? <Section t="Réceptionniste"><List><Row first label="Ajouter la Réceptionniste IA" onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Réceptionniste IA" s="Décroche, qualifie, prend RDV et prépare le devis" r={<LockTag>Ajouter</LockTag>} /></List></Section> : <Section t="Réceptionniste"><ReceptionnisteControls className="mb-5" /><List><Row first label="Ma réceptionniste" onClick={() => modal({ kind: "studio" })} lead={<Circ><Blob c={A.rec.c} s={20} /></Circ>} t="Ma réceptionniste" s={`Voix ${voiceInfo(prof?.reception_config?.voice).name} · script, prestations, FAQ`} r={<Chev />} /><S I={Phone} l="Numéro Akno" v={acc?.integrations.twilio_number || "Non attribué"} onClick={() => modal({ kind: "reception" })} /><S I={Phone} l="Numéro d'urgence" v={st.urgencePhone ? formatPhonePairs(st.urgencePhone) : "Non renseigné"} onClick={() => modal({ kind: "urgencePhone" })} /><S I={Clock} l="Horaires" v={hor ? `${hor} j / 7` : "Lun–ven 8 h–18 h"} onClick={() => modal({ kind: "reception" })} /><S I={MessageSquareText} l="Message d'accueil" v={prof?.message_accueil ? "Personnalisé" : "Par défaut"} onClick={() => modal({ kind: "reception" })} /></List></Section>}
       <Section t="Facturation"><List><S first I={Percent} l="TVA par défaut" v={tva} onClick={cycT} /><S I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : "OK"} onClick={() => modal({ kind: "entreprise" })} /><S I={CreditCard} l="IBAN" v={prof?.iban ? "Renseigné" : "À renseigner"} onClick={() => modal({ kind: "entreprise" })} /></List></Section>
       <Section t="Équipe et abonnement"><List><S first I={HardHat} l="Équipe" v={equipeN ? `${equipeN} membre${equipeN > 1 ? "s" : ""}` : ""} onClick={() => go("eq")} />{!billingHidden && <S I={CreditCard} l="Abonnement" v={planL} onClick={() => modal({ kind: "abonnement" })} />}</List></Section>
-      <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} />{isNative ? <Row label="Notifications sur le téléphone" lead={<Ic I={Bell} />} t="Notifications sur le téléphone" s="Pas encore dans l'app installée. Sur iPhone : ouvre Akno dans Safari, ajoute-le à l'écran d'accueil, puis active-les ici." /> : <Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} />}</List>{!isNative && <>{iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}{pushOn ? <p data-push-state="on" className="mt-3 px-1 text-[13px] leading-5 text-[#30D158]">Notifications activées sur cet appareil : appels, rendez-vous, devis.</p> : <Btn primary data-push-enable className="mt-3 w-full" disabled={pushBusy} onClick={() => void togglePush()}>{pushBusy ? "Activation…" : "Activer les notifications"}</Btn>}<Btn data-push-test className="mt-2 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Envoyer un test"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</>}</Section>
+      <Section t="Notifications"><List><Row first label="SMS clients" onClick={() => modal({ kind: "sms" })} lead={<Ic I={Smartphone} />} t="SMS clients" s={acc && !acc.integrations.sms ? "Service SMS non configuré" : "Rappels de RDV, relances, avis"} r={<Tg on={st.sms} onClick={() => up(x => ({ ...x, sms: !x.sms }))} label="SMS" />} />{isNative && !nativeIosPush() ? <Row label="Notifications sur le téléphone" lead={<Ic I={Bell} />} t="Notifications sur le téléphone" s="Pas encore disponibles sur Android. Sur iPhone, utilisez l'app installée depuis l'App Store." /> : <Row label="Notifications" onClick={() => void togglePush()} lead={<Ic I={Bell} />} t="Notifications" s="Appels, devis et réponses" r={<Tg on={pushOn} onClick={() => void togglePush()} label="Notifications" />} />}</List>{(!isNative || nativeIosPush()) && <>{!nativeIosPush() && iosHint && <p className="mt-2 px-1 text-[13px] leading-5 text-white/50">Ajoute Akno à l’écran d’accueil depuis Safari pour activer les notifications iPhone.</p>}{pushOn ? <p data-push-state="on" className="mt-3 px-1 text-[13px] leading-5 text-[#30D158]">Notifications activées sur cet appareil : appels, rendez-vous, devis.</p> : <Btn primary data-push-enable className="mt-3 w-full" disabled={pushBusy} onClick={() => void togglePush()}>{pushBusy ? "Activation…" : "Activer les notifications"}</Btn>}<Btn data-push-test className="mt-2 w-full" disabled={testBusy} onClick={() => void testNotif()}>{testBusy ? "Envoi…" : "Envoyer un test"}</Btn>{testMsg && <p className={`mt-2 px-1 text-[13px] leading-5 ${testMsg.ok ? "text-[#30D158]" : "text-[#FF9B96]"}`}>{testMsg.text}</p>}</>}</Section>
       <Section t="Session"><List>{canBio && <Row first label="Face ID" onClick={bioTg} lead={<Ic I={ScanFace} />} t="Face ID" r={<Tg on={bio} onClick={bioTg} label="Face ID" />} />}<Row first={!canBio} label="Se déconnecter" onClick={reset} lead={<Circ c={RED}><LogOut size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Se déconnecter</span>} /></List></Section>
       </div>
     </Col>
