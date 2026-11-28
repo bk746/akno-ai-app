@@ -705,17 +705,16 @@ function useDevisView(active: boolean, onAll?: () => void) {
   const DRow = (d: Devis, i: number) => <SwipeRow key={d.id} id={"all-" + d.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(d, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Ouvrir le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} s={`N° ${d.num} · ${d.objet}`} r={eur(d.amount)} rs={<Chip c={ST[d.status][1]}>{ST[d.status][0]}</Chip>} /></SwipeRow>
   const todo = ds.filter(d => (d.status === "brouillon" && !d.ai) || d.status === "att" || d.status === "env")
   const aval = ds.filter(toValidate), { desk } = useC()
-  /* Pop-up : brouillon IA à valider, sinon dernière réponse client (accepté / refusé) — au premier affichage du mode Devis */
-  const popped = useRef(false)
+  /* Pop-up : dernière réponse client (accepté / refusé) — au premier affichage du mode Devis (les brouillons IA ne s'ouvrent plus seuls). */
+  const poppedReply = useRef(false)
   useEffect(() => {
-    if (!active || popped.current) return
-    popped.current = true
-    const first = [...s.devis].sort((a, b) => b.num - a.num).find(toValidate)
-    if (first) { const t = setTimeout(() => modal({ kind: "aiPop", data: first }), 450); return () => clearTimeout(t) }
+    if (!active || poppedReply.current) return
     const reply = [...s.devis].filter(d => d.repliedAt && (d.status === "val" || d.status === "ref")).sort((a, b) => (b.repliedAt || "").localeCompare(a.repliedAt || ""))[0]
     if (!reply) return
     try { if (sessionStorage.getItem("akno-seen-" + reply.id)) return } catch { }
-    const t = setTimeout(() => modal({ kind: "clientReply", data: reply }), 450); return () => clearTimeout(t)
+    poppedReply.current = true
+    const t = setTimeout(() => modal({ kind: "clientReply", data: reply }), 450)
+    return () => clearTimeout(t)
   }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
   const VRow = (d: Devis, i: number) => <SwipeRow key={d.id} id={"val-" + d.id} first={i === 0} label="Supprimer" onAction={() => askDelDevis(d, set, toast)}><Row className="!rounded-none" first={i === 0} label={`Regarder le devis ${d.num}`} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Circ><Blob c={c} s={20} /></Circ>} t={<span className="flex items-center gap-2"><span className="truncate">{d.client}</span></span>} s={`N° ${d.num} · brouillon généré par Akno`} r={eur(d.amount)} rs={<Chip c={c}>Brouillon — à valider</Chip>} /></SwipeRow>
   const replies = ds.filter(d => d.reply || d.status === "sans" || ((d.status === "val" || d.status === "ref") && !!d.repliedAt))
