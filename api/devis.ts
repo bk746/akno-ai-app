@@ -307,6 +307,7 @@ export async function handleDevis(authorization?: string, body?: unknown): Promi
       if (action === "facture_send_sms") return await factureSendSms(supabase, userId, input, ent)
       if (action === "facture_paid") return await facturePaid(supabase, input)
       if (action === "facture_relance_send") return await factureRelanceSend(supabase, userId, input)
+      if (action === "facture_relance_now") return await factureRelanceNow(supabase, userId, input, ent) // refonte iOS : relance manuelle SMS / e-mail / appel IA
       if (action === "avoir") return await factureAvoir(supabase, userId, input)
     }
     return { status: 400, body: { error: "Action inconnue." } }
@@ -542,6 +543,50 @@ async function factureRelanceSend(supabase: SupabaseClient, userId: string, body
   const now = new Date().toISOString()
   await supabase.from("facture_relances").update({ statut: "envoyee", sent_at: now, sujet, corps }).eq("id", id)
   return { status: 200, body: { ok: true, sent_at: now } }
+}
+
+/** Refonte iOS · relance immédiate d'une facture impayée depuis l'app : SMS (Twilio), e-mail (Resend) ou appel IA.
+ *  La facture est lue avec la session de l'artisan (RLS) ; la trace est écrite avec le client admin car facture_relances
+ *  n'a pas de policy INSERT pour authenticated (aucune migration nécessaire). */
+async function factureRelanceNow(supabase: SupabaseClient, userId: string, body: Json, ent: Entitlements): Promise<ApiResult> {
+  const id = String(body.facture_id || "").trim()
+  const canal = String(body.canal || "")
+  if (!["sms", "email", "appel"].includes(canal)) return { status: 400, body: { error: "Canal inconnu." } }
+  const { data: f } = await supabase.from("factures").select("id, artisan_id, numero, statut, type, client_nom, client_email, client_telephone, total_ttc, acompte_deduit, token").eq("id", id).maybeSingle()
+  if (!f || f.artisan_id !== userId) return { status: 404, body: { error: "Facture introuvable." } }
+  if (!f.numero) return { status: 409, body: { error: "Émettez la facture avant de la relancer." } }
+  if (f.statut === "payee" || f.statut === "annulee" || f.type === "avoir") return { status: 409, body: { error: "Cette facture est réglée ou annulée." } }
+  if (canal === "appel") return { status: 501, body: { error: "L'appel de relance par l'IA arrive bientôt. Appelez le client vous-même ou envoyez un SMS.", soon: true } }
+  const { data: artisan } = await supabase.from("artisans").select("entreprise_nom, nom_entreprise, entreprise_email, email, sms_sender").eq("id", userId).maybeSingle()
+  const company = artisan?.entreprise_nom || artisan?.nom_entreprise || "votre artisan"
+  const link = f.token ? payUrl(String(f.token)) : ""
+  const due = String(dueOfRow(f).toFixed(2)).replace(".", ",") + " €"
+  const sujet = String(body.sujet || `Rappel : facture n° ${f.numero} en attente`).slice(0, 200)
+  const corps = String(body.corps || `Bonjour,\n\nSauf erreur de notre part, la facture n° ${f.numero} (${due}) reste à régler.${link ? `\nVous pouvez la régler en ligne ici : ${link}` : ""}\n\nMerci par avance. Cordialement,\n${company}`).slice(0, 6000)
+  let label = "E-mail"
+  if (canal === "email") {
+    const email = String(body.email || f.client_email || "").trim()
+    if (!looksLikeEmail(email)) return { status: 400, body: { error: "Ajoutez l'e-mail du client sur la facture." } }
+    const mailed = await sendResend({ to: email, subject: sujet, html: textToHtml(corps), replyTo: artisan?.entreprise_email || artisan?.email || undefined, company })
+    if (!mailed.ok) return { status: mailed.missingKey ? 503 : 502, body: { error: mailed.missingKey ? "L'envoi d'e-mail n'est pas configuré (RESEND_API_KEY manquante)." : "L'e-mail n'a pas pu être envoyé.", copy: true } }
+  } else {
+    label = "SMS"
+    const phone = String(body.phone || f.client_telephone || "").trim()
+    if (!toE164(phone)) return { status: 400, body: { error: "Ajoutez le portable du client sur la facture." } }
+    if (!smsConfigured()) return { status: 503, body: { error: "L'envoi de SMS n'est pas encore activé. Utilisez l'e-mail.", copy: true } }
+    const text = String(body.sms || `${company} : rappel, la facture n° ${f.numero} (${due}) reste à régler.${link ? ` ${link}` : ""}`).slice(0, 480)
+    const sms = await sendSmsMetered({ artisanId: userId, to: phone, kind: "relance_facture", sender: artisan?.sms_sender || company, body: text }, ent.quotas.sms)
+    if (!sms.ok) return { status: 502, body: { error: sms.error || "Le SMS n'a pas pu partir." } }
+  }
+  const now = new Date().toISOString()
+  try {
+    const admin = adminClient()
+    const { data: prev } = await admin.from("facture_relances").select("id, niveau, statut").eq("facture_id", id)
+    const pending = (prev || []).find(r => r.statut === "a_valider")
+    if (pending) await admin.from("facture_relances").update({ statut: "envoyee", canal: label, sujet, corps, sent_at: now }).eq("id", pending.id)
+    else await admin.from("facture_relances").insert({ artisan_id: userId, facture_id: id, niveau: Math.max(0, ...(prev || []).map(r => Number(r.niveau))) + 1, statut: "envoyee", canal: label, sujet, corps, sent_at: now })
+  } catch { /* la relance est partie ; la trace est facultative */ }
+  return { status: 200, body: { ok: true, sent_at: now, canal: label } }
 }
 
 async function factureAvoir(supabase: SupabaseClient, userId: string, body: Json): Promise<ApiResult> {

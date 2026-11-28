@@ -5,7 +5,7 @@ import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
 import { CO, buildDoc, e2, missingLegal } from "../lib/devisDoc"
 import { api, openUpgrade, useAccount, useRights } from "../lib/accountApi"
 import { LockTag, ReceptionLocked, UpgradeHost } from "./billing/Upgrade"
-import { Lock as LockIco, MessageSquare, Copy } from "lucide-react"
+import { Lock as LockIco, MessageSquare, Copy, MoreHorizontal } from "lucide-react"
 import { useProfile } from "../lib/profile"
 import EntrepriseSheet from "./sheets/EntrepriseSheet"
 import AbonnementSheet from "./sheets/AbonnementSheet"
@@ -70,9 +70,12 @@ import { billingHidden, isNative, webOrigin } from "../lib/native"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
 import MobileNav, { type CreateKind } from "./nav/MobileNav"
-import { CROSSFADE, PUSH, SNAP, TAB, TOAST, TOAST_TOP, idle, lazyPage } from "../lib/motion"
+import { IosPage, Chip as IosChip, Segmented, IRow, IH2, Capsule as Capsule2, type CapsBtn } from "./nav/IosPage"
+import { useRelancesCounts, useRelancesView } from "./relances/RelancesPane"
+import { CROSSFADE, PUSH, SHEET, SNAP, TAB, TOAST, TOAST_TOP, idle, lazyPage } from "../lib/motion"
 import { createPortal } from "react-dom"
 import { hapticSuccess } from "../lib/haptics"
+import { lastDocMode } from "../lib/facturesLite"
 import { dueOf, isLate, isUnpaid, refreshFactures, rememberDocMode, unpaidCount, useFacturesLite, factureState, type FactureLite } from "../lib/facturesLite"
 import ModalSheet from "./sheet/ModalSheet"
 import { SwipeRow, askConfirm, ConfirmHost } from "./form/SwipeRow"
@@ -163,7 +166,7 @@ function MobileHead({ k }: { k?: K }) {
     </>
 }
 /* Gabarit unique de page : blob + chiffre clé + actions rondes + sections */
-const DOC_ORDER = (x?: string) => x === "fac" ? 1 : 0
+const DOC_ORDER = (x?: string) => x === "rel" ? 2 : x === "fac" ? 1 : 0
 /* update67 · Devis ↔ Factures : le contenu glisse dans le sens du changement avec un fondu, la hauteur suit en ressort (aucun saut),
    le haut de page (bot bleu, chiffre) ne bouge pas. */
 const swapV = { enter: (d: number) => ({ opacity: 0, x: d * 44 }), center: { opacity: 1, x: 0 }, exit: (d: number) => ({ opacity: 0, x: -d * 44 }) }
@@ -205,28 +208,36 @@ function DuoPanes({ active, panes, className }: { active: string; panes: [string
         <div className={className}>{node}</div></motion.div> })}
   </div>
 }
-function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt }: { k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string; alt?: { key: string; actions: QAi[]; children: ReactNode } }) {
-  const { desk, s, setChat } = useC(), on = k ? s.settings.agents[k] : true
+function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt, alts, title }: { title?: string; k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string; alt?: { key: string; actions: QAi[]; children: ReactNode }; alts?: { key: string; actions: QAi[]; children: ReactNode }[] }) {
+  const { desk, s, setChat, go, page } = useC(), on = k ? s.settings.agents[k] : true, rr = useRights()
   // update63 · contenu interchangeable (Devis | Factures) : fondu + glissement, le haut de page (bot) ne bouge pas
   const prevKey = useRef(bodyKey), dir = useRef(1)
   if (bodyKey !== prevKey.current) { dir.current = DOC_ORDER(bodyKey) >= DOC_ORDER(prevKey.current) ? 1 : -1; prevKey.current = bodyKey }
   // update69 : avec « alt », les deux contenus restent montés côte à côte (DuoPanes) au lieu d'être recréés à chaque bascule
-  const swap = (mk: (a: QAi[], c: ReactNode) => ReactNode, cls: string) => alt && bodyKey !== undefined
-    ? <DuoPanes active={bodyKey} className={cls} panes={[[bodyKey, mk(actions, children)], [alt.key, mk(alt.actions, alt.children)]]} />
+  const others = alts || (alt ? [alt] : [])
+  const swap = (mk: (a: QAi[], c: ReactNode) => ReactNode, cls: string) => others.length && bodyKey !== undefined
+    ? <DuoPanes active={bodyKey} className={cls} panes={[[bodyKey, mk(actions, children)] as [string, ReactNode], ...others.map(o => [o.key, mk(o.actions, o.children)] as [string, ReactNode])]} />
     : <SwapBody k={bodyKey} dir={dir.current} className={cls}>{mk(actions, children)}</SwapBody>
   const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${A[k].c === "#E6E6E6" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
-  const lab = label || (k && <><Dot c={on ? GREEN : GREY} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
+  const lab = label || (k && <><Dot c={on ? GREEN : "#FF9F0A"} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
   const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-4 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`${desk ? "mt-1 text-[52px]" : "mt-3 text-[44px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const LB = L && <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block cursor-pointer select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{L}</button>
   const foot = null
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0">{bodyKey === undefined ? <QA items={actions} /> : swap(a => <QA items={a} />, "")}</div></motion.div>{mid && <motion.div variants={rise} className="mt-8">{mid}</motion.div>}{bodyKey === undefined ? <div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div> : swap((_a, c) => c, "mt-10 grid grid-cols-2 items-start gap-6")}{foot}</motion.div></div>
-  return <motion.div data-page-scroll initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-    {/* update70 · en-tête fixe et translucide (façon Revolut) : le contenu défile dessous, rien n'est coupé */}
-    <div data-mobile-head className="sticky top-0 z-20 shrink-0 bg-black/70 backdrop-blur-[20px] backdrop-saturate-150" style={{ paddingTop: "calc(var(--sat) + 2px)" }}><MobileHead k={k} /></div>
-    <motion.div variants={rise} className="mt-6 flex flex-col items-center px-5">{LB}{H}</motion.div>
-    {mid && <motion.div variants={rise} className="mt-6 px-5">{mid}</motion.div>}
-    {bodyKey === undefined ? <><motion.div variants={rise} className="mt-8 px-4"><QA items={actions} /></motion.div>
-    <div className="mt-5 flex flex-col gap-8 px-4">{children}</div></> : swap((a, c) => <><div className="mt-7 px-4"><QA items={a} /></div><div className="mt-5 flex flex-col gap-8 px-4">{c}</div></>, "")}{foot}<div aria-hidden className="shrink-0" style={{ height: "var(--page-bottom)" }} /></motion.div>
+  // Refonte iOS (DA Designer) : titre + capsule (+ · action · …), haut de page noir, contenu dans une feuille blanche
+  const plus = actions.find(x => x.I === Plus)
+  const secB: Partial<Record<K, CapsBtn>> = { rec: { I: Users, label: "Clients", on: () => go("cl") }, ag: { I: Users, label: "Équipe", on: () => go("eq") }, dev: { I: Users, label: "Clients", on: () => go("cl") } }
+  const isSet = !k && page === "set", back = () => go(rr.reception || !rr.ready ? "rec" : "ag")
+  const caps: CapsBtn[] = isSet ? [{ I: X, label: "Terminé", text: "Terminé", on: back }] : [...(plus ? [{ I: Plus, label: plus.label || plus.l, on: plus.on, dis: plus.dis }] : []), ...(k && secB[k] ? [secB[k]!] : []), { I: MoreHorizontal, label: "Réglages", on: () => go("set") }]
+  const chipsOf = (a: QAi[]) => a.filter(x => x.I !== Plus && !/^(Contacts|Relance)$/.test(x.l))
+  const chipRow = (a: QAi[]) => { const xs = chipsOf(a); return xs.length ? <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">{xs.map(x => <IosChip key={x.l} I={x.I} l={x.l} on={x.on} dis={x.dis} />)}</div> : null }
+  const heroBot = <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{lead || <motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }} className="drop-shadow-[0_8px_16px_rgba(0,0,0,.45)]"><Blob c="#E6E6E6" s={96} /></motion.div>}</button>
+  const hero = <>{heroBot}<div className="mt-3.5 flex items-center gap-1.5 text-[13px] leading-4 text-[#A1A1A6] [&>span:first-child]:h-[7px] [&>span:first-child]:w-[7px]">{lab}</div><div className="mt-2 text-[64px] font-semibold leading-[64px] tracking-[-0.03em] tabular-nums text-white">{fig}</div><div className="mt-1.5 text-[19px] leading-6 text-[rgba(235,235,245,.72)]">{sub}</div></>
+  const ttl = title || (k === "dev" ? "Facturation" : k === "rel" ? "Relances" : k ? A[k].tab : "")
+  const backBtn = k === "rel" ? <button type="button" aria-label="Retour" onClick={() => go(lastDocMode())} className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center text-white"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[.14]"><ChevronLeft size={22} strokeWidth={2} /></span></button> : undefined
+  return <IosPage title={ttl || (isSet ? "Réglages" : "")} caps={caps} mid={mid} hero={hero} lead={backBtn}>
+    {bodyKey === undefined ? <>{chipRow(actions)}{children}</> : swap((a, c) => <div className="flex flex-col gap-8">{chipRow(a)}{c}</div>, "")}
+  </IosPage>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
 const meName = (s: St) => s.settings.name?.trim() || s.settings.company?.trim() || s.settings.email?.split("@")[0] || "Mon compte"
@@ -383,7 +394,7 @@ function Rec() {
   return <RecFull />
 }
 function RecFull() {
-  const { s, set, modal, q, setChat, toast } = useC(), c = A.rec.c
+  const { s, set, modal, q, setChat, toast, desk } = useC(), c = A.rec.c
   const acc = useAccount()
   const [voiceOn, setVoiceOn] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
@@ -402,6 +413,10 @@ function RecFull() {
   return <><Shell k="rec" fig={<Num n={weekN} />} sub="appels reçus cette semaine" actions={[
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Settings, l: "Réglages", label: "Réglages de la réceptionniste", on: () => modal({ kind: "recReglages" }) }]}>
+    {!desk && <>
+      <section><IH2 t="À rappeler" more={todoS.length > 4 ? () => modal({ kind: "callbacks" }) : undefined} />{todoS.length ? todoS.slice(0, 4).map((x, i) => <IRow key={x.id} first={i === 0} ini={initials(x.name)} name={x.name} red sub={x.tag || x.topic} time={x.day ? cap(x.day.toLowerCase()) : x.time} href={tel(x.name) ? `tel:${tel(x.name)}` : undefined} onClick={() => tel(x.name) ? done(x) : open(x)} onInfo={() => open(x)} />) : <div className="flex h-[64px] items-center gap-2 px-1 text-[15px] text-[#6E6E73]"><Check size={16} />Personne à rappeler. Tout est à jour.</div>}</section>
+      <section><IH2 t="Appels récents" more={s.calls.length > 5 ? () => { if (play) pl.toggle(); modal({ kind: "calls" }) } : undefined} />{s.calls.length ? s.calls.filter(x => match(q, x.name, x.topic, x.note)).slice(0, 5).map((x, i) => <IRow key={x.id} first={i === 0} ini={initials(x.name)} name={x.name} sub={x.tag || x.topic} time={x.day ? cap(x.day.toLowerCase()) : x.time} href={tel(x.name) ? `tel:${tel(x.name)}` : undefined} onClick={() => { if (!tel(x.name)) open(x) }} onInfo={() => open(x)} />) : <div className="flex h-[64px] items-center px-1 text-[15px] text-[#6E6E73]">Aucun appel pour l'instant.</div>}</section>
+    </>}
     <div className="col-span-2">
       {!acc?.integrations.twilio_number && <div className="mb-4"><ActivateReceptionniste home onActivated={() => modal({ kind: "recReglages" })} /></div>}
       <button type="button" onClick={() => { primeCallWakeLock(); setVoiceOn(true) }} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium transition active:scale-[.98]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 12px 32px -12px ${c}99` }}>
@@ -409,10 +424,10 @@ function RecFull() {
         Appeler ma réceptionniste
       </button>
     </div>
-    <div className="col-span-2"><RelancesCard /></div>
+    {desk && <div className="col-span-2"><RelancesCard /></div>}
     {showPush && <div className="col-span-2"><Card className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-[15px] font-medium">Notifications d'appels et de RDV</div><div className={tx.cap}>Recevez un bandeau dans l'app dès qu'un client appelle ou qu'un rendez-vous est pris.</div></div><Btn className="h-11 shrink-0" disabled={pushBusy} onClick={() => { if (pushBusy) return; setPushBusy(true); void enablePush().then(res => { setPushBusy(false); if (res.ok) { set(x => ({ ...x, settings: { ...x.settings, push: true } })); toast("Notifications activées") } else toast(res.error || "Activez les notifications dans les réglages du navigateur.") }) }}><Bell size={16} strokeWidth={1.75} />Activer</Btn></Card></div>}
-    <Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section></Col>
-    <Col><Section t="À rappeler" aside={todoS.length ? `${todoS.length} client${todoS.length > 1 ? "s" : ""}` : undefined}><List I={Check} empty="Personne à rappeler. Tout est à jour.">{todoS.slice(0, 3).map(TRow)}</List>{todoS.length > 3 && <button type="button" onClick={() => modal({ kind: "calls" })} className="mt-2 w-full py-2 text-[14px] font-medium text-white/70">Voir tout ({todoS.length})</button>}</Section></Col>
+    {desk && <><Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section></Col>
+    <Col><Section t="À rappeler" aside={todoS.length ? `${todoS.length} client${todoS.length > 1 ? "s" : ""}` : undefined}><List I={Check} empty="Personne à rappeler. Tout est à jour.">{todoS.slice(0, 3).map(TRow)}</List>{todoS.length > 3 && <button type="button" onClick={() => modal({ kind: "calls" })} className="mt-2 w-full py-2 text-[14px] font-medium text-white/70">Voir tout ({todoS.length})</button>}</Section></Col></>}
     <Col>{cur && <Section t="Dernier débrief" more={() => open(cur)}><Card className="overflow-hidden"><Row first label={cur.name} onClick={() => open(cur)} lead={<Av n={cur.name} />} t={cur.name} s={(cur.note || cur.besoin || cur.topic || "").slice(0, 160)} r={<span className={tx.cap}>{cur.at || cur.time}</span>} />
       {cur.recording && <div className="px-4 pb-4 pt-1"><Player p={pl} c={c} onMic={() => setChat(true)} /></div>}</Card></Section>}</Col>
   </Shell>
@@ -748,17 +763,18 @@ function DocAllPage({ title, onBack, children }: { title: string; onBack: () => 
 function DevFac() {
   // update69 : le mode change localement au tap (pilule et contenu partent ensemble) ; l'adresse suit juste après l'animation
   const { page } = useC(), shownSlot = useContext(SlotActive), own = shownSlot && (page === "dev" || page === "fac")
-  const [mode, setMode] = useState<"dev" | "fac">(page === "fac" ? "fac" : "dev")
+  const [mode, setMode] = useState<"dev" | "fac" | "rel">(page === "fac" ? "fac" : "dev")
   const [list, setList] = useState<"dev" | "fac" | null>(null)
-  useEffect(() => { if (own) setMode(page === "fac" ? "fac" : "dev") }, [page, own])
+  useEffect(() => { if (own) setMode(m => m === "rel" && page === "fac" ? m : page === "fac" ? "fac" : "dev") }, [page, own])
   useEffect(() => { setList(null) }, [mode])
-  const dv = useDevisView(own && mode === "dev", () => setList("dev")), fv = useFacturesView(() => setList("fac")), v = mode === "dev" ? dv : fv, o = mode === "dev" ? fv : dv
-  useEffect(() => { if (own) rememberDocMode(mode) }, [mode, own])
+  const dv = useDevisView(own && mode === "dev", () => setList("dev")), fv = useFacturesView(() => setList("fac")), rv = useRelancesView()
+  const views = { dev: dv, fac: fv, rel: rv }, v = views[mode], others = (["dev", "fac", "rel"] as const).filter(x => x !== mode).map(x => ({ key: x, actions: views[x].actions, children: views[x].body }))
+  useEffect(() => { if (own && mode !== "rel") rememberDocMode(mode) }, [mode, own])
   const reduce = useReducedMotion()
   const curAll = list === "dev" ? dv : fv
   return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
     <motion.div className="flex min-h-0 min-w-0 flex-1 flex-col" initial={false} animate={!reduce && list ? { x: "-28%", opacity: .85 } : { x: 0, opacity: 1 }} transition={reduce ? { duration: .16 } : PUSH} style={{ pointerEvents: list ? "none" : undefined }}>
-      <Shell k="dev" fig={v.fig} sub={v.sub} actions={v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alt={{ key: mode === "dev" ? "fac" : "dev", actions: o.actions, children: o.body }}>{v.body}</Shell>
+      <Shell k="dev" label={<><Dot c={mode === "fac" ? "#FF9F0A" : mode === "rel" ? "#FF3B30" : "#007AFF"} />{mode === "dev" ? "Devis" : mode === "fac" ? "À encaisser" : "Relances"}</>} fig={v.fig} sub={v.sub} actions={mode === "rel" ? dv.actions.filter(x => x.I === Plus) : v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alts={others}>{v.body}</Shell>
     </motion.div>
     <AnimatePresence>
       {list && <motion.div key="doc-all" data-doc-list-push className="absolute inset-0 z-20 flex flex-col bg-black" initial={reduce ? { opacity: 0 } : { x: "100%" }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "100%" }} transition={reduce ? { duration: .16 } : PUSH}>
@@ -767,8 +783,8 @@ function DevFac() {
     </AnimatePresence>
   </div>
 }
-function DocSwitch({ mode, onPick }: { mode: "dev" | "fac"; onPick?: (m: "dev" | "fac") => void }) {
-  const navigate = useNavigate(), { desk } = useC(), timer = useRef(0)
+function DocSwitch({ mode, onPick }: { mode: "dev" | "fac" | "rel"; onPick?: (m: "dev" | "fac" | "rel") => void }) {
+  const navigate = useNavigate(), { desk } = useC(), timer = useRef(0), relN = useRelancesCounts().total
   useEffect(() => () => clearTimeout(timer.current), [])
   const pick = (id: "dev" | "fac", url: string) => {
     if (!onPick) { navigate(url + location.search, { replace: true }); return }
@@ -777,6 +793,9 @@ function DocSwitch({ mode, onPick }: { mode: "dev" | "fac"; onPick?: (m: "dev" |
     timer.current = window.setTimeout(() => { const cur = location.pathname.split("/")[1]; if ((cur === "devis" || cur === "factures") && location.pathname !== url) startTransition(() => navigate(url + location.search, { replace: true })) }, 380)
   }
   const items: ["dev" | "fac", string, string][] = [["dev", "Devis", "/devis"], ["fac", "Factures", "/factures"]]
+  // Refonte iOS : sélecteur segmenté Devis | Factures | Relances (le nombre de relances dues à côté du libellé)
+  if (!desk) return <Segmented label="Devis, factures ou relances" layoutId="akno-doc-seg" value={mode} onPick={m => { if (m === "rel") { onPick?.("rel"); return } pick(m, m === "dev" ? "/devis" : "/factures") }}
+    items={[["dev", "Devis"], ["fac", "Factures"], ["rel", <>Relances{relN > 0 && <span className="tabular-nums opacity-60">{relN}</span>}</>]]} />
   // update84 : pastille layoutId sous l'onglet actif (tablist non transformé)
   return <div role="tablist" aria-label="Devis ou factures" className={`relative grid h-11 grid-cols-2 rounded-full bg-white/[.07] p-1 ${desk ? "w-[280px]" : "mx-auto w-full max-w-[340px]"}`}>
     {items.map(([id, l, url]) => { const on = mode === id; return <motion.button key={id} role="tab" aria-selected={on} type="button" whileTap={{ scale: .96 }} onClick={() => { if (!on) pick(id, url) }}
@@ -791,22 +810,23 @@ function ChP() {
   return <ChantiersPage me={<Me size={30} />} clients={ctInfos(s)} />
 }
 /* update67 · En-tête des pages hors barre (Équipe, Clients) : le même que les pages principales — logo, mise à jour, assistant, initiales */
-function PageHead() {
-  const { go, setChat } = useC()
-  return <div className="-mx-4 flex h-10 shrink-0 items-center px-5">
-    <img src="/logo.png" alt="Akno" className="h-[25px] w-auto" />
-    <div className="ml-auto flex items-center gap-2"><UpdateButton sm />
-      <button type="button" data-hit aria-label="Assistant" title="Assistant" onClick={() => setChat(true)} className="relative flex h-8 w-8 items-center justify-center rounded-[10px] bg-[#141416] text-white/55 hover:text-white"><Sparkles size={16} strokeWidth={1.5} /></button>
-      <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Réglages" title="Réglages" onClick={() => go("set")} className="ml-1 flex h-9 w-9 items-center justify-center rounded-full [-webkit-tap-highlight-color:transparent]"><Me size={30} /></motion.button></div>
+function PageHead({ title, to }: { title: string; to: P }) {
+  // Refonte iOS : barre de navigation des sous-pages (Clients sous Réception, Équipe sous Agenda) : retour + titre + « … »
+  const { go } = useC()
+  return <div className="-mx-4 flex h-11 shrink-0 items-center gap-1 px-3">
+    <button type="button" aria-label="Retour" onClick={() => go(to)} className="flex h-11 w-11 shrink-0 items-center justify-center text-white [-webkit-tap-highlight-color:transparent]"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[.14]"><ChevronLeft size={22} strokeWidth={2} /></span></button>
+    <span className="sr-only">{title}</span><span className="flex-1" />
+    <UpdateButton sm />
+    <Capsule2 items={[{ I: MoreHorizontal, label: "Réglages", on: () => go("set") }]} />
   </div>
 }
 /* update66 · Clients (page chargée à la demande) */
 function ClP() {
-  return <ClientsPage head={<PageHead />} />
+  return <div className="akno-light flex min-h-0 flex-1 flex-col bg-[#fff]"><ClientsPage head={<PageHead title="Clients" to="rec" />} /></div>
 }
 /* update65 · Équipe (page chargée à la demande) */
 function EqP() {
-  return <EquipePage head={<PageHead />} />
+  return <div className="akno-light flex min-h-0 flex-1 flex-col bg-[#fff]"><EquipePage head={<PageHead title="Équipe" to="ag" />} /></div>
 }
 function SetP() {
   const { s, set, desk, toast, modal, go } = useC(), st = s.settings, presta = usePrestations()
@@ -861,7 +881,7 @@ function SetP() {
   const { p: prof, save: saveProf } = useProfile()
   const acPctS = Math.round(Number(prof?.acompte_pct ?? 30))
   const cycA = async () => { const opts = [30, 40, 50, 20, 0], i = opts.indexOf(acPctS), nx = opts[(i + 1) % opts.length]; const e = await saveProf({ acompte_pct: nx }); toast(e ? "Réglage indisponible : appliquez la migration 20261122_14 (voir LISEZMOI)." : nx ? `Acompte demandé à la signature : ${nx} %` : "Pas d'acompte à la signature") }
-  const cycI = async () => { const nx = prof?.relances_auto !== true; const e = await saveProf({ relances_auto: nx }); toast(e ? "Réglage indisponible : appliquez la migration 20261122_14 (voir LISEZMOI)." : nx ? "Relances d'impayés J+1, J+7, J+15 envoyées automatiquement" : "Relances d'impayés à valider avant envoi") }
+  const cycI = async () => { const nx = prof?.relances_auto !== true; const e = await saveProf({ relances_auto: nx }); toast(e ? "Réglage indisponible : appliquez la migration 20261122_14 (voir LISEZMOI)." : nx ? "Relances d'impayés J+3, J+7, J+15 envoyées automatiquement" : "Relances d'impayés à valider avant envoi") }
   const cycR = async () => { const opts = [[3, 7], [2, 5, 10], [7, 14], [3, 7, 15]], cur = JSON.stringify(relDelays(prof?.relance_delais)), i = opts.findIndex(o => JSON.stringify(o) === cur), nx = opts[(i + 1) % opts.length]; const e = await saveProf({ relance_delais: nx }); toast(e || `Relances : ${relDelaysL(nx)}`) }
   const hor = prof?.horaires && typeof prof.horaires === "object" ? Object.values(prof.horaires as Record<string, unknown>).filter(Boolean).length : 0
   const reset = () => { if (confirm("Se déconnecter ?")) supabase.auth.signOut() }
@@ -1438,7 +1458,7 @@ const ORD: P[] = ["rec", "ag", "rel", "dev", "set"]
 const LAZY: Partial<Record<P, { preload: () => Promise<void>; ready: () => boolean }>> = { ch: ChantiersPage, eq: EquipePage, cl: ClientsPage }
 const ORDER: Partial<Record<string, number>> = { rec: 0, ag: 1, ch: 2, dev: 3, eq: 4, cl: 5 }
 const isPushP = (p: string) => p === "set" || p === "rel"
-type PT = { kind: "fade" | "push" | "pop"; dir: number }
+type PT = { kind: "fade" | "push" | "pop" | "sheet" | "unsheet"; dir: number }
 const OPA = { duration: .24, ease: [.22, 1, .36, 1] as const }
 /* update69 · Pages conservées (Réception, Agenda, Chantiers, Devis | Factures) : une fois ouvertes (ou préparées au repos),
    elles restent montées et sont seulement masquées. Changer d'onglet ne recrée donc plus la page : aucun rendu lourd au
@@ -1485,10 +1505,14 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
   const prev = useRef(pkey), pt = useRef<PT>({ kind: "fade", dir: 1 }), fromSet = useRef(false)
   if (prev.current !== pkey) {
     const a = prev.current, b = pkey, sub = (x: string) => x === "eq" || x === "cl"
-    if (!desk && a === "set" && sub(b)) { pt.current = { kind: "push", dir: 1 }; fromSet.current = true }
+    const deep = (x: string) => isPushP(x) || sub(x)
+    // Refonte iOS : Réglages s'ouvre en feuille (monte du bas) depuis le « … » de la capsule, et redescend à la fermeture
+    if (!desk && b === "set" && !sub(a)) { pt.current = { kind: "sheet", dir: 1 }; fromSet.current = false }
+    else if (!desk && a === "set" && !sub(b)) { pt.current = { kind: "unsheet", dir: -1 }; fromSet.current = false }
+    else if (!desk && a === "set" && sub(b)) { pt.current = { kind: "push", dir: 1 }; fromSet.current = true }
     else if (!desk && sub(a) && b === "set" && fromSet.current) { pt.current = { kind: "pop", dir: -1 }; fromSet.current = false }
     else {
-      pt.current = !desk && isPushP(b) && !isPushP(a) ? { kind: "push", dir: 1 } : !desk && isPushP(a) && !isPushP(b) ? { kind: "pop", dir: -1 } : { kind: "fade", dir: (ORDER[b] ?? 9) >= (ORDER[a] ?? 9) ? 1 : -1 }
+      pt.current = !desk && deep(b) && !deep(a) ? { kind: "push", dir: 1 } : !desk && deep(a) && !deep(b) ? { kind: "pop", dir: -1 } : { kind: "fade", dir: (ORDER[b] ?? 9) >= (ORDER[a] ?? 9) ? 1 : -1 }
       fromSet.current = false
     }
     // update84 · navbar (rec/ag/ch/dev) : crossfade 180 ms. Relance / Réglages / sous-pages : push iOS.
@@ -1509,10 +1533,10 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
     const elIn = els.current.get(to), elOut = els.current.get(from), t = pt.current
     if (!elIn) return
     const reduce = prefersReduced()
-    const zIn = t.kind === "pop" && !reduce ? "1" : "2", zOut = zIn === "2" ? "1" : "2"
+    const zIn = (t.kind === "pop" || t.kind === "unsheet") && !reduce ? "1" : "2", zOut = zIn === "2" ? "1" : "2"
     // état de départ posé immédiatement (aucune image de la nouvelle page à sa place finale avant l'animation)
     const dx = t.dir >= 0 ? 10 : -10
-    const fromIn: Record<string, string> = reduce ? { opacity: "0" } : t.kind === "push" ? { transform: "translateX(100%)" } : t.kind === "pop" ? { transform: "translateX(-28%)", opacity: ".55" } : { opacity: "0", transform: `translateX(${dx}px)` }
+    const fromIn: Record<string, string> = reduce ? { opacity: "0" } : t.kind === "push" ? { transform: "translateX(100%)" } : t.kind === "pop" ? { transform: "translateX(-28%)", opacity: ".55" } : t.kind === "sheet" ? { transform: "translateY(100%)" } : t.kind === "unsheet" ? {} : { opacity: "0", transform: `translateX(${dx}px)` }
     elIn.style.visibility = ""; elIn.style.zIndex = zIn; elIn.style.transform = fromIn.transform || ""; elIn.style.opacity = fromIn.opacity || ""; elIn.style.willChange = "transform, opacity"
     if (!reduce && (t.kind === "push")) elIn.style.boxShadow = PAGE_SHADOW
     if (elOut) { elOut.style.visibility = ""; elOut.style.zIndex = zOut; elOut.style.willChange = "transform, opacity"; if (!reduce && t.kind === "pop") elOut.style.boxShadow = PAGE_SHADOW }
@@ -1523,6 +1547,8 @@ function Pages({ pkey, page, desk, loading }: { pkey: string; page: P; desk: boo
       const list: any[] = []
       if (reduce) { list.push(animate(elIn, { opacity: [0, 1] }, { duration: .26, ease: [.22, 1, .36, 1] })); if (elOut) list.push(animate(elOut, { opacity: [1, 0] }, { duration: .2 })) }
       else if (t.kind === "push") { list.push(animate(elIn, { x: ["100%", "0%"] }, xT)); if (elOut) list.push(animate(elOut, { x: ["0%", "-28%"], opacity: [1, .55] }, { x: xT, opacity: xT })) }
+      else if (t.kind === "sheet") { list.push(animate(elIn, { y: ["100%", "0%"] }, SHEET)); if (elOut) list.push(animate(elOut, { opacity: [1, .7] }, { duration: .3 })) }
+      else if (t.kind === "unsheet") { if (elOut) list.push(animate(elOut, { y: ["0%", "100%"] }, SHEET)); list.push(animate(elIn, { opacity: [.7, 1] }, { duration: .3 })) }
       else if (t.kind === "pop") { list.push(animate(elIn, { x: ["-28%", "0%"], opacity: [.55, 1] }, { x: xT, opacity: xT })); if (elOut) list.push(animate(elOut, { x: ["0%", "100%"] }, xT)) }
       // update84 · onglets navbar : crossfade 180 ms + léger translate, les deux pages restent visibles (KEEP monté)
       else { list.push(animate(elIn, { opacity: [0, 1], x: [dx, 0] }, CROSSFADE)); if (elOut) list.push(animate(elOut, { opacity: [1, 0], x: [0, -dx] }, CROSSFADE)) }
@@ -1666,7 +1692,7 @@ function AknoApp() {
   const prefetch = (p: P) => { void LAZY[p]?.preload().catch(() => {}) }
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} page={page} desk loading={loading} /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={unpaidCount(fst)} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={(fst.rows || []).filter(isLate).length} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <Suspense fallback={null}><DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={(dv: Devis) => { setEd(null); setM({ kind: "devisPrev", data: dv }) }}
       // Création confirmée : toast du haut + retour haptique léger, puis le document créé s'ouvre.
       onCreated={(dv: Devis) => { setEd(null); flash(dv.num ? `Devis N° ${dv.num} créé` : "Devis créé"); void hapticSuccess(); setM({ kind: "devisPrev", data: dv }) }}

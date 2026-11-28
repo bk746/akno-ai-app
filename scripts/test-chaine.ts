@@ -151,7 +151,7 @@ async function main() {
   check("Webhook : facture payée, mode « Prélèvement SEPA », relance en attente annulée", (pd as any).paid === "f2" && pay.db.factures[0].statut === "payee" && pay.db.factures[0].mode_paiement === "Prélèvement SEPA" && pay.db.facture_relances[0].statut === "ignoree")
   check("Webhook rejoué : idempotent", (await markPaidFromStripe(pay.sb, { metadata: { akno_facture_id: "f2" } }, "acct_123") as any).already)
 
-  /* 6. Relances : devis perdu à 30 j, impayés J+1 / J+7 / J+15 puis mise en demeure */
+  /* 6. Relances : devis perdu à 30 j, impayés J+3 / J+7 / J+15 puis mise en demeure */
   const now = new Date("2026-11-22T09:00:00Z")
   const lost = fakeDb({ devis: [{ id: "old", statut: "env", envoye_le: "2026-10-10T08:00:00Z" }, { id: "recent", statut: "env", envoye_le: "2026-11-10T08:00:00Z" }, { id: "signed", statut: "val", envoye_le: "2026-09-01T08:00:00Z" }], relances: [] })
   const lr = await markLostDevis(lost.sb, now)
@@ -159,16 +159,16 @@ async function main() {
   const legacy = fakeDb({ devis: [{ id: "old", statut: "envoye", envoye_le: "2026-10-10T08:00:00Z" }], relances: [] }, { reject: (t, r) => t === "devis" && r.statut === "perdu" ? { code: "23514", message: "devis_statut_check" } : null })
   await markLostDevis(legacy.sb, now)
   check("Sans migration : « perdu » replié en « sans_reponse »", legacy.db.devis[0].statut === "sans_reponse", legacy.db.devis[0])
-  check("Paliers d'impayés : J+1, J+7, J+15, mise en demeure J+30", JSON.stringify(IMPAYE_STEPS.map(s => s.days)) === "[1,7,15,30]")
+  check("Paliers d'impayés : J+3, J+7, J+15, mise en demeure J+30", JSON.stringify(IMPAYE_STEPS.map(s => s.days)) === "[3,7,15,30]")
   const ctx = (auto: boolean) => ({ artisan: async () => ({ id: "u1", entreprise_nom: "Alpes Rénovation", relances_auto: auto }), can: async () => true }) as any
   const fact = (late: string) => ({ id: "f" + late, artisan_id: "u1", numero: "F-2026-0009", client_nom: "Paul", client_email: "", statut: "envoyee", relances_off: false, type: "facture", total_ttc: 500, date_echeance: late })
-  const im = fakeDb({ factures: [fact("2026-11-21"), fact("2026-11-14"), fact("2026-11-22")], facture_relances: [] })
+  const im = fakeDb({ factures: [fact("2026-11-19"), fact("2026-11-14"), fact("2026-11-22")], facture_relances: [] })
   await prepareFactureRelances(im.sb, ctx(false), now)
-  check("Impayé à J+1 : relance préparée (à valider) ; pas avant l'échéance", im.db.facture_relances.length === 2 && im.db.facture_relances.every(r => r.statut === "a_valider" && r.niveau === 1), im.db.facture_relances)
+  check("Impayé à J+3 : relance préparée (à valider) ; pas avant l'échéance", im.db.facture_relances.length === 2 && im.db.facture_relances.every(r => r.statut === "a_valider" && r.niveau === 1), im.db.facture_relances)
   im.db.facture_relances.forEach(r => { r.statut = "envoyee" })
   await prepareFactureRelances(im.sb, ctx(false), now)
   const n2 = im.db.facture_relances.filter(r => r.niveau === 2)
-  check("Impayé à J+8 : 2e relance (J+7) ; J+1 attend son tour", n2.length === 1 && n2[0].facture_id === "f2026-11-14", im.db.facture_relances)
+  check("Impayé à J+8 : 2e relance (J+7) ; J+3 attend son tour", n2.length === 1 && n2[0].facture_id === "f2026-11-14", im.db.facture_relances)
   const md = fakeDb({ factures: [fact("2026-10-20")], facture_relances: [1, 2, 3].map(n => ({ facture_id: "f2026-10-20", niveau: n, statut: "envoyee" })) })
   await prepareFactureRelances(md.sb, ctx(true), now)
   const m4 = md.db.facture_relances.find(r => r.niveau === 4)

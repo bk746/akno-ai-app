@@ -46,6 +46,8 @@
     "test:update85": "node scripts/test-update85.mjs",
     "test:update86": "node scripts/test-update86.mjs",
     "test:kb-sheets": "node scripts/test-kb-sheets.mjs",
+    "test:relances-ui": "node scripts/test-relances-ui.mjs",
+    "shots:refonte": "node scripts/shots-refonte.mjs",
     "test:client-picker": "node scripts/test-client-picker.mjs",
     "test:devis-ui": "node scripts/test-devis-ui.mjs",
     "test:devis-pdf": "esbuild scripts/render-devis-pdf.ts --bundle --platform=node --format=esm --packages=external --outfile=node_modules/.cache/akno-render-devis.mjs --log-level=warning && node node_modules/.cache/akno-render-devis.mjs"

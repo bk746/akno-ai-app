@@ -191,8 +191,8 @@ export default function ModalSheet({ label, labelledBy, onClose, children, desk,
         onScroll={e => { const p = e.currentTarget; if (p === e.target && p.scrollTop) p.scrollTop = 0 }}
         {...anim} style={desk ? style : mobile}
         onPointerDown={e => e.stopPropagation()} onAnimationStart={() => { if (panel.current) panel.current.style.willChange = "transform" }} onAnimationComplete={() => { if (panel.current) panel.current.style.willChange = "auto"; if (!entered.current) { entered.current = true; onEntered?.() } }}
-        className={`pointer-events-auto relative flex w-full flex-col overflow-hidden text-white outline-none ${desk ? `max-h-[88dvh] rounded-[24px] border border-white/[.08] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${deskClass}` : `max-w-[640px] ${size === "full" ? "" : "rounded-t-[22px] shadow-[0_-24px_60px_-18px_rgba(0,0,0,.9)]"}`} ${className}`}>
-        {!desk && handle && <div aria-hidden data-sheet-grab className="pointer-events-none absolute left-1/2 top-[6px] z-30 h-[5px] w-9 -translate-x-1/2 rounded-full bg-white/25" />}
+        className={`pointer-events-auto relative flex w-full flex-col overflow-hidden text-white outline-none ${/\bak-dark\b/.test(className) ? "" : "akno-light ak-modal ak-on-grey "}${desk ? `max-h-[88dvh] rounded-[24px] border border-white/[.08] shadow-[0_40px_80px_-20px_rgba(0,0,0,.95)] ${deskClass}` : `max-w-[640px] ${size === "full" ? "" : "rounded-t-[22px] shadow-[0_-24px_60px_-18px_rgba(0,0,0,.9)]"}`} ${className}`}>
+        {!desk && handle && <div aria-hidden data-sheet-grab className="pointer-events-none absolute left-1/2 top-[6px] z-30 h-[5px] w-9 -translate-x-1/2 rounded-full bg-[rgba(60,60,67,.28)]" />}
         {children}
       </motion.div>
     </div>

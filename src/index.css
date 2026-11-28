@@ -202,7 +202,7 @@ label:focus-within input:focus-visible { outline: none; }
    --nav-h / --nav-gap : barre flottante (hauteur, écart au bas = au-dessus du home indicator)
    --page-bottom : réserve en bas de CHAQUE zone qui défile sous la barre (barre + écart + marge de lecture)
    --sheet-bottom : bas des feuilles (pied de page, zone de saisie) au-dessus du home indicator */
-:root{--nav-h:64px;--nav-gap:max(calc(var(--sab) - 10px),12px);--page-bottom:calc(var(--nav-h) + var(--nav-gap) + 28px);--sheet-bottom:max(var(--sab),16px)}
+:root{--nav-h:56px;--nav-gap:max(calc(var(--sab) - 10px),12px);--page-bottom:calc(var(--nav-h) + var(--nav-gap) + 28px);--sheet-bottom:max(var(--sab),16px)}
 .pb-page{padding-bottom:var(--page-bottom)!important}
 .pb-sheet{padding-bottom:var(--sheet-bottom)!important}
 /* champ focalisé ou ancre : jamais caché sous la barre flottante */
@@ -437,3 +437,49 @@ button, a, [role="button"], [role="tab"], [data-press], [data-hit], [data-qa], [
 @media (prefers-reduced-motion: reduce) {
   .ch-carousel { scroll-behavior: auto; }
 }
+
+/* ================= Refonte iOS · DA validée (Designer) =================
+   Haut de page noir (bot, chiffre clé), contenu dans une feuille blanche (rayon 40), barre d'onglets et capsule en verre clair.
+   Couleurs porteuses de sens uniquement : rouge #E0221B (retard / dû), orange #B25E00 (bientôt / en pause),
+   bleu Apple #0071E3 (texte) / #007AFF (pastilles) pour signé / succès. Texte secondaire #6E6E73, filets rgba(60,60,67,.16). */
+:root{--ak-red:#E0221B;--ak-orange:#B25E00;--ak-blue:#0071E3;--ak-blue-dot:#007AFF;--ak-grey:#6E6E73;--ak-sep:rgba(60,60,67,.16);--ak-fill:rgba(118,118,128,.12);--ak-grouped:#F2F2F7}
+.ak-glass{position:relative;background:rgba(250,250,252,.68);border:.5px solid rgba(255,255,255,.9);box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 0 0 .5px rgba(0,0,0,.07),0 6px 24px rgba(0,0,0,.10);-webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%)}
+.ak-caps{background:rgba(255,255,255,.86);border:.5px solid rgba(255,255,255,.95);box-shadow:inset 0 1px 0 #fff,0 0 0 .5px rgba(0,0,0,.08),0 4px 14px rgba(0,0,0,.25);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%)}
+.ak-seg{background:rgba(120,120,128,.32);border:.5px solid rgba(255,255,255,.12)}
+.ak-sheet{background:#fff;border-radius:40px 40px 0 0;color:#000}
+.ak-grab{width:44px;height:5px;border-radius:3px;background:rgba(60,60,67,.28);margin:8px auto 0}
+
+/* Thème clair par portée : à l'intérieur de .akno-light, les utilitaires blanc/noir de Tailwind s'inversent
+   (text-white/60 → noir 60 %, bg-white/[.06] → remplissage gris iOS…) et les surfaces sombres deviennent des surfaces claires.
+   Les écrans existants gardent leur logique et leurs branchements ; seule la couche visuelle change. */
+.akno-light{--color-white:#000;--color-black:#fff;--ak-surface:var(--ak-grouped);color:#000;color-scheme:light}
+.akno-light.ak-on-grey,.akno-light .ak-on-grey{--ak-surface:#fff}
+.akno-light :is(.bg-\[\#141416\],.bg-\[\#121214\],.bg-\[\#0E0E10\],.bg-\[\#1C1C1E\],.bg-\[\#1C1C1F\],.bg-\[\#161618\],.bg-\[\#0B0B0D\],.bg-\[\#0A0A0B\],.bg-\[\#2A2A2D\],.bg-\[\#111113\]){background-color:var(--ak-surface)!important}
+.akno-light :is(.bg-\[\#2C2C2E\]){background-color:#E5E5EA!important}
+.akno-light :is(.from-\[\#1A1A1D\],.from-\[\#161618\]){--tw-gradient-from:var(--ak-surface)!important}
+.akno-light :is(.to-\[\#101012\],.to-\[\#111113\]){--tw-gradient-to:var(--ak-surface)!important}
+.akno-light :is(.bg-\[\#F2F2F2\],.bg-\[\#F6F6F8\]){background-color:#000!important}
+.akno-light :is(.text-\[\#FF9B96\],.text-\[\#FF6B61\],.text-\[\#FF6B6B\],.text-\[\#FF5F57\],.text-\[\#FF453A\],.text-\[\#FF7A72\],.text-\[\#FFB4AF\]){color:var(--ak-red)!important}
+.akno-light :is(.text-\[\#7EA6FF\],.text-\[\#2F6BFF\],.text-\[\#30D158\]){color:var(--ak-blue)!important}
+.akno-light :is(.text-\[\#FFB340\]){color:var(--ak-orange)!important}
+.akno-light :is(.text-\[\#6E6E76\],.text-\[\#8A8A90\]){color:var(--ak-grey)!important}
+.akno-light :is(.border-\[\#FF453A\]){border-color:var(--ak-red)!important}
+.akno-light :is(.bg-\[\#FF453A\]){background-color:var(--ak-red)!important}
+.akno-light :is(.border-\[\#FFB340\]){border-color:var(--ak-orange)!important}
+.akno-light :is(.bg-\[\#2F6BFF\]){background-color:var(--ak-blue-dot)!important}
+.akno-light input,.akno-light textarea,.akno-light select{color:#000;caret-color:var(--ak-blue-dot)}
+.akno-light ::placeholder{color:rgba(60,60,67,.3)}
+/* boutons pleins de couleur (texte blanc d'origine) : on garde le texte blanc sur les fonds colorés */
+.akno-light :is(.bg-\[\#FF453A\],.bg-\[\#2F6BFF\],.bg-\[\#30D158\]).text-white{color:#fff!important}
+/* Feuilles modales : fond gris groupé iOS, cartes blanches */
+.akno-light.ak-modal{background:var(--ak-grouped)!important}
+/* primitives (ui.tsx) : couleurs pilotées par variables pour suivre le thème de la portée */
+:root{--st-danger:#FF5F57;--st-muted:rgba(255,255,255,.45);--st-accent:#2F6BFF;--tg-on:#2F7BFF;--tg-off:rgba(255,255,255,.14);--btn-bg:#fff;--btn-fg:#000;--tbtn-bg:#fff;--tbtn-fg:#111;--tbtn-soft:rgba(255,255,255,.09);--tbtn-fg-soft:#fff;--chart-bar:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.04));--chart-bar-sh:inset 0 1px 0 rgba(255,255,255,.08)}
+.akno-light{--st-danger:var(--ak-red);--st-muted:var(--ak-grey);--st-accent:var(--ak-blue);--tg-on:#000;--tg-off:rgba(120,120,128,.16);--btn-bg:#000;--btn-fg:#fff;--tbtn-bg:var(--ak-fill);--tbtn-fg:#1C1C1E;--tbtn-soft:var(--ak-fill);--tbtn-fg-soft:#1C1C1E;--chart-bar:#E5E5EA;--chart-bar-sh:none;--chart-sel:#000;--chart-sel-sh:none}
+.akno-light [data-av]{background:linear-gradient(180deg,#A2A2A7,#7C7C81)!important;color:#fff!important;font-size:15px}
+.akno-light [data-urgent-dot]{background:var(--ak-red)!important}
+/* verres sombres des écrans existants → verre clair dans la portée claire (cartes Chantiers sur la carte, menus) */
+.akno-light :is(.bg-\[\#1C1C1E\]\/75,.bg-\[\#1C1C1E\]\/95,.bg-\[\#161618\]\/95,.bg-\[\#161618\]\/70){background-color:rgba(250,250,252,.86)!important}
+.akno-light .text-\[\#4D9BFF\]{color:var(--ak-blue-dot)!important}
+/* interrupteurs des écrans existants : la pastille reste blanche dans la portée claire */
+.akno-light [role=switch] :is(.bg-white,.bg-white\/95,.bg-white\/90){background-color:#fff!important}

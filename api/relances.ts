@@ -37,7 +37,7 @@ type ArtisanRow = {
   nom_entreprise?: string | null; entreprise_telephone?: string | null; telephone?: string | null; avis_url?: string | null
   sms_enabled?: boolean | null; sms_sender?: string | null; rapport_mensuel?: boolean | null; iban?: string | null
   conservation_enregistrements_jours?: number | null
-  relances_auto?: boolean | null // update71 (migration 20261122_14) : relances d'impayés J+1/J+7/J+15 envoyées automatiquement
+  relances_auto?: boolean | null // update71 (migration 20261122_14) : relances d'impayés J+3/J+7/J+15 envoyées automatiquement
 }
 
 /** Cache par exécution : profil et droits de chaque artisan. */
@@ -329,9 +329,9 @@ async function processAppointmentReminders(sb: SupabaseClient, ctx: Ctx, now: Da
 }
 
 /* ---------- update46 : relances d'impayés PRÉPARÉES, validées par l'artisan ---------- */
-/* update71 : J+1, J+7, J+15 après l'échéance (envoyées seules si l'artisan a laissé « Relances automatiques » activé), puis
+/* update71 : J+3, J+7, J+15 après l'échéance (envoyées seules si l'artisan a laissé « Relances automatiques » activé), puis
    mise en demeure à J+30 TOUJOURS à valider par l'artisan. Avant la migration 20261122_14 : tout reste à valider (comportement update46). */
-export const IMPAYE_STEPS = [{ niveau: 1, days: 1 }, { niveau: 2, days: 7 }, { niveau: 3, days: 15 }, { niveau: 4, days: 30 }]
+export const IMPAYE_STEPS = [{ niveau: 1, days: 3 }, { niveau: 2, days: 7 }, { niveau: 3, days: 15 }, { niveau: 4, days: 30 }]
 
 export async function prepareFactureRelances(sb: SupabaseClient, ctx: Ctx, now: Date) {
   const today = parisYmd(now)

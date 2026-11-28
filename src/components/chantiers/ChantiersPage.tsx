@@ -2,7 +2,9 @@
    avec la carte, fiche complète glissable, création par « + » ou appui long. Chargée à la demande (Leaflet hors bundle principal). */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react"
-import { Check, ChevronDown, ChevronLeft, HardHat, Layers, LocateFixed, Loader2, MapPin, Plus, Sparkles, X } from "lucide-react"
+import { Check, ChevronDown, ChevronLeft, HardHat, Layers, List, LocateFixed, Loader2, MapPin, MoreHorizontal, Plus, Sparkles, X } from "lucide-react"
+import { Capsule } from "../nav/IosPage"
+import ChHistory from "./ChHistory"
 import { useC } from "../ui"
 import ChMap, { TILES, type MapApi, type MapLayer } from "./ChMap"
 import ChantierForm, { type FormReq } from "./ChantierForm"
@@ -39,6 +41,7 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
   const setFilter = (f: Filter) => { setFilterS(f); ls.set("akno.ch.filter", f); setFOpen(false) }
   const setLayer = (l: MapLayer) => { setLayerS(l); ls.set("akno.ch.layer", l) }
 
+  const [hist, setHist] = useState(false)
   useEffect(() => { void loadChantiers() }, [])
   // « + » → Nouveau chantier (depuis n'importe quelle page)
   useEffect(() => { if (takeNewRequest()) setForm({}); const f = () => { if (takeNewRequest()) setForm({}) }; addEventListener("akno-chantier-new", f); return () => removeEventListener("akno-chantier-new", f) }, [])
@@ -216,21 +219,23 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
   </div>
 
   /* ---------- mobile ---------- */
+  const fromHist = (id: string) => { setHist(false); setDraft(null); if (filter !== "all") setFilterS("all"); setSel(id); setTimeout(() => { const c = chState().rows.find(x => x.id === id); setSheet(true); flyTo(c, { open: true }); scrollToId(id) }, 320) }
   return <div className="relative min-h-0 flex-1 overflow-hidden overscroll-none bg-[#0b0d0c]">
     {mapEl}
+    <AnimatePresence>{hist && <ChHistory key="hist" rows={all} onPick={fromHist} onClose={() => setHist(false)} />}</AnimatePresence>
     <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[170px] bg-gradient-to-b from-black/70 via-black/30 to-transparent" />
     <header className="pointer-events-none absolute inset-x-0 top-0 z-20" style={{ paddingTop: "calc(var(--sat) + 2px)" }}>
       <div className="flex h-11 items-center px-5">
-        <img src="/logo.png" alt="Akno" className="h-[25px] w-auto drop-shadow-[0_1px_6px_rgba(0,0,0,.5)]" />
+        {/* Refonte iOS : titre + capsule en verre clair (+ nouveau chantier · liste / historique · réglages) */}
+        <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-white drop-shadow-[0_1px_6px_rgba(0,0,0,.5)]">Chantiers</h1>
         <div className="pointer-events-auto ml-auto flex items-center gap-2">
-          <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Assistant" onClick={() => setChat(true)} className={`flex h-9 w-9 items-center justify-center rounded-full ${glass}`}><Sparkles size={17} strokeWidth={2} /></motion.button>
-          <motion.button type="button" whileTap={{ scale: .9 }} aria-label="Réglages" title="Réglages" onClick={() => go("set")} className="flex h-9 w-9 items-center justify-center rounded-full">{me}</motion.button>
+          <Capsule items={[{ I: Plus, label: "Nouveau chantier", on: () => { if (st.missing) { toast("Appliquez d'abord la migration Chantiers"); return } setForm({}) } }, { I: List, label: "Liste des chantiers", on: () => setHist(true) }, { I: MoreHorizontal, label: "Réglages", on: () => go("set") }]} />
         </div>
       </div>
       <div className="mt-2 flex justify-center">{filterPill}</div>
     </header>
 
-    <AnimatePresence>{!sheet && <motion.div key="bottom" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} transition={{ type: "spring", stiffness: 380, damping: 36 }} className="kb-hide data-ch-peek pointer-events-none absolute inset-x-0 z-20 flex flex-col" style={{ bottom: NAV }}>
+    <AnimatePresence>{!sheet && <motion.div key="bottom" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} transition={{ type: "spring", stiffness: 380, damping: 36 }} className="akno-light ak-on-grey kb-hide data-ch-peek pointer-events-none absolute inset-x-0 z-20 flex flex-col" style={{ bottom: NAV }}>
       <div className="flex items-end justify-between px-4 pb-2.5">{attribution}{ctrls}</div>
       <AnimatePresence mode="popLayout" initial={false}>
         {draft ? <div key="dr" className="px-4">{draftCard}</div>
@@ -262,7 +267,7 @@ function FullSheet({ children, onClose }: { children: ReactNode; onClose: () => 
     <motion.section ref={sec} role="dialog" aria-modal="true" aria-labelledby="ch-sheet-title" drag="y" dragControls={dc} dragListener={false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: .04, bottom: .7 }}
       onDragEnd={(_, i) => { if (i.offset.y > 110 || i.velocity.y > 650) onClose() }}
       initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", stiffness: 340, damping: 34, mass: .9 }}
-      className="absolute inset-x-0 bottom-0 z-[22] flex flex-col rounded-t-[26px] border-t border-white/[.08] bg-[#161618]/95 text-white shadow-[0_-20px_50px_-10px_rgba(0,0,0,.7)] backdrop-blur-2xl" style={{ top: "calc(var(--sat) + 132px)" }}>
+      className="akno-light absolute inset-x-0 bottom-0 z-[22] flex flex-col rounded-t-[40px] border-t border-white/[.08] bg-[#fff] text-white shadow-[0_-20px_50px_-10px_rgba(0,0,0,.7)] backdrop-blur-2xl" style={{ top: "calc(var(--sat) + 132px)" }}>
       <div onPointerDown={e => dc.start(e)} className="flex h-6 shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing" aria-hidden><div className="h-[5px] w-10 rounded-full bg-white/25" /></div>
       <div ref={body} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5" style={{ paddingBottom: NAV }}>
         <div onPointerDown={fromHead}>{children}</div>
