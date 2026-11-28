@@ -244,7 +244,7 @@ function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt,
   const hero = noHero ? undefined : <>{heroBot}{lab && <div className={`${mid ? "mt-2.5" : "mt-3.5"} flex items-center gap-1.5 text-[13px] leading-4 text-[#A1A1A6] [&>span:first-child]:h-[7px] [&>span:first-child]:w-[7px]`}>{lab}</div>}<div className={`${mid ? "mt-1.5" : "mt-3.5"} flex items-baseline justify-center text-[64px] font-semibold leading-[64px] tracking-[-0.03em] tabular-nums text-white`}>{fig}</div><div className={`mt-1.5 ${mid ? "text-[17px]" : "text-[19px]"} leading-6 text-[rgba(235,235,245,.72)]`}>{sub}</div></>
   const ttl = title || (k === "dev" ? "Facturation" : k === "rel" ? "Relances" : k ? A[k].tab : "")
   const backBtn = k === "rel" ? <button type="button" aria-label="Retour" onClick={() => go(lastDocMode())} className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center text-white"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[.14]"><ChevronLeft size={22} strokeWidth={2} /></span></button> : undefined
-  return <IosPage title={ttl || (isSet ? "Réglages" : "")} caps={caps} mid={mid} hero={hero} lead={backBtn} sheetTop={sheetTop}>
+  return <IosPage title={ttl || (isSet ? "Réglages" : "")} caps={caps} mid={mid} hero={hero} lead={backBtn} sheetTop={sheetTop} dragSheet={k === "rec"}>
     {bodyKey === undefined ? children : swap((_a, c) => <div className="flex flex-col">{c}</div>, "")}
   </IosPage>
 }

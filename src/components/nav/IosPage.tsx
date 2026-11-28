@@ -5,9 +5,12 @@
    - Contenu dans une feuille blanche (coins 40, poignée), qui s'étend jusqu'en bas (rebond compris).
    Animations : transform / opacity uniquement, pilotées par le défilement (aucun saut de layout) ;
    prefers-reduced-motion → pas de repli animé (le titre reste net, la barre change seulement d'opacité). */
-import { useRef, type ReactNode } from "react"
-import { motion, useReducedMotion, useScroll, useTransform } from "motion/react"
+import { useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from "react"
+import { animate, motion, useDragControls, useMotionValue, useReducedMotion, useScroll, useTransform, type PanInfo } from "motion/react"
 import { hapticTap } from "../../lib/haptics"
+
+const SHEET_OVERLAP = 40
+const SHEET_SPRING = { type: "spring" as const, stiffness: 520, damping: 42, mass: .85 }
 
 export type CapsBtn = { I: any; label: string; on: () => void; dis?: boolean; text?: string }
 
@@ -43,9 +46,89 @@ let lastTabP = "rec"
 export const noteTab = (p: string) => { if (p === "rec" || p === "ag" || p === "ch" || p === "dev" || p === "fac") lastTabP = p }
 export const lastTab = () => lastTabP
 
-export function IosPage({ title, caps, mid, hero, chips, children, lead, sheetTop, spacer, flush, heroPt }: { heroPt?: number; title: ReactNode; caps?: CapsBtn[]; mid?: ReactNode; hero?: ReactNode; chips?: ReactNode; children: ReactNode; lead?: ReactNode; sheetTop?: number
+/** Réception mobile : haut noir fixe, feuille blanche déplaçable (poignée) avec liste qui défile une fois en haut. */
+function IosPageDragSheet({ title, caps, mid, hero, chips, children, lead, sheetTop, flush, heroPt }: { heroPt?: number; title: ReactNode; caps?: CapsBtn[]; mid?: ReactNode; hero?: ReactNode; chips?: ReactNode; children: ReactNode; lead?: ReactNode; sheetTop?: number; flush?: boolean }) {
+  const headRef = useRef<HTMLDivElement>(null)
+  const heroRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const reduce = useReducedMotion()
+  const dragControls = useDragControls()
+  const y = useMotionValue(0)
+  const [snap, setSnap] = useState<{ top: number; expandY: number } | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const pt = heroPt ?? (mid ? 18 : 52), pb = sheetTop ?? (mid ? 52 : 74)
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const nav = headRef.current?.offsetHeight ?? 0
+      const heroH = heroRef.current?.offsetHeight ?? 0
+      const collapsedTop = nav + heroH - SHEET_OVERLAP
+      const expandedTop = nav + 2
+      setSnap({ top: collapsedTop, expandY: expandedTop - collapsedTop })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (headRef.current) ro.observe(headRef.current)
+    if (heroRef.current) ro.observe(heroRef.current)
+    return () => ro.disconnect()
+  }, [mid, hero, pt, pb])
+
+  const onSheetEnd = (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (!snap || reduce) return
+    const expandY = snap.expandY
+    const target = info.velocity.y < -450 || y.get() < expandY * .45 ? expandY : 0
+    setExpanded(target !== 0)
+    void animate(y, target, SHEET_SPRING).then(() => { void hapticTap("select") })
+  }
+
+  const onGrab = (e: PointerEvent) => { if (!reduce) dragControls.start(e) }
+
+  const onInnerScroll = () => {
+    if (!snap || reduce) return
+    const atTop = y.get() <= snap.expandY + 6
+    if (!atTop && scrollRef.current) scrollRef.current.scrollTop = 0
+  }
+
+  return <div data-page-scroll data-ios-drag-sheet className="ak-page relative flex min-h-0 flex-1 flex-col overflow-hidden bg-black">
+    <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-full h-[100vh] bg-black" />
+    <div ref={headRef} className="relative z-30 shrink-0 bg-black">
+      <NavBar title={title} caps={caps} lead={lead} scroller={scrollRef} />
+    </div>
+    <div className="relative z-0 shrink-0 bg-black">
+      {mid && <div className="relative z-10 px-5 pt-2">{mid}</div>}
+      <div ref={heroRef} className="flex flex-col items-center px-5 text-center" style={{ paddingTop: pt, paddingBottom: pb + 40 }}>{hero}</div>
+    </div>
+    <motion.div
+      data-ios-sheet
+      className="ak-sheet akno-light absolute inset-x-0 z-20 flex max-h-[100dvh] flex-col bg-[#fff] shadow-[0_-8px_32px_rgba(0,0,0,.35)]"
+      style={{ top: snap?.top ?? "42%", bottom: 0, minHeight: "100dvh", y }}
+      drag={reduce ? false : "y"}
+      dragControls={dragControls}
+      dragListener={false}
+      dragConstraints={snap ? { top: snap.expandY, bottom: 0 } : undefined}
+      dragElastic={{ top: .1, bottom: .14 }}
+      onDragEnd={onSheetEnd}
+    >
+      <button type="button" aria-label="Déplacer la feuille" onPointerDown={onGrab} className="flex w-full shrink-0 cursor-grab touch-none justify-center py-2 active:cursor-grabbing [-webkit-tap-highlight-color:transparent]">
+        <span aria-hidden className="ak-grab !my-0" />
+      </button>
+      {chips && <div className="no-scrollbar flex shrink-0 gap-2 overflow-x-auto px-5 pb-2">{chips}</div>}
+      <div
+        ref={scrollRef}
+        onScroll={onInnerScroll}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-y-contain"
+        style={{ paddingBottom: "var(--page-bottom)", WebkitOverflowScrolling: "touch", overflowY: expanded || reduce ? "auto" : "hidden" }}
+      >
+        <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className={`flex flex-col ${flush ? "" : "px-4"}`}>{children}</motion.div>
+      </div>
+    </motion.div>
+  </div>
+}
+
+export function IosPage({ title, caps, mid, hero, chips, children, lead, sheetTop, spacer, flush, heroPt, dragSheet }: { heroPt?: number; title: ReactNode; caps?: CapsBtn[]; mid?: ReactNode; hero?: ReactNode; chips?: ReactNode; children: ReactNode; lead?: ReactNode; sheetTop?: number; dragSheet?: boolean
   /** hauteur noire sous le sélecteur quand il n'y a pas de haut de page (défaut 14 / 18) ; flush : contenu de la feuille sans marge latérale */
   spacer?: number; flush?: boolean }) {
+  if (dragSheet) return <IosPageDragSheet title={title} caps={caps} mid={mid} hero={hero} chips={chips} lead={lead} sheetTop={sheetTop} flush={flush} heroPt={heroPt}>{children}</IosPageDragSheet>
   const ref = useRef<HTMLDivElement>(null)
   // gabarit des maquettes : sans sélecteur, bot à 52 pt sous la barre et feuille à 74 pt sous le texte ; avec sélecteur, 18 / 52 pt
   const pt = heroPt ?? (mid ? 18 : 52), pb = sheetTop ?? (mid ? 52 : 74)
