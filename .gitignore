@@ -1,4 +1,7 @@
 node_modules
 dist
-.env.local
-*.local
+.env*
+!.env.example
+.vercel
+bridge-secret.txt
+*.zip
