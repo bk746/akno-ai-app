@@ -13,7 +13,7 @@ export type P = K | "set" | "fac" | "ch" | "eq" | "cl"
 export const isK = (p: P): p is K => p === "rec" || p === "ag" || p === "rel" || p === "dev"
 export const A = {
   rec: { n: "Réceptionniste", c: "#E6E6E6", tab: "Réception", I: PhoneCall, slug: "reception", d: "Décroche 24/7" },
-  ag: { n: "Agenda", c: "#8B7CFF", tab: "Agenda", I: CalendarDays, slug: "agenda", d: "Cale vos RDV" },
+  ag: { n: "Agenda", c: "#0A84FF", tab: "Agenda", I: CalendarDays, slug: "agenda", d: "Cale vos RDV" },
   rel: { n: "Relance", c: "#22B07A", tab: "Relance", I: Repeat2, slug: "relance", d: "Avis et rappels" },
   dev: { n: "Devis", c: "#2F6BFF", tab: "Devis", I: Receipt, slug: "devis", d: "Chiffre en direct" },
 } as const
@@ -56,7 +56,7 @@ export const orbEyes = (s: number): EyeG => s < 30 ? { l: 106, r: 168, y: 118, r
 // [fond, tache 1..4] par couleur d'agent ; delay = décalage pour désynchroniser les agents
 const ORB: Record<string, { p: string[]; d: number }> = {
   "#2F6BFF": { p: ["#0B2AA8", "#061A86", "#2F6EEA", "#A9BEEA", "#1A47D8"], d: 0 },
-  "#8B7CFF": { p: ["#8A7DF4", "#5F63EC", "#F5A3D3", "#F4E2B8", "#B7A2FF"], d: -7 },
+  "#0A84FF": { p: ["#0A60D8", "#0646A8", "#64B5FF", "#D6E9FF", "#2F8CFF"], d: -7 },
   "#22B07A": { p: ["#1E8C5E", "#0B6544", "#7AD9AA", "#ECE59E", "#2EAA72"], d: -13 },
   "#E6E6E6": { p: ["#ECECEF", "#FFFFFF", "#CFCFD6", "#E6CEF6", "#F8DFC4"], d: -4 },
 }

@@ -3,7 +3,11 @@
    historique automatique, documents), ajout / modification (ClientForm). Même style que la page Équipe (update65). Chargée à la demande. */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronLeft, ChevronRight, FileText, Mail, MapPin, MessageSquare, Navigation, Phone, Plus, Search, UsersRound, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, FileText, Info, Mail, MapPin, MessageSquare, MoreHorizontal, Navigation, Phone, Plus, Search, UsersRound, X } from "lucide-react"
+import { IosPage, lastTab } from "../nav/IosPage"
+import { BackBtn } from "../m/MPage"
+import { takeEditClient } from "../m/Fiche"
+import { hapticTap } from "../../lib/haptics"
 import { useC } from "../ui"
 import { SatThumb } from "../SatThumb"
 import { Bar, AvatarStack } from "../chantiers/parts"
@@ -42,7 +46,7 @@ export function useDirectory() {
 }
 
 export default function ClientsPage({ head }: { head?: ReactNode }) {
-  const { desk, go } = useC(), reduce = useReducedMotion(), prof = useProfile().p
+  const { desk, go, modal, s: s0 } = useC(), reduce = useReducedMotion(), prof = useProfile().p
   const { list, factures, cs, ch, ready } = useDirectory()
   const delay = useMemo(() => { const a = Array.isArray(prof?.relance_delais) ? (prof!.relance_delais as unknown[]).map(Number).filter(n => n >= 1 && n <= 60).sort((x, y) => x - y) : []; return a[0] || 3 }, [prof])
   const [q, setQ] = useState(""), [filter, setFilter] = useState<Filter>("all"), [openKey, setOpenKey] = useState<string | null>(null), [form, setForm] = useState<{ c: Client | null; seed?: NewClientSeed | null } | null>(null)
@@ -67,8 +71,13 @@ export default function ClientsPage({ head }: { head?: ReactNode }) {
     const k = pendingOpen.current; if (!k || !ready) return
     const [key, name, phone] = k.split("\u0001"), p = phoneKey(phone), n = ficheKey(name || "")
     const c = list.find(x => x.key === key) || (p ? list.find(x => phoneKey(x.phone) === p) : undefined) || list.find(x => x.key === n || ficheKey(x.name) === n)
-    pendingOpen.current = null; if (c) open(c.key)
-  }, [ready, list, open])
+    pendingOpen.current = null; if (c) { if (desk) open(c.key); else modal({ kind: "client", data: { name: c.name } }) }
+  }, [ready, list, open]) // eslint-disable-line react-hooks/exhaustive-deps
+  // « Modifier » d'une fiche (passe 2) : formulaire complet du client
+  useEffect(() => {
+    const f = () => { const n = takeEditClient(); if (!n || !ready) return; const k = ficheKey(n), c = list.find(x => x.key === k || ficheKey(x.name) === k); setForm({ c: c || null, seed: c ? undefined : { name: n } }) }
+    f(); addEventListener("akno-client-edit", f); return () => removeEventListener("akno-client-edit", f)
+  }, [ready, list])
 
   const shown = useMemo(() => list.filter(c => matchFilter(c, filter, today, delay) && matchQuery(c, q)).sort((a, b) => b.last.localeCompare(a.last) || a.name.localeCompare(b.name, "fr")), [list, filter, q, today, delay])
   const sum = useMemo(() => summary(list, ch.rows, factures, today), [list, ch.rows, factures, today])
@@ -117,6 +126,50 @@ export default function ClientsPage({ head }: { head?: ReactNode }) {
         </>}
   </div>
 
+  // passe 2 · maquette 02-Contacts/contacts : retour + « Clients » + capsule (+ · …), recherche, filtres, feuille blanche alphabétique
+  if (!desk) {
+    const sortedA = [...shown].sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }))
+    const L = (n: string) => { const c = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()[0]?.toUpperCase() || "#"; return /[A-Z]/.test(c) ? c : "#" }
+    const groups: [string, Client[]][] = []; for (const c of sortedA) { const l = L(c.name), g = groups[groups.length - 1]; if (g && g[0] === l) g[1].push(c); else groups.push([l, [c]]) }
+    const has = new Set(groups.map(g => g[0]))
+    const jump = (l: string) => { const el = document.getElementById(`cl-l-${l}`); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }) }
+    const subOf = (c: Client): [string, boolean] => {
+      const lateF = c.factures.find(f => f.due > 0 && !!f.numero && (f.statut === "emise" || f.statut === "envoyee") && !!(f as { date_echeance?: string | null }).date_echeance && String((f as { date_echeance?: string | null }).date_echeance) < today)
+      if (lateF) return [`${(lateF as { objet?: string | null }).objet || "Facture"} · facture en retard`, true]
+      const cb = s0.calls.find(x => x.callback && ficheKey(x.name) === c.key)
+      if (cb) return [`À rappeler · ${cb.tag || cb.topic || "appel"}`, true]
+      const on = c.chantiers.find(x => effectiveStatus(x, today) === "in_progress"); if (on) return [`${on.title} · chantier en cours`, false]
+      const up = c.chantiers.find(x => effectiveStatus(x, today) === "upcoming"); if (up) return [`${up.title} · chantier à venir`, false]
+      const dv = [...c.devis].sort((a, b) => b.num - a.num)[0]; if (dv) return [`${dv.objet || "Devis"} · ${dv.status === "val" ? "signé" : dv.status === "brouillon" ? "brouillon" : dv.status === "ref" ? "refusé" : "envoyé"}`, false]
+      return [c.city || c.phone || (c.kind === "pro" ? "Professionnel" : "—"), false]
+    }
+    const openM = (c: Client) => modal({ kind: "client", data: { name: c.name } })
+    return <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[#000]">
+      <IosPage title="Clients" flush lead={<BackBtn on={() => go(lastTab() as never)} className="-ml-2 mr-1" />} caps={[{ I: Plus, label: "Ajouter un client", on: () => setForm({ c: null }), dis: cs.missing }, { I: MoreHorizontal, label: "Réglages", on: () => go("set") }]} spacer={24}
+        mid={<><label className="ak-seg flex h-10 items-center gap-2 rounded-[20px] px-3.5 text-[#A1A1A6]"><Search size={17} strokeWidth={2} /><input type="search" enterKeyHint="search" aria-label="Rechercher un client" placeholder="Rechercher" value={q} onChange={e => setQ(e.target.value)} className="h-full min-w-0 flex-1 bg-transparent text-[17px] text-[#fff] outline-none placeholder:text-[#A1A1A6]" /></label>
+          <div role="tablist" aria-label="Filtrer les clients" className="no-scrollbar -mx-5 mt-3.5 flex gap-2 overflow-x-auto px-5">
+            {FILTERS.map(([f, l]) => <button key={f} type="button" role="tab" aria-selected={filter === f} onClick={() => { void hapticTap("select"); setFilter(f) }} className={`h-[34px] shrink-0 whitespace-nowrap rounded-[17px] px-3.5 text-[14px] ${filter === f ? "bg-[#fff] font-semibold text-[#000]" : "bg-[rgba(255,255,255,.12)] font-medium text-[#EBEBF5]"}`}>{l}</button>)}
+          </div></>}>
+        {!ready ? <div className="px-6 py-6 text-[15px] text-[#6E6E73]">Chargement…</div> : <>
+          <div className="px-6 pb-0.5 pt-3 text-[15px] leading-5 text-[#6E6E73]">{shown.length} client{shown.length > 1 ? "s" : ""}</div>
+          {!shown.length && <p className="px-6 py-8 text-center text-[15px] text-[#6E6E73]">{q ? `Aucun client pour « ${q} »` : !list.length ? "Les clients de vos devis et de vos appels apparaissent ici tout seuls. Touchez + pour en ajouter un." : filter === "relance" ? "Aucun client à relancer. Tout est à jour." : "Aucun client pour ce filtre."}</p>}
+          {groups.map(([l, cs2]) => <div key={l}>
+            <div id={`cl-l-${l}`} className="mt-1 h-7 scroll-mt-24 bg-[#F7F7F9] px-6 pt-1.5 text-[13px] font-semibold leading-4 text-[#6E6E73]">{l}</div>
+            {cs2.map((c, i) => { const [sub, red] = subOf(c); return <div key={c.key} className="relative flex h-[60px] items-center pl-6">
+              <button type="button" onClick={() => { void hapticTap(); openM(c) }} aria-label={c.name} className="flex h-full min-w-0 flex-1 items-center text-left active:opacity-60">
+                <span data-av aria-hidden className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold">{initials(c.name)}</span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-[17px] font-medium leading-[22px] tracking-[-0.01em]" style={{ color: red ? "#E0221B" : "#000" }}>{c.name}</span><span className="block truncate text-[14px] leading-[19px] text-[#6E6E73]">{sub}</span></span>
+              </button>
+              <button type="button" aria-label={`Fiche de ${c.name}`} onClick={() => { void hapticTap(); openM(c) }} className="ml-1 mr-[30px] flex h-11 w-11 shrink-0 items-center justify-center"><span className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-[rgba(118,118,128,.12)] text-[#1C1C1E]"><Info size={20} strokeWidth={1.6} /></span></button>
+              {i < cs2.length - 1 && <span aria-hidden className="absolute bottom-0 left-[76px] right-[34px] h-[.5px] bg-[rgba(60,60,67,.16)]" />}
+            </div> })}
+          </div>)}
+        </>}
+      </IosPage>
+      {groups.length > 0 && <nav aria-label="Index alphabétique" className="absolute right-[5px] top-[262px] z-[5] flex w-4 flex-col items-center">{"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => <button key={l} type="button" tabIndex={-1} onClick={() => jump(l)} className={`text-[10px] font-semibold leading-[16.5px] ${has.has(l) ? "text-[#6E6E73]" : "text-[#C7C7CC]"}`}>{l}</button>)}</nav>}
+      <AnimatePresence>{form && <ClientForm key="cf" initial={form.c} seed={form.seed} directory={list} desk={desk} onClose={() => setForm(null)} onOpen={k => { const c = list.find(x => x.key === k); if (c) openM(c) }} onSaved={() => { /* la liste se met à jour */ }} onDeleted={() => { /* */ }} />}</AnimatePresence>
+    </div>
+  }
   return <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-black text-white">
     <PushStack ref={scroller} base={listView} top={client ? <Fiche c={client} today={today} sigs={cs.sigs} onBack={back} onEdit={() => setForm({ c: client })} /> : null} topKey={client ? `f-${client.key}` : undefined}
       inner={desk ? "max-w-[640px]" : ""} padTop={desk ? 28 : "calc(var(--sat) + 2px)"} padBottom={desk ? 40 : "calc(var(--page-bottom) + 16px)"} />

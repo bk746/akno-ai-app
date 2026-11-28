@@ -11,7 +11,7 @@ import { useAppRole } from "../../lib/role"
 import { Btn, F, inp, Sheet } from "../ui"
 
 const hh = (n: number) => `${String(Math.floor(n)).padStart(2, "0")}:${String(Math.round((n % 1) * 60)).padStart(2, "0")}`
-const A_AG = "#BF5AF2"
+const A_AG = "#0A84FF"
 
 export default function EventSheet({ e, all, onChange, onClose, onOpenClient, onOpenDevis, onOpenFacture, onOpenChantier }: {
   e: Ev

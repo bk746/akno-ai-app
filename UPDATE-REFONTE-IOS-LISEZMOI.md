@@ -24,3 +24,21 @@
 ## Tests
 - `npm run build` OK · `npm run test:relances-ui` · `npm run shots:refonte` (captures 390×844, données simulées).
 - Les anciens tests visuels de la barre (`test:navbar`, `test:bottom`…) décrivent l'ancienne barre à « + » central : ils sont obsolètes.
+
+## Passe 2 · fidélité aux maquettes (akno-maquettes-app)
+
+Écrans refaits sur mobile (bureau inchangé) :
+- Agenda : Jour / Semaine / Mois / Équipe, avec le filtre salariés en haut
+- Équipe et fiche salarié
+- Chantiers : carte avec épingles et carte basse claire, fiche plein écran, historique
+- Nouveau devis en 4 étapes, signature sur place (même API publique /api/devis-public, preuve eIDAS conservée), puis conversion en facture
+- Réglages : carte profil, sections, « Terminé », sans barre d'onglets
+- Abonnement : page poussée qui reprend les mêmes appels Stripe (portail, offres, montée en gamme)
+- Couleurs violettes codées en dur remplacées : l'accent Agenda passe en bleu système #0A84FF
+- test:navbar et test:bottom mis à jour : plus de menu « + » dans la barre, la création se fait par la capsule de chaque page
+
+Migration optionnelle : `supabase/migrations/20261128_18_passe2_equipe_competences.sql` (habilitations / compétences des salariés).
+- Elle est idempotente.
+- Sans elle, l'interface masque simplement ces champs.
+
+Photos de chantier : bucket existant « equipe », chemin `{uid}/chantiers/{id}/`. Aucune migration.

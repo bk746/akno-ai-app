@@ -5,10 +5,10 @@ import { isVoiceCallActive, primeCallWakeLock } from "../lib/voice/wakeLock"
 import { CO, buildDoc, e2, missingLegal } from "../lib/devisDoc"
 import { api, openUpgrade, useAccount, useRights } from "../lib/accountApi"
 import { LockTag, ReceptionLocked, UpgradeHost } from "./billing/Upgrade"
-import { Lock as LockIco, MessageSquare, Copy, MoreHorizontal } from "lucide-react"
+import { Lock as LockIco, MessageSquare, Copy, MoreHorizontal, Navigation } from "lucide-react"
 import { useProfile } from "../lib/profile"
 import EntrepriseSheet from "./sheets/EntrepriseSheet"
-import AbonnementSheet from "./sheets/AbonnementSheet"
+import AbonnementSheet, { AbonnementPage } from "./sheets/AbonnementSheet"
 import DeleteAccountSheet from "./sheets/DeleteAccountSheet"
 import { APP_BUILD, APP_VERSION } from "../lib/version"
 import ConformiteSheet from "./sheets/ConformiteSheet"
@@ -31,6 +31,7 @@ import { answer, askExternal, HELP_CHIPS, type Pending, type RAct, type RItem } 
 import { useLocation, useNavigate } from "react-router-dom"
 import { Component, Suspense, lazy, type ComponentType, type ReactNode, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, startTransition } from "react"
 import { motion, AnimatePresence, useReducedMotion, animate, MotionConfig, useIsPresent } from "motion/react"
+import { Tag, KeyRound, UserRound } from "lucide-react"
 import { Plus, Settings, Sparkles, Mic, Play, Pause, ArrowUp, X, PhoneCall, CalendarDays, Repeat2, Receipt, ChevronRight, ChevronLeft, Phone, Clock, AudioLines, MessageSquareText, Percent, FileSignature, ImageIcon, Timer, MapPin, Bell, Smartphone, CreditCard, LifeBuoy, LogOut, Search, Send, Mail, RotateCcw, Trash2, Check, Download, FileText , Users, HardHat, ScanFace, Banknote, Building2, ShieldCheck, Globe, CalendarCheck, Package, FilePen } from "lucide-react"
 import { BLOB } from "./blobPath"
 import { PHONES, useStore, uid, BASE, addDays, eur, seed } from "../lib/store"
@@ -70,6 +71,15 @@ import { billingHidden, isNative, webOrigin } from "../lib/native"
 import { applyUpdate, initAppUpdate, isChunkError, recoverChunkError } from "../lib/appUpdate"
 import { CloudDownload } from "lucide-react"
 import MobileNav, { type CreateKind } from "./nav/MobileNav"
+import { DocRow, StDot, BigEur, eurM, frShort, MO_L, type StT } from "./m/DocRow"
+import { MListPage, PushLayer } from "./m/MPage"
+import SignSheet from "./m/SignSheet"
+import { AgDay, AgWeek, AgMonth, AgTeam, TeamPill, TeamFilterSheet, useAgendaM, addMonth } from "./m/MAgenda"
+import { FicheShell, DBlk, DRow, KV as MKV, LSec, LCard, DocLine, CallLine, Timeline, useClientFactures, requestEditClient, type FAct, type CFact } from "./m/Fiche"
+import { chantiersOfClient } from "./chantiers/ClientChantiers"
+import { STATUS_COLOR, STATUS_LABEL, effectiveStatus, progressPct, rangeLabel } from "../lib/chantierCalc"
+import { SatThumb } from "./SatThumb"
+import { noteTab, lastTab } from "./nav/IosPage"
 import { IosPage, Chip as IosChip, Segmented, IRow, IH2, Capsule as Capsule2, type CapsBtn } from "./nav/IosPage"
 import { useRelancesCounts, useRelancesView } from "./relances/RelancesPane"
 import { CROSSFADE, PUSH, SHEET, SNAP, TAB, TOAST, TOAST_TOP, idle, lazyPage } from "../lib/motion"
@@ -208,7 +218,7 @@ function DuoPanes({ active, panes, className }: { active: string; panes: [string
         <div className={className}>{node}</div></motion.div> })}
   </div>
 }
-function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt, alts, title }: { title?: string; k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string; alt?: { key: string; actions: QAi[]; children: ReactNode }; alts?: { key: string; actions: QAi[]; children: ReactNode }[] }) {
+function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt, alts, title, mcaps, noHero, sheetTop }: { mcaps?: CapsBtn[]; noHero?: boolean; sheetTop?: number; title?: string; k?: K; lead?: any; label?: any; fig: any; sub: any; actions: QAi[]; children: any; mid?: ReactNode; bodyKey?: string; alt?: { key: string; actions: QAi[]; children: ReactNode }; alts?: { key: string; actions: QAi[]; children: ReactNode }[] }) {
   const { desk, s, setChat, go, page } = useC(), on = k ? s.settings.agents[k] : true, rr = useRights()
   // update63 · contenu interchangeable (Devis | Factures) : fondu + glissement, le haut de page (bot) ne bouge pas
   const prevKey = useRef(bodyKey), dir = useRef(1)
@@ -219,24 +229,23 @@ function Shell({ k, lead, label, fig, sub, actions, children, mid, bodyKey, alt,
     ? <DuoPanes active={bodyKey} className={cls} panes={[[bodyKey, mk(actions, children)] as [string, ReactNode], ...others.map(o => [o.key, mk(o.actions, o.children)] as [string, ReactNode])]} />
     : <SwapBody k={bodyKey} dir={dir.current} className={cls}>{mk(actions, children)}</SwapBody>
   const L = lead || (k && <div className="relative"><div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: `radial-gradient(circle, ${A[k].c}${A[k].c === "#E6E6E6" ? "1A" : "33"} 0%, transparent 62%)` }} /><motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}><Blob c={A[k].c} s={desk ? 86 : 106} /></motion.div></div>)
-  const lab = label || (k && <><Dot c={on ? GREEN : "#FF9F0A"} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
+  const lab = label !== undefined ? label : (k && <><Dot c={on ? GREEN : "#FF9F0A"} />{A[k].n} · {on ? "En ligne" : "En pause"}</>)
   const H = <div className={desk ? "min-w-0" : "flex flex-col items-center text-center"}><div className={`flex items-center gap-1.5 ${desk ? "text-[12px]" : "mt-4 text-[10px] leading-none [&>span:first-child]:h-[5px] [&>span:first-child]:w-[5px]"} normal-case text-white/40`}>{lab}</div><div className={`${desk ? "mt-1 text-[52px]" : "mt-3 text-[44px]"} font-normal tabular-nums leading-none tracking-[-0.03em] text-white/90`}>{fig}</div><div className={`mt-2 ${tx.cap}`}>{sub}</div></div>
   const LB = L && <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block cursor-pointer select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{L}</button>
   const foot = null
   if (desk) return <div className="h-full overflow-y-auto px-8 pt-8"><motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="mx-auto w-full max-w-[1040px]"><motion.div variants={rise} className="flex items-center gap-6">{LB}{H}<div className="ml-auto w-[360px] shrink-0">{bodyKey === undefined ? <QA items={actions} /> : swap(a => <QA items={a} />, "")}</div></motion.div>{mid && <motion.div variants={rise} className="mt-8">{mid}</motion.div>}{bodyKey === undefined ? <div className="mt-12 grid grid-cols-2 items-start gap-6">{children}</div> : swap((_a, c) => c, "mt-10 grid grid-cols-2 items-start gap-6")}{foot}</motion.div></div>
   // Refonte iOS (DA Designer) : titre + capsule (+ · action · …), haut de page noir, contenu dans une feuille blanche
   const plus = actions.find(x => x.I === Plus)
-  const secB: Partial<Record<K, CapsBtn>> = { rec: { I: Users, label: "Clients", on: () => go("cl") }, ag: { I: Users, label: "Équipe", on: () => go("eq") }, dev: { I: Users, label: "Clients", on: () => go("cl") } }
+  const secB: Partial<Record<K, CapsBtn>> = { rec: { I: Users, label: "Clients", on: () => go("cl") }, dev: { I: Users, label: "Clients", on: () => go("cl") } }
   const isSet = !k && page === "set", back = () => go(rr.reception || !rr.ready ? "rec" : "ag")
-  const caps: CapsBtn[] = isSet ? [{ I: X, label: "Terminé", text: "Terminé", on: back }] : [...(plus ? [{ I: Plus, label: plus.label || plus.l, on: plus.on, dis: plus.dis }] : []), ...(k && secB[k] ? [secB[k]!] : []), { I: MoreHorizontal, label: "Réglages", on: () => go("set") }]
-  const chipsOf = (a: QAi[]) => a.filter(x => x.I !== Plus && !/^(Contacts|Relance)$/.test(x.l))
-  const chipRow = (a: QAi[]) => { const xs = chipsOf(a); return xs.length ? <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">{xs.map(x => <IosChip key={x.l} I={x.I} l={x.l} on={x.on} dis={x.dis} />)}</div> : null }
-  const heroBot = <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="block select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{lead || <motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }} className="drop-shadow-[0_8px_16px_rgba(0,0,0,.45)]"><Blob c="#E6E6E6" s={96} /></motion.div>}</button>
-  const hero = <>{heroBot}<div className="mt-3.5 flex items-center gap-1.5 text-[13px] leading-4 text-[#A1A1A6] [&>span:first-child]:h-[7px] [&>span:first-child]:w-[7px]">{lab}</div><div className="mt-2 text-[64px] font-semibold leading-[64px] tracking-[-0.03em] tabular-nums text-white">{fig}</div><div className="mt-1.5 text-[19px] leading-6 text-[rgba(235,235,245,.72)]">{sub}</div></>
+  const caps: CapsBtn[] = mcaps ? mcaps : isSet ? [{ I: X, label: "Terminé", text: "Terminé", on: back }] : [...(plus ? [{ I: Plus, label: plus.label || plus.l, on: plus.on, dis: plus.dis }] : []), ...(k && secB[k] ? [secB[k]!] : []), { I: MoreHorizontal, label: "Réglages", on: () => go("set") }]
+  // passe 2 : plus de rangée de pastilles sous le haut de page (absente des maquettes) ; les actions sont dans la capsule, les Réglages via « … »
+  const heroBot = <button type="button" aria-label="Ouvrir l'assistant" onClick={() => setChat(true)} className="flex h-24 w-24 items-center justify-center select-none transition-transform duration-150 active:scale-95 [-webkit-tap-highlight-color:transparent]">{lead || <motion.div animate={{ y: [0, -3, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }} className="drop-shadow-[0_8px_16px_rgba(0,0,0,.45)]"><Blob c="#E6E6E6" s={96} /></motion.div>}</button>
+  const hero = noHero ? undefined : <>{heroBot}{lab && <div className={`${mid ? "mt-2.5" : "mt-3.5"} flex items-center gap-1.5 text-[13px] leading-4 text-[#A1A1A6] [&>span:first-child]:h-[7px] [&>span:first-child]:w-[7px]`}>{lab}</div>}<div className={`${mid ? "mt-1.5" : "mt-3.5"} flex items-baseline justify-center text-[64px] font-semibold leading-[64px] tracking-[-0.03em] tabular-nums text-white`}>{fig}</div><div className={`mt-1.5 ${mid ? "text-[17px]" : "text-[19px]"} leading-6 text-[rgba(235,235,245,.72)]`}>{sub}</div></>
   const ttl = title || (k === "dev" ? "Facturation" : k === "rel" ? "Relances" : k ? A[k].tab : "")
   const backBtn = k === "rel" ? <button type="button" aria-label="Retour" onClick={() => go(lastDocMode())} className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center text-white"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[.14]"><ChevronLeft size={22} strokeWidth={2} /></span></button> : undefined
-  return <IosPage title={ttl || (isSet ? "Réglages" : "")} caps={caps} mid={mid} hero={hero} lead={backBtn}>
-    {bodyKey === undefined ? <>{chipRow(actions)}{children}</> : swap((a, c) => <div className="flex flex-col gap-8">{chipRow(a)}{c}</div>, "")}
+  return <IosPage title={ttl || (isSet ? "Réglages" : "")} caps={caps} mid={mid} hero={hero} lead={backBtn} sheetTop={sheetTop}>
+    {bodyKey === undefined ? children : swap((_a, c) => <div className="flex flex-col">{c}</div>, "")}
   </IosPage>
 }
 /* Icônes de navigation dessinées sur mesure : grille 24, trait 1.75, extrémités arrondies, même taille optique */
@@ -414,18 +423,19 @@ function RecFull() {
     { I: Plus, l: "Note", on: () => modal({ kind: "call" }) }, { I: Users, l: "Contacts", on: () => { if (play) pl.toggle(); modal({ kind: "contacts" }) } },
     { I: PhoneCall, l: "Appels", on: () => { if (play) pl.toggle(); modal({ kind: "calls" }) } }, { I: Settings, l: "Réglages", label: "Réglages de la réceptionniste", on: () => modal({ kind: "recReglages" }) }]}>
     {!desk && <>
-      <section><IH2 t="À rappeler" more={todoS.length > 4 ? () => modal({ kind: "callbacks" }) : undefined} />{todoS.length ? todoS.slice(0, 4).map((x, i) => <IRow key={x.id} first={i === 0} ini={initials(x.name)} name={x.name} red sub={x.tag || x.topic} time={x.day ? cap(x.day.toLowerCase()) : x.time} href={tel(x.name) ? `tel:${tel(x.name)}` : undefined} onClick={() => tel(x.name) ? done(x) : open(x)} onInfo={() => open(x)} />) : <div className="flex h-[64px] items-center gap-2 px-1 text-[15px] text-[#6E6E73]"><Check size={16} />Personne à rappeler. Tout est à jour.</div>}</section>
-      <section><IH2 t="Appels récents" more={s.calls.length > 5 ? () => { if (play) pl.toggle(); modal({ kind: "calls" }) } : undefined} />{s.calls.length ? s.calls.filter(x => match(q, x.name, x.topic, x.note)).slice(0, 5).map((x, i) => <IRow key={x.id} first={i === 0} ini={initials(x.name)} name={x.name} sub={x.tag || x.topic} time={x.day ? cap(x.day.toLowerCase()) : x.time} href={tel(x.name) ? `tel:${tel(x.name)}` : undefined} onClick={() => { if (!tel(x.name)) open(x) }} onInfo={() => open(x)} />) : <div className="flex h-[64px] items-center px-1 text-[15px] text-[#6E6E73]">Aucun appel pour l'instant.</div>}</section>
+      <section><IH2 first t="À rappeler" />{todoS.length ? todoS.map((x, i) => <IRow key={x.id} first={i === 0} ini={initials(x.name)} name={x.name} red sub={x.tag || x.topic} time={x.day ? cap(x.day.toLowerCase()) : x.time} href={tel(x.name) ? `tel:${tel(x.name)}` : undefined} onClick={() => tel(x.name) ? done(x) : open(x)} onInfo={() => open(x)} />) : <div className="flex h-[64px] items-center gap-2 px-1 text-[15px] text-[#6E6E73]"><Check size={16} />Personne à rappeler. Tout est à jour.</div>}</section>
+      <section><IH2 t="Appels récents" />{s.calls.length ? s.calls.filter(x => match(q, x.name, x.topic, x.note)).slice(0, 30).map((x, i) => <IRow key={x.id} first={i === 0} ini={initials(x.name)} name={x.name} sub={x.tag || x.topic} time={x.day ? cap(x.day.toLowerCase()) : x.time} href={tel(x.name) ? `tel:${tel(x.name)}` : undefined} onClick={() => { if (!tel(x.name)) open(x) }} onInfo={() => open(x)} />) : <div className="flex h-[64px] items-center px-1 text-[15px] text-[#6E6E73]">Aucun appel pour l'instant.</div>}</section>
     </>}
-    <div className="col-span-2">
-      {!acc?.integrations.twilio_number && <div className="mb-4"><ActivateReceptionniste home onActivated={() => modal({ kind: "recReglages" })} /></div>}
-      <button type="button" onClick={() => { primeCallWakeLock(); setVoiceOn(true) }} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium transition active:scale-[.98]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 12px 32px -12px ${c}99` }}>
+    {(desk || !acc?.integrations.twilio_number) && <div className={desk ? "col-span-2" : "mt-6"}>
+      {!acc?.integrations.twilio_number && <div className={desk ? "mb-4" : ""}><ActivateReceptionniste home onActivated={() => modal({ kind: "recReglages" })} /></div>}
+      {/* passe 2 : sur mobile, l'appel test de la réceptionniste est dans Réglages › Réceptionniste IA (absent de la maquette Réception) */}
+      {desk && <button type="button" onClick={() => { primeCallWakeLock(); setVoiceOn(true) }} aria-label="Appeler ma réceptionniste" className="flex h-14 w-full items-center justify-center gap-2.5 rounded-full text-[15px] font-medium transition active:scale-[.98]" style={{ background: c, color: c === "#E6E6E6" || c === "#FFFFFF" ? "#000" : "#fff", boxShadow: `0 12px 32px -12px ${c}99` }}>
         <Phone size={18} strokeWidth={1.75} />
         Appeler ma réceptionniste
-      </button>
-    </div>
+      </button>}
+    </div>}
     {desk && <div className="col-span-2"><RelancesCard /></div>}
-    {showPush && <div className="col-span-2"><Card className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-[15px] font-medium">Notifications d'appels et de RDV</div><div className={tx.cap}>Recevez un bandeau dans l'app dès qu'un client appelle ou qu'un rendez-vous est pris.</div></div><Btn className="h-11 shrink-0" disabled={pushBusy} onClick={() => { if (pushBusy) return; setPushBusy(true); void enablePush().then(res => { setPushBusy(false); if (res.ok) { set(x => ({ ...x, settings: { ...x.settings, push: true } })); toast("Notifications activées") } else toast(res.error || "Activez les notifications dans les réglages du navigateur.") }) }}><Bell size={16} strokeWidth={1.75} />Activer</Btn></Card></div>}
+    {showPush && <div className={desk ? "col-span-2" : "mt-6"}><Card className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-[15px] font-medium">Notifications d'appels et de RDV</div><div className={tx.cap}>Recevez un bandeau dans l'app dès qu'un client appelle ou qu'un rendez-vous est pris.</div></div><Btn className="h-11 shrink-0" disabled={pushBusy} onClick={() => { if (pushBusy) return; setPushBusy(true); void enablePush().then(res => { setPushBusy(false); if (res.ok) { set(x => ({ ...x, settings: { ...x.settings, push: true } })); toast("Notifications activées") } else toast(res.error || "Activez les notifications dans les réglages du navigateur.") }) }}><Bell size={16} strokeWidth={1.75} />Activer</Btn></Card></div>}
     {desk && <><Col><Section t="Appels du jour" more={today.length > 4 ? () => setAll(!all) : undefined} aside={`${today.length} appels`}><List empty="Aucun appel aujourd'hui">{(all ? today : today.slice(0, 4)).map(CRow)}</List></Section></Col>
     <Col><Section t="À rappeler" aside={todoS.length ? `${todoS.length} client${todoS.length > 1 ? "s" : ""}` : undefined}><List I={Check} empty="Personne à rappeler. Tout est à jour.">{todoS.slice(0, 3).map(TRow)}</List>{todoS.length > 3 && <button type="button" onClick={() => modal({ kind: "calls" })} className="mt-2 w-full py-2 text-[14px] font-medium text-white/70">Voir tout ({todoS.length})</button>}</Section></Col></>}
     <Col>{cur && <Section t="Dernier débrief" more={() => open(cur)}><Card className="overflow-hidden"><Row first label={cur.name} onClick={() => open(cur)} lead={<Av n={cur.name} />} t={cur.name} s={(cur.note || cur.besoin || cur.topic || "").slice(0, 160)} r={<span className={tx.cap}>{cur.at || cur.time}</span>} />
@@ -546,7 +556,34 @@ function AgCal() {
   const head = <div className="mb-4 flex flex-col gap-3" data-cal-head><div className="flex items-center justify-between gap-2"><div className="min-w-0"><div className="truncate text-[17px] font-semibold tracking-[-0.01em]">{title}</div><div className={`truncate ${tx.cap}`}>{subT}</div></div>{desk ? <div className="flex items-center gap-3"><div className="w-[300px]">{seg}</div>{nav}</div> : <div className="flex shrink-0 items-center gap-0.5" data-cal-tools>{todayB}{arrows}</div>}</div>{!desk && <div className="w-full">{seg}</div>}</div>
   return <section className="relative z-0 min-w-0" data-cal-section style={{ transform: "none" }}><div className="mb-3 flex h-6 items-center justify-between px-1"><h2 className={tx.title}>Calendrier</h2></div><div className={`relative z-0 rounded-[24px] bg-[#141416] p-4 ${v === "a" ? "overflow-visible" : ""}`}>{head}{strip}{view}</div></section>
 }
+/* passe 2 · Agenda mobile fidèle aux maquettes 03-Agenda (Jour / Semaine / Mois / Équipe + filtre salarié) */
+function AgM() {
+  const { s, modal, q, go } = useC(), g = useAgendaM(), { v, cur } = g
+  const from = addDays(v === "m" ? `${cur.slice(0, 7)}-01` : monOf(cur), -7), to = addDays(v === "m" ? `${cur.slice(0, 7)}-28` : monOf(cur), 42)
+  const all = attachTravel(expandForGrid(expandRecurring(s.events.filter(e => match(q, e.name, e.topic)), from, to)))
+  const evs = all.filter(g.filt)
+  const mon = monOf(TODAY), wkN = evs.filter(e => e.date >= mon && e.date <= addDays(mon, 6) && e.kind !== "absence").length
+  const a = dd(mon), b = dd(addDays(mon, 4))
+  const onEv = (e: Ev) => modal({ kind: "ev", data: e }), onSlot = (d: string, h: number) => modal({ kind: "rdv", data: { date: d, start: h } })
+  const pill = <TeamPill sel={g.sel} emps={g.emps} onOpen={() => g.setPick(true)} />
+  const body = v === "j" ? <AgDay cur={cur} evs={evs} onEv={onEv} onPick={g.setCur} onMove={n => g.setCur(x => addDays(x, n))} pill={pill} onNew={() => modal({ kind: "rdv", data: { date: cur } })} />
+    : v === "s" ? <AgWeek cur={cur} evs={evs} emps={g.emps} onEv={onEv} onSlot={onSlot} onMove={n => g.setCur(x => addDays(x, n))} pill={pill} />
+    : v === "m" ? <AgMonth cur={cur} evs={evs} onEv={onEv} onPick={g.setCur} onMove={n => g.setCur(x => addMonth(x, n))} pill={pill} />
+    : <AgTeam cur={cur} evs={all} emps={g.sel ? g.emps.filter(e => g.sel!.includes(e.id)) : g.emps} onEv={onEv} />
+  return <>
+    <Shell k="ag" noHero={v !== "j"} label={`Semaine du ${a.getDate()}${a.getMonth() !== b.getMonth() ? ` ${MONTHS[a.getMonth()]}` : ""} au ${b.getDate()} ${MONTHS[b.getMonth()]}`} fig={wkN} sub={`rendez-vous cette semaine`}
+      mcaps={[{ I: Plus, label: "Nouveau rendez-vous", on: () => modal({ kind: "rdv", data: { date: cur } }) }, { I: RotateCcw, label: "Aujourd'hui", on: () => g.setCur(TODAY) }, { I: MoreHorizontal, label: "Réglages", on: () => go("set") }]}
+      mid={<Segmented label="Vue de l'agenda" layoutId="ag-seg" value={v} onPick={g.setV} items={[["j", "Jour"], ["s", "Semaine"], ["m", "Mois"], ["e", "Équipe"]]} />} actions={[]}>
+      <div data-ag-view={v}>{body}</div>
+    </Shell>
+    <AnimatePresence>{g.pick && <TeamFilterSheet key="tf" emps={g.emps} sel={g.sel} onClose={() => g.setPick(false)} onDone={x => { g.setSel(x); g.setPick(false) }} />}</AnimatePresence>
+  </>
+}
 function Ag() {
+  const { desk } = useC()
+  return desk ? <AgD /> : <AgM />
+}
+function AgD() {
   const { s, modal, q, desk } = useC(), c = A.ag.c
   const [wk, setWk] = useState(0), [day, setDay] = useState(TODAY)
   const mon = addDays(BASE, wk * 7), days = Array.from({ length: 5 }, (_, i) => addDays(mon, i))
@@ -687,7 +724,16 @@ function useDevisView(active: boolean, onAll?: () => void) {
   const avalS = aval.length > 0 && <Section t={<span className="flex items-center gap-2">À valider<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{aval.length}</span></span>} aside="Devis générés par l'IA"><List>{aval.map(VRow)}</List></Section>
   const replyS = replies.length > 0 && <Section t={<span className="flex items-center gap-2">Réponses clients<span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold text-white" style={{ background: c }}>{replies.length}</span></span>} aside="Acceptation, refus ou message"><List>{replies.map(ReplyRow)}</List></Section>
   const recent = ds.slice(0, 5)
+  // passe 2 · maquette facturation-devis : « Validés en <mois> », montant, « n devis signés · n envoyés » ; feuille « Devis récents » + Tout voir
+  const sentM = s.devis.filter(d => d.status !== "brouillon" && d.status !== "aval" && inM({ ...d, at: d.sentAt || d.at } as Devis, 5)).length, valM = val.filter(d => inM(d, 5)).length
+  const dSt = (d: Devis): [StT, string] => ({ aval: ["blue", "À valider"], brouillon: ["draft", "Brouillon"], att: ["orange", "En attente"], env: ["grey", "Envoyé"], val: ["blue", "Signé"], ref: ["red", "Refusé"], sans: ["orange", "Sans réponse"], perdu: ["grey", "Perdu"] } as Record<DevStatus, [StT, string]>)[d.status] || ["grey", ST[d.status]?.[0] || ""]
+  const late5 = (d: Devis) => (d.status === "env" || d.status === "sans") && !!d.sentAt && Date.now() - Date.parse(d.sentAt) > 5 * 864e5
+  const MRow = (d: Devis, i: number) => { const [t, l] = dSt(d); return <DocRow key={d.id} first={i === 0} label={`Ouvrir le devis ${d.num}`} name={d.client} red={late5(d)} sub={`${d.objet || "Devis"} · N° ${d.num}`} amount={eurM(d.amount)} st={<StDot t={t}>{l}</StDot>} onClick={() => modal({ kind: "devisPrev", data: d })} /> }
+  const mEmpty = <div className="flex h-[68px] items-center px-1 text-[15px] text-[#6E6E73]">Aucun devis pour l'instant.</div>
   return { fig: <Num n={cur} u="€" money />, sub: `validés ce mois · ${val.length} devis sur ${sent.length} envoyés`,
+    mlabel: `Validés en ${MO_L[now.getMonth()]}`, mfig: <BigEur n={cur} />, msub: `${valM} devis signé${valM > 1 ? "s" : ""} · ${sentM} envoyé${sentM > 1 ? "s" : ""}`,
+    mbody: <section><IH2 first t="Devis récents" more={ds.length > 5 ? () => onAll?.() : undefined} />{recent.length ? recent.map(MRow) : mEmpty}</section>,
+    mall: <>{ds.length ? ds.map(MRow) : mEmpty}</>,
     allTitle: "Tous les devis", all: <List empty="Aucun devis pour l'instant.">{ds.map(DRow)}</List>,
     actions: [
       { I: Plus, l: "Nouveau", on: () => modal({ kind: "devis" }) },
@@ -732,7 +778,24 @@ function useFacturesView(onAll?: () => void) {
   const FRow = (f: FactureLite, i: number) => { const [l, c] = isLate(f) ? ["En retard", RED] : F_ST[f.statut] || F_ST.brouillon
     const act = factureSwipeAction(f)
       return <SwipeRow key={f.id} id={f.id} first={i === 0} label={act === "avoir" ? "Avoir" : "Supprimer"} tone={act === "avoir" ? "accent" : "danger"} onAction={() => askFactureSwipe(f, modal, toast)}><Row className="!rounded-none" first={i === 0} label={`Ouvrir ${f.numero || "brouillon"}`} onClick={() => modal({ kind: "factures", data: { id: f.id } })} lead={<Ic I={Receipt} />} t={`${fLabel(f)} ${f.numero || "(brouillon)"}`} s={f.client_nom || "Client à renseigner"} r={e2(f.type === "avoir" ? -dueOf(f) : dueOf(f))} rs={<Chip c={c}>{l}</Chip>} /></SwipeRow> }
+  // passe 2 · maquette facturation-factures : « À encaisser » (retards d'abord) puis « Payées en <mois> »
+  const td = new Date(), ymdNow = td.toLocaleDateString("en-CA", { timeZone: "Europe/Paris" })
+  const lateDays = (f: FactureLite) => f.date_echeance ? Math.round((Date.parse(ymdNow + "T12:00:00Z") - Date.parse(f.date_echeance + "T12:00:00Z")) / 864e5) : 0
+  const owed = unpaid.filter(f => f.type !== "avoir" && f.statut !== "brouillon").sort((a, b) => Number(isLate(b)) - Number(isLate(a)) || String(a.date_echeance || "").localeCompare(String(b.date_echeance || "")))
+  const drafts = rows.filter(f => f.statut === "brouillon")
+  const paidM = rows.filter(f => f.statut === "payee" && (f.payee_le || "").slice(0, 7) === ymdNow.slice(0, 7))
+  const fSub = (f: FactureLite) => `${f.objet || fLabel(f)} · ${isLate(f) ? `${lateDays(f)} j de retard` : f.statut === "payee" ? f.numero || "" : f.date_echeance ? `échéance ${frShort(f.date_echeance)}` : f.numero || "brouillon"}`
+  const FM = (f: FactureLite, i: number) => <DocRow key={f.id} first={i === 0} label={`Ouvrir ${f.numero || "brouillon"}`} name={f.client_nom || "Client à renseigner"} red={isLate(f)} sub={fSub(f)} amount={eurM(f.type === "avoir" ? -dueOf(f) : f.statut === "payee" ? Number(f.total_ttc || 0) : dueOf(f))}
+    st={isLate(f) ? <StDot t="orange">En retard</StDot> : f.statut === "payee" ? <StDot t="grey">Payée</StDot> : f.statut === "brouillon" ? <StDot t="draft">Brouillon</StDot> : <StDot t="grey">À payer</StDot>} onClick={() => modal({ kind: "factures", data: { id: f.id } })} />
+  const fEmpty = (t: string) => <div className="flex h-[68px] items-center px-1 text-[15px] text-[#6E6E73]">{t}</div>
   return { fig: <Num n={Math.round(total)} u="€" money />,
+    mlabel: "À encaisser", mfig: <BigEur n={total} />, msub: st.rows === null ? "Chargement…" : `${owed.length} facture${owed.length > 1 ? "s" : ""} en attente${late ? ` · ${late} en retard` : ""}`,
+    mbody: <>
+      <section><IH2 first t="À encaisser" />{owed.length ? owed.map(FM) : fEmpty(st.rows === null ? "Chargement…" : st.error ? "Factures indisponibles pour le moment." : "Rien à encaisser.")}</section>
+      {drafts.length > 0 && <section><IH2 t="Brouillons" />{drafts.map(FM)}</section>}
+      <section><IH2 t={`Payées en ${MO_L[td.getMonth()]}`} more={sorted.length ? () => onAll?.() : undefined} />{paidM.length ? paidM.map(FM) : fEmpty("Aucun paiement ce mois-ci.")}</section>
+    </>,
+    mall: <>{sorted.length ? sorted.map(FM) : fEmpty("Aucune facture pour l'instant.")}</>,
     sub: st.rows === null ? "Chargement…" : `à encaisser · ${unpaid.length} facture${unpaid.length > 1 ? "s" : ""}${late ? ` · ${late} en retard` : ""}`,
     allTitle: "Toutes les factures", all: <List empty={st.error ? "Factures indisponibles pour le moment." : "Aucune facture pour l'instant."}>{sorted.map(FRow)}</List>,
     actions: [
@@ -762,7 +825,7 @@ function DocAllPage({ title, onBack, children }: { title: string; onBack: () => 
 }
 function DevFac() {
   // update69 : le mode change localement au tap (pilule et contenu partent ensemble) ; l'adresse suit juste après l'animation
-  const { page } = useC(), shownSlot = useContext(SlotActive), own = shownSlot && (page === "dev" || page === "fac")
+  const { page, desk } = useC(), shownSlot = useContext(SlotActive), own = shownSlot && (page === "dev" || page === "fac")
   const [mode, setMode] = useState<"dev" | "fac" | "rel">(page === "fac" ? "fac" : "dev")
   const [list, setList] = useState<"dev" | "fac" | null>(null)
   useEffect(() => { if (own) setMode(m => m === "rel" && page === "fac" ? m : page === "fac" ? "fac" : "dev") }, [page, own])
@@ -774,11 +837,13 @@ function DevFac() {
   const curAll = list === "dev" ? dv : fv
   return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
     <motion.div className="flex min-h-0 min-w-0 flex-1 flex-col" initial={false} animate={!reduce && list ? { x: "-28%", opacity: .85 } : { x: 0, opacity: 1 }} transition={reduce ? { duration: .16 } : PUSH} style={{ pointerEvents: list ? "none" : undefined }}>
-      <Shell k="dev" label={<><Dot c={mode === "fac" ? "#FF9F0A" : mode === "rel" ? "#FF3B30" : "#007AFF"} />{mode === "dev" ? "Devis" : mode === "fac" ? "À encaisser" : "Relances"}</>} fig={v.fig} sub={v.sub} actions={mode === "rel" ? dv.actions.filter(x => x.I === Plus) : v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alts={others}>{v.body}</Shell>
+      {desk ? <Shell k="dev" label={<><Dot c={mode === "fac" ? "#FF9F0A" : mode === "rel" ? "#FF3B30" : "#007AFF"} />{mode === "dev" ? "Devis" : mode === "fac" ? "À encaisser" : "Relances"}</>} fig={v.fig} sub={v.sub} actions={mode === "rel" ? dv.actions.filter(x => x.I === Plus) : v.actions} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alts={others}>{v.body}</Shell>
+        : <Shell k="dev" label={mode === "rel" ? null : mode === "dev" ? dv.mlabel : fv.mlabel} fig={mode === "dev" ? dv.mfig : mode === "fac" ? fv.mfig : rv.fig} sub={mode === "dev" ? dv.msub : mode === "fac" ? fv.msub : rv.sub} sheetTop={mode === "rel" ? 40 : 52}
+          actions={[{ I: Plus, l: mode === "fac" ? "Nouvelle facture" : "Nouveau devis", on: mode === "fac" ? fv.actions[0].on : dv.actions[0].on }]} mid={<DocSwitch mode={mode} onPick={setMode} />} bodyKey={mode} alts={others.map(o => ({ ...o, children: o.key === "dev" ? dv.mbody : o.key === "fac" ? fv.mbody : rv.body }))}>{mode === "dev" ? dv.mbody : mode === "fac" ? fv.mbody : rv.body}</Shell>}
     </motion.div>
     <AnimatePresence>
-      {list && <motion.div key="doc-all" data-doc-list-push className="absolute inset-0 z-20 flex flex-col bg-black" initial={reduce ? { opacity: 0 } : { x: "100%" }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "100%" }} transition={reduce ? { duration: .16 } : PUSH}>
-        <DocAllPage title={curAll.allTitle} onBack={() => setList(null)}>{curAll.all}</DocAllPage>
+      {list && <motion.div key="doc-all" data-doc-list-push className={`absolute inset-0 z-20 flex flex-col ${desk ? "bg-black" : "bg-[#fff]"}`} initial={reduce ? { opacity: 0 } : { x: "100%" }} animate={{ x: 0, opacity: 1 }} exit={reduce ? { opacity: 0 } : { x: "100%" }} transition={reduce ? { duration: .16 } : PUSH}>
+        {desk ? <DocAllPage title={curAll.allTitle} onBack={() => setList(null)}>{curAll.all}</DocAllPage> : <MListPage title={curAll.allTitle} onBack={() => setList(null)}>{curAll.mall}</MListPage>}
       </motion.div>}
     </AnimatePresence>
   </div>
@@ -822,10 +887,14 @@ function PageHead({ title, to }: { title: string; to: P }) {
 }
 /* update66 · Clients (page chargée à la demande) */
 function ClP() {
+  const { desk } = useC()
+  if (!desk) return <div className="flex min-h-0 flex-1 flex-col bg-[#000]"><ClientsPage /></div>
   return <div className="akno-light flex min-h-0 flex-1 flex-col bg-[#fff]"><ClientsPage head={<PageHead title="Clients" to="rec" />} /></div>
 }
 /* update65 · Équipe (page chargée à la demande) */
 function EqP() {
+  const { desk } = useC()
+  if (!desk) return <div className="flex min-h-0 flex-1 flex-col bg-[#000]"><EquipePage /></div>
   return <div className="akno-light flex min-h-0 flex-1 flex-col bg-[#fff]"><EquipePage head={<PageHead title="Équipe" to="ag" />} /></div>
 }
 function SetP() {
@@ -839,6 +908,9 @@ function SetP() {
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [voiceDbg, setVoiceDbg] = useState(isVoiceDebugEnabled)
   const [moreSet, setMoreSet] = useState(false)
+  const [testCall, setTestCall] = useState(false) // passe 2 · appel de test déplacé dans Réglages › Réceptionniste IA
+  const [factM, setFactM] = useState(0)
+  useEffect(() => { if (desk) return; const mo = new Date().toISOString().slice(0, 7); void supabase.from("factures").select("id", { count: "exact", head: true }).gte("date_emission", `${mo}-01`).then(r => setFactM(r.count || 0), () => {}) }, [desk])
   const [voiceLog, setVoiceLog] = useState(() => formatVoiceTimings())
   useEffect(() => { bioAvailable().then(setCanBio) }, [])
   useEffect(() => { if (nativeIosPush()) void nativePushPermission().then(setNativePushOk) }, [])
@@ -893,6 +965,93 @@ function SetP() {
   const S = ({ I, l, v, onClick, first }: any) => <Row first={first} label={l} onClick={onClick} lead={<Ic I={I} />} t={l} r={<V v={v} />} />
   const rr = useRights(), recLock = !rr.reception, cliLock = !rr.clients
   const mine = agents.filter(a => a !== "rec" || !recLock), n = mine.filter(a => st.agents[a]).length
+  const moreBody = <div data-more-settings-body className="mt-8 flex flex-col gap-8">
+      <Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
+      <Section t="Gestion"><List><S first I={Users} l="Clients" v="" onClick={() => go("cl")} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
+      <Section t="Compte"><List>{support && <S first I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} /></List></Section>
+      {/* update70 · suppression du compte (App Store 5.1.1(v), Google Play) */}
+      <Section t="Données"><List><Row first label="Supprimer mon compte" onClick={() => modal({ kind: "deleteAccount" })} lead={<Circ c={RED}><Trash2 size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Supprimer mon compte</span>} s="Efface votre compte et vos données" r={<Chev />} /></List></Section>
+      <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
+      <Section t="Devis"><List><S first I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={Package} l="Mes prestations" v={presta.ready ? String(presta.items.length) : "…"} onClick={() => modal({ kind: "prestations" })} /></List></Section>
+      <Section t="Paiements"><List><S first I={Percent} l="Acompte à la signature" v={`${acPctS} %`} onClick={cycA} /><S I={Repeat2} l="Relances d'impayés" v={prof?.relances_auto === false ? "À valider" : prof?.relances_auto === true ? "Automatiques" : "À valider"} onClick={cycI} />{connectUi() && <S I={CreditCard} l="Paiement en ligne" v="Carte, SEPA" onClick={() => modal({ kind: "connect" })} />}<S I={Receipt} l="Suivi et export comptable" v="CSV, FEC" onClick={() => modal({ kind: "pilotage" })} /></List></Section>
+      <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
+      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /><S I={Globe} l="Lien de réservation public" v="À copier depuis l'Agenda" onClick={() => go("ag")} /></List></Section>
+      <Section t="Avis clients"><List>{cliLock ? <Row first label="Demandes d'avis Google" onClick={() => openUpgrade("clients")} lead={<Ic I={Sparkles} />} t="Demandes d'avis Google" s="Automatiques après chaque chantier" r={<LockTag />} /> : <S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} />}</List></Section>
+      <Section t="Informations légales"><List>{[["CGV", "/cgv"], ["Mentions légales", "/mentions-legales"], ["Confidentialité", "/confidentialite"], ["Sous-traitance des données (DPA)", "/dpa"]].map(([l, h], i) => <S key={h} first={!i} I={FileText} l={l} v="" onClick={() => isNative ? location.assign(h) : window.open(h, "_blank", "noopener")} />)}</List></Section>
+        </div>
+  /* passe 2 · Réglages mobile fidèle à la maquette 08-Reglages (carte profil sombre, sections groupées, « Terminé ») */
+  if (!desk) {
+    const Ico = ({ I }: { I: any }) => <I size={21} strokeWidth={1.6} className="shrink-0 text-[#1C1C1E]" />
+    const R = ({ I, l, sub, v, on, tg, red, first }: { I: any; l: string; sub?: string; v?: ReactNode; on?: () => void; tg?: { on: boolean; set: () => void }; red?: boolean; first?: boolean }) =>
+      <div role={on ? "button" : undefined} aria-label={on ? l : undefined} tabIndex={on ? 0 : undefined} onClick={on} onKeyDown={e => { if (on && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); on() } }} className={`relative flex min-h-[52px] items-center gap-4 pl-4 pr-4 ${on ? "cursor-pointer active:bg-black/[.04]" : ""} ${first ? "" : "before:absolute before:left-[54px] before:right-0 before:top-0 before:h-[.5px] before:bg-[rgba(60,60,67,.16)]"}`}>
+        {red ? <I size={21} strokeWidth={1.6} className="shrink-0 text-[#E0221B]" /> : <Ico I={I} />}
+        <span className="min-w-[96px] flex-1 py-2"><span className={`block truncate text-[17px] leading-[22px] ${red ? "text-[#E0221B]" : "text-[#000]"}`}>{l}</span>{sub && <span className="block truncate text-[13px] leading-[17px] text-[#6E6E73]">{sub}</span>}</span>
+        {tg ? <button type="button" role="switch" aria-checked={tg.on} aria-label={l} onClick={e => { e.stopPropagation(); tg.set() }} className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors ${tg.on ? "bg-[#000]" : "bg-[rgba(120,120,128,.16)]"}`}><span className="absolute top-[2px] h-[27px] w-[27px] rounded-full bg-[#fff] shadow-[0_3px_8px_rgba(0,0,0,.15)] transition-[left]" style={{ left: tg.on ? 22 : 2 }} /></button>
+          : !red && on ? <span className="flex min-w-0 max-w-[52%] shrink-0 items-center gap-1.5 text-[17px] text-[#6E6E73]"><span className="truncate">{v}</span><ChevronRight size={18} className="text-[#C4C4C7]" /></span> : null}
+      </div>
+    const G = ({ t, children }: { t: string; children: ReactNode }) => <section><h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold uppercase tracking-[.03em] text-[#6E6E73]">{t}</h2><div className="overflow-hidden rounded-[20px] bg-[#F2F2F7]">{children}</div></section>
+    const q = ent?.quotas, u = acc?.usage
+    const gauge = (l: string, n: ReactNode, unit: string, pct: number) => <div className="min-w-0"><div className="text-[13px] text-[rgba(235,235,245,.6)]">{l}</div><div className="mt-0.5 truncate text-[20px] font-semibold leading-6 text-[#fff]">{n}<span className="ml-1 text-[15px] font-normal text-[rgba(235,235,245,.6)]">{unit}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-[rgba(255,255,255,.16)]"><div className="h-full rounded-full bg-[#fff]" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} /></div></div>
+    const fin = (x: unknown) => typeof x === "number" && Number.isFinite(x)
+    const dOk = fin(q?.devis_drafts) && fin(u?.devis_drafts), vOk = fin(q?.voice_minutes) && fin(u?.voice_minutes)
+    const dLeft = dOk ? Math.max(0, q!.devis_drafts - u!.devis_drafts) : null, vLeft = vOk ? Math.max(0, Math.round(q!.voice_minutes - u!.voice_minutes)) : null
+    const who = [s.settings.name, s.settings.company].filter(Boolean)
+    const card = <button type="button" onClick={() => modal({ kind: "entreprise" })} className="w-full rounded-[28px] bg-[#1C1C1E] px-[18px] pb-[18px] pt-4 text-left shadow-[inset_0_.5px_0_rgba(255,255,255,.08)]">
+      <div className="flex items-center gap-3.5"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#fff] text-[20px] font-semibold text-[#000]">{meIniS(s)}</span>
+        <span className="min-w-0 flex-1"><span className="block truncate text-[20px] font-semibold leading-6 text-[#fff]">{who[0] || "Mon entreprise"}</span><span className="block truncate text-[15px] text-[rgba(235,235,245,.6)]">{[s.settings.company && s.settings.company !== who[0] ? s.settings.company : "", String(CO.city || "").replace(/^\d{5}\s*/, "")].filter(Boolean).join(" · ") || "Profil et entreprise"}</span></span>
+        <ChevronRight size={20} className="shrink-0 text-[rgba(235,235,245,.45)]" /></div>
+      {!billingHidden && <span className="mt-3 inline-flex h-[30px] items-center rounded-full bg-[rgba(255,255,255,.12)] px-3 text-[13px] font-semibold text-[#fff]">{planL}</span>}
+      <div className="mt-3.5 grid grid-cols-3 gap-4">
+        {gauge("Devis", dLeft ?? s.devis.length, dLeft != null ? "restants" : "au total", dOk ? (dLeft! / Math.max(1, q!.devis_drafts)) * 100 : 60)}
+        {gauge("Factures", factM, "ce mois", Math.min(100, factM * 5))}
+        {gauge("Appels", vLeft ?? "—", "min", vOk ? (vLeft! / Math.max(1, q!.voice_minutes)) * 100 : 0)}
+      </div>
+    </button>
+    return <>
+      <IosPage title="Réglages" caps={[{ I: Check, label: "Terminé", text: "Terminé", on: () => go(lastTab() as P) }]} hero={<div className="w-full">{card}</div>} heroPt={12} sheetTop={22} flush>
+        <div className="akno-light px-4 pb-6">
+          <G t="Mon entreprise">
+            <R first I={ImageIcon} l="Logo" v={prof?.logo_path ? meIniS(s) : "À ajouter"} on={() => modal({ kind: "entreprise" })} />
+            <R I={Building2} l="SIREN" v={String(CO.siret || "").replace(/\D/g, "").slice(0, 9).replace(/(\d{3})(?=\d)/g, "$1 ") || "À renseigner"} on={() => modal({ kind: "entreprise" })} />
+            <R I={Percent} l="N° de TVA" v={CO.tvaNA ? "Non applicable" : CO.tva || "À renseigner"} on={() => modal({ kind: "entreprise" })} />
+            <R I={FileSignature} l="Mentions légales" v={missingLegal("devis").length ? "À compléter" : ""} on={() => modal({ kind: "entreprise" })} />
+            <R I={CreditCard} l="Coordonnées bancaires" v={prof?.iban ? "" : "À renseigner"} on={() => modal({ kind: "entreprise" })} />
+          </G>
+          <G t="Réceptionniste IA">
+            {recLock ? <R first I={AudioLines} l="Ajouter la Réceptionniste IA" sub="Décroche, qualifie, prend RDV" on={() => openUpgrade("reception")} />
+              : <><R first I={AudioLines} l="Réceptionniste active" sub="Répond sur vos chantiers" tg={{ on: !!st.agents.rec, set: () => tgA("rec") }} />
+                <R I={AudioLines} l="Voix" v={s.settings.name ? "" : ""} on={() => modal({ kind: "recReglages" })} />
+                <R I={MessageSquare} l="Message d’accueil" on={() => modal({ kind: "recReglages" })} />
+                <R I={Clock} l="Horaires d’ouverture" v={hor ? `${hor} jour${hor > 1 ? "s" : ""}` : ""} on={() => modal({ kind: "reception" })} />
+                <R I={PhoneCall} l="Appeler ma réceptionniste" sub="Appel de test, depuis l’app" on={() => { primeCallWakeLock(); setTestCall(true) }} /></>}
+          </G>
+          <G t="Devis et factures">
+            <R first I={Percent} l="TVA par défaut" v={tva} on={cycT} />
+            <R I={Banknote} l="Acompte à la signature" v={`${acPctS} %`} on={cycA} />
+            <R I={Tag} l="Mes prestations" v={presta.ready ? String(presta.items.length) : ""} on={() => modal({ kind: "prestations" })} />
+            <R I={RotateCcw} l="Relances automatiques" sub={relDelaysL(relDelays(prof?.relance_delais)).replace(/ et /g, ", ")} tg={{ on: prof?.relances_auto !== false, set: () => void cycI() }} />
+          </G>
+          <G t="Équipe">
+            <R first I={Users} l="Salariés" v={equipeN ? String(equipeN) : ""} on={() => go("eq")} />
+            <R I={KeyRound} l="Rôles & accès" on={() => go("eq")} />
+          </G>
+          <G t="Application">
+            <R first I={Bell} l="Notifications" v={pushBusy ? "…" : pushOn ? "Activées" : "Désactivées"} on={() => void togglePush()} />
+            {!billingHidden && <R I={CreditCard} l="Abonnement" v={planL} on={() => modal({ kind: "abonnement" })} />}
+          </G>
+          <G t="Compte">
+            <R first I={UserRound} l="Profil" on={() => modal({ kind: "entreprise" })} />
+            <R I={ScanFace} l="Sécurité & Face ID" v={canBio ? (bio ? "Activé" : "Désactivé") : ""} on={() => canBio ? void bioTg() : modal({ kind: "pw" })} />
+            <R I={Settings} l="Plus de réglages" on={() => setMoreSet(o => !o)} v={moreSet ? "Masquer" : ""} />
+            <R I={LogOut} l="Se déconnecter" red on={reset} />
+          </G>
+          {moreSet && <div className="mt-8">{moreBody}</div>}
+          <p data-testid="app-version" className="pt-5 text-center text-[13px] text-[#6E6E73]">Akno {APP_VERSION} · build {APP_BUILD}</p>
+        </div>
+      </IosPage>
+      {testCall && <VoiceCall fallback={{ prenom: s.settings.name, company: s.settings.company, email: s.settings.email, tarifs: s.settings.tarifs, telephoneUrgence: s.settings.urgencePhone }} onDone={msg => { setTestCall(false); try { dispatchEvent(new Event("akno-refresh")) } catch { /* */ } if (msg) toast(msg) }} />}
+    </>
+  }
   return <Shell lead={<span className={`flex items-center justify-center rounded-full bg-gradient-to-b from-white/[.16] to-white/[.05] font-light tracking-[-0.03em] shadow-[inset_0_1px_0_rgba(255,255,255,.14)] ${desk ? "h-[72px] w-[72px] text-[24px]" : "h-[88px] w-[88px] text-[28px]"}`}>{meIniS(s)}</span>} label={s.settings.company?.trim() && s.settings.company.trim() !== meName(s) ? `${meName(s)} · ${s.settings.company.trim()}` : meName(s)} fig={<Num n={n} u={`/ ${mine.length}`} />} sub={`agents actifs · ${planL}`} actions={[
     { I: Building2, l: "Entreprise", on: () => modal({ kind: "entreprise" }) }, { I: Receipt, l: "Factures", on: () => modal({ kind: "factures" }) }, { I: Clock, l: "Horaires", on: () => recLock ? openUpgrade("reception") : modal({ kind: "reception" }) }, { I: LogOut, l: "Quitter", on: reset }]}>
     <Col>
@@ -908,20 +1067,7 @@ function SetP() {
     <Col>
       <div data-more-settings className="min-w-0">
         <List><Row first label="Plus de réglages" onClick={() => setMoreSet(o => !o)} lead={<Ic I={Settings} />} t="Plus de réglages" s="Avancé, exports, développeur, légal" r={<span className="text-[13px] text-white/50">{moreSet ? "Masquer" : "Voir"}</span>} /></List>
-        {moreSet && <div data-more-settings-body className="mt-8 flex flex-col gap-8">
-      <Section t="Mes agents"><List>{agents.map((x, i) => x === "rec" && recLock ? <Row key={x} first={i === 0} label={A[x].n} onClick={() => openUpgrade("reception")} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s="Option non incluse dans votre offre" r={<LockTag>Ajouter</LockTag>} /> : <Row key={x} first={i === 0} label={A[x].n} onClick={() => tgA(x)} lead={<Circ><Blob c={A[x].c} s={20} /></Circ>} t={A[x].n} s={st.agents[x] ? A[x].d : "En pause"} r={<Tg on={st.agents[x]} onClick={() => tgA(x)} label={A[x].n} />} />)}</List></Section>
-      <Section t="Gestion"><List><S first I={Users} l="Clients" v="" onClick={() => go("cl")} /><S I={Repeat2} l="Relances" v={relPending(s) ? `${relPending(s)} à venir` : ""} onClick={() => go("rel")} /><S I={Receipt} l="Factures" v="" onClick={() => modal({ kind: "factures" })} /><S I={ShieldCheck} l="Dossier de conformité" v="" onClick={() => modal({ kind: "conformite" })} />{cliLock ? <Row label="Demandes du site" onClick={() => openUpgrade("clients")} lead={<Ic I={Globe} />} t="Demandes du site" r={<LockTag />} /> : <S I={Globe} l="Demandes du site" v="" onClick={() => modal({ kind: "leads" })} />}</List></Section>
-      <Section t="Compte"><List>{support && <S first I={LifeBuoy} l="Aide & support" v="" onClick={help} />}<S I={FileSignature} l="Changer le mot de passe" v="" onClick={() => modal({ kind: "pw" })} /><S I={Smartphone} l="Code d'accès" v={lk ? "Activé" : "Créer"} onClick={() => dispatchEvent(new Event("akno-lock-setup"))} /></List></Section>
-      {/* update70 · suppression du compte (App Store 5.1.1(v), Google Play) */}
-      <Section t="Données"><List><Row first label="Supprimer mon compte" onClick={() => modal({ kind: "deleteAccount" })} lead={<Circ c={RED}><Trash2 size={IS} strokeWidth={SW} /></Circ>} t={<span className="text-[#FF6B6B]">Supprimer mon compte</span>} s="Efface votre compte et vos données" r={<Chev />} /></List></Section>
-      <Section t="Diagnostic"><List><Row first label="Latence vocale" onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} lead={<Ic I={Timer} />} t="Latence vocale" s="Mesures pendant l'appel, pour capture d'écran" r={<Tg on={voiceDbg} onClick={() => { const next = !voiceDbg; setVoiceDebugEnabled(next); setVoiceDbg(next) }} label="Latence vocale" />} /></List>{voiceDbg && <pre className="mt-3 max-h-[240px] overflow-auto rounded-[16px] bg-white/[.06] p-3 font-mono text-[11px] leading-[1.4] text-[#8CE99A] whitespace-pre-wrap">{voiceLog || "Aucun appel mesuré pour l'instant. Passez un appel puis revenez ici."}</pre>}</Section>
-      <Section t="Devis"><List><S first I={Repeat2} l="Relances de devis" v={relDelaysL(relDelays(prof?.relance_delais))} onClick={cycR} /><S I={Package} l="Mes prestations" v={presta.ready ? String(presta.items.length) : "…"} onClick={() => modal({ kind: "prestations" })} /></List></Section>
-      <Section t="Paiements"><List><S first I={Percent} l="Acompte à la signature" v={`${acPctS} %`} onClick={cycA} /><S I={Repeat2} l="Relances d'impayés" v={prof?.relances_auto === false ? "À valider" : prof?.relances_auto === true ? "Automatiques" : "À valider"} onClick={cycI} />{connectUi() && <S I={CreditCard} l="Paiement en ligne" v="Carte, SEPA" onClick={() => modal({ kind: "connect" })} />}<S I={Receipt} l="Suivi et export comptable" v="CSV, FEC" onClick={() => modal({ kind: "pilotage" })} /></List></Section>
-      <Section t="Tarifs"><List><S first I={Banknote} l="Frais et forfaits" v={tarifsSummary(st.tarifs)} onClick={() => modal({ kind: "tarifs" })} /></List></Section>
-      <Section t="Agenda"><List><S first I={Timer} l="Durée par défaut" v={dur} onClick={cycD} /><S I={MapPin} l="Zone d'intervention" v={st.tarifs?.zoneKm ? `${st.tarifs.zoneKm} km` : "Non renseignée"} onClick={() => modal({ kind: "tarifs" })} /><S I={CalendarCheck} l="Agenda en ligne (Cal.com)" v={acc?.integrations.calcom ? "Connecté" : "Agenda Akno"} onClick={() => modal({ kind: "agendaCal" })} /><S I={Globe} l="Lien de réservation public" v="À copier depuis l'Agenda" onClick={() => go("ag")} /></List></Section>
-      <Section t="Avis clients"><List>{cliLock ? <Row first label="Demandes d'avis Google" onClick={() => openUpgrade("clients")} lead={<Ic I={Sparkles} />} t="Demandes d'avis Google" s="Automatiques après chaque chantier" r={<LockTag />} /> : <S first I={Sparkles} l="Lien d'avis Google" v={st.reviewUrl ? st.reviewUrl.replace(/^https?:\/\//, "").slice(0, 28) : "À renseigner"} onClick={() => modal({ kind: "reviewUrl" })} />}</List></Section>
-      <Section t="Informations légales"><List>{[["CGV", "/cgv"], ["Mentions légales", "/mentions-legales"], ["Confidentialité", "/confidentialite"], ["Sous-traitance des données (DPA)", "/dpa"]].map(([l, h], i) => <S key={h} first={!i} I={FileText} l={l} v="" onClick={() => isNative ? location.assign(h) : window.open(h, "_blank", "noopener")} />)}</List></Section>
-        </div>}
+        {moreSet && moreBody}
         <p data-testid="app-version" className="mt-3 px-1 pb-2 text-center text-[12px] text-white/30">Version {APP_VERSION} (build {APP_BUILD})</p>
       </div>
     </Col>
@@ -981,7 +1127,7 @@ const CQA = ({ I, l, href, c, ext, onClick }: any) => {
 const KV = ({ I, l, v, href }: any) => { const inner = <><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><I size={16} strokeWidth={SW} /></span><div className="min-w-0 flex-1"><div className="text-[12px] text-white/40">{l}</div><div className="truncate text-[15px]">{v}</div></div>{href && <Chev />}</>
   return href ? <a href={href} className="flex min-h-[56px] items-center gap-3 border-t border-white/[.05] px-4 first:border-t-0 hover:bg-white/[.03]">{inner}</a> : <div className="flex min-h-[56px] items-center gap-3 border-t border-white/[.05] px-4 first:border-t-0">{inner}</div> }
 function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: string; eventId?: string; close: () => void }) {
-  const { s, set, modal, setChat, go } = useC(), ev = eventId ? s.events.find(x => x.id === eventId) : undefined
+  const { s, set, modal, setChat, go, desk } = useC(), ev = eventId ? s.events.find(x => x.id === eventId) : undefined
   const [genBusy, setGenBusy] = useState(false), [genErr, setGenErr] = useState("")
   const seed = callId ? s.calls.find(x => x.id === callId) : undefined
   const k = ckey(ev?.name || seed?.name || name), cl = findC(ev?.name || seed?.name || name)
@@ -1038,6 +1184,7 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
     ...rels.map(r => ({ t: `${r.type} · ${r.canal}`, w: `${r.date} · ${RS[r.status][0]}`, I: Send, o: 2 })),
     ...devis.map(d => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0], I: Receipt, o: 3 }))].sort((a, b) => a.o - b.o)
   const H = ({ children }: any) => <div className="mb-2 mt-6 px-1 text-[13px] font-medium text-white/45">{children}</div>
+  if (!desk) return <MFiche {...{ nm, call, calls, playable, devis, evs, rels, fiche, ficheOk, reloadFiche, raw, ph, addr, email, st, close, seed, linked, cl, ev, existingDv, genBusy, genErr, generateDevis }} />
   return <Sheet title={nm} c={A.rec.c} onClose={close}>
     <div className="-mt-2 flex items-center gap-4"><span className="scale-[1.35] origin-left"><Av n={nm} /></span><div className="ml-3 min-w-0"><div className="truncate text-[20px] font-medium tracking-[-0.02em]">{nm}</div><div className="mt-1 flex flex-wrap items-center gap-2"><Chip c={st[1]}>{st[0]}</Chip>{call?.callback && !/^À rappeler/.test(st[0]) && <Chip c={call.urgent ? RED : AMBER}>À rappeler</Chip>}{call?.wantDevis && <Chip c={A.dev.c}>Devis demandé</Chip>}</div>{call?.callback && call.rappelAt && <div className={`mt-1 ${tx.cap}`}>Rappel souhaité · {call.rappelAt}</div>}</div></div>
     <div className="mt-6 grid grid-cols-4 gap-2"><CQA I={Phone} l="Appeler" href={`tel:${raw}`} c={A.rec.c} /><CQA I={MessageSquareText} l="SMS" href={`sms:${raw}`} />{addr ? <CQA I={MapPin} l="Itinéraire" ext href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`} /> : <span />}<CQA I={Receipt} l="Devis" onClick={() => modal({ kind: "devis", data: { client: nm, objet: ev?.topic || call?.besoin || call?.topic } })} /></div>
@@ -1060,11 +1207,65 @@ function ClientSheet({ name, callId, eventId, close }: { name: string; callId?: 
     {hist.length > 0 && <><H>Historique</H><div className="relative pl-2">{hist.map((h, i) => <div key={i} className="relative flex gap-3 pb-4 last:pb-0">{i < hist.length - 1 && <span className="absolute left-[15px] top-8 bottom-0 w-px bg-white/[.08]" />}<span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[.06] text-white/60"><h.I size={14} strokeWidth={SW} /></span><div className="min-w-0 pt-1"><div className="truncate text-[14px]">{h.t}</div><div className={tx.cap}>{h.w}</div></div></div>)}</div></>}
   </Sheet>
 }
+/* passe 2 · fiche contact (issue d'un appel, sombre) / fiche client (feuille blanche) — maquettes 01-Reception/fiche-contact, 02-Contacts/fiche-client */
+function MFiche({ nm, call, calls, playable, devis, evs, rels, fiche, ficheOk, reloadFiche, raw, ph, addr, email, st, close, seed, linked, cl, ev, existingDv, genBusy, genErr, generateDevis }: any) {
+  const { modal, setChat, go } = useC(), chs = useChantiers(), facts = useClientFactures(nm)
+  useEffect(() => { if (!chs.ready) void loadChantiers() }, [chs.ready])
+  const [tab, setTab] = useState<"det" | "hist">("det"), [edit, setEdit] = useState(0)
+  const known = !!fiche || !!cl, dark = !!seed && !known
+  const myCh = chantiersOfClient(chs.rows, nm).sort((a, b) => (b.start_date || "").localeCompare(a.start_date || ""))
+  const chCur = myCh.find(c => effectiveStatus(c) === "in_progress") || myCh.find(c => effectiveStatus(c) === "upcoming") || myCh[0]
+  const unknownName = /^((client )?inconnu\b.*)?$/i.test(String(nm).trim())
+  const onDevis = () => call ? void generateDevis() : modal({ kind: "devis", data: { client: nm, objet: ev?.topic || call?.besoin || call?.topic } })
+  const acts: FAct[] = [{ I: Phone, l: "Appeler", href: raw ? `tel:${raw}` : undefined, dis: !raw }, { I: MessageSquareText, l: "SMS", href: raw ? `sms:${raw}` : undefined, dis: !raw },
+    { I: Navigation, l: "Itinéraire", href: addr ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}` : undefined, ext: true, dis: !addr }, { I: FileText, l: genBusy ? "…" : "Devis", on: onDevis }]
+  const status = call?.callback ? <span className="font-medium text-[#FF6961]">À rappeler{call.urgent ? " · urgent" : call.rappelAt ? ` · ${call.rappelAt}` : ""}</span>
+    : chCur ? <span className="text-[rgba(235,235,245,.78)]"><i aria-hidden className="mr-1.5 inline-block h-[7px] w-[7px] rounded-full align-middle" style={{ background: effectiveStatus(chCur) === "in_progress" ? "#30D158" : effectiveStatus(chCur) === "upcoming" ? "#0A84FF" : "#8E8E93" }} />{STATUS_LABEL[effectiveStatus(chCur)] === "En cours" ? "Chantier en cours" : STATUS_LABEL[effectiveStatus(chCur)] === "À venir" ? "Chantier à venir" : "Chantier terminé"} · {chCur.title}</span>
+    : <span className="text-[rgba(235,235,245,.78)]">{st[0]}</span>
+  const avatar = <span className="flex h-24 w-24 items-center justify-center rounded-full text-[36px] font-semibold tracking-[-0.01em] text-[#fff]" style={dark ? { background: "linear-gradient(180deg,rgba(255,255,255,.2),rgba(255,255,255,.07))", border: ".5px solid rgba(255,255,255,.35)", boxShadow: "inset 0 1px 0 rgba(255,255,255,.45),0 10px 30px rgba(0,0,0,.5)" } : { background: "linear-gradient(180deg,#A2A2A7,#7C7C81)", boxShadow: "0 0 0 1px rgba(255,255,255,.16)" }}>{initials(nm)}</span>
+  const when = (x: Call) => `${x.day || "Aujourd'hui"}, ${x.time}${x.dur ? ` · ${x.dur}` : ""}`
+  const addClient = () => { close(); requestNewClient({ name: unknownName || /^[+\d\s.]+$/.test(nm) ? "" : nm, phone: raw, addr: addr || undefined, email: email || undefined, origine: "appel" }); go("cl") }
+  const today = new Date().toISOString().slice(0, 10)
+  const fLate = (f: CFact) => f.type !== "avoir" && (f.statut === "emise" || f.statut === "envoyee") && !!f.date_echeance && f.date_echeance < today
+  const dvSt = (d: Devis) => d.status === "val" ? <StDot t="blue">Signé</StDot> : d.status === "ref" ? <StDot t="red">Refusé</StDot> : d.status === "brouillon" || d.status === "aval" ? <StDot t="draft">Brouillon</StDot> : <StDot t="grey">{ST[d.status][0]}</StDot>
+  const hist = [...calls.map((x: Call) => ({ t: `Appel · ${x.tag || x.topic}`, w: when(x), hot: false })), ...evs.map((e: Ev) => ({ t: `RDV · ${e.topic}`, w: `${fmtD(e.date)} · ${hh(e.start)}` })),
+    ...rels.map((r: any) => ({ t: `${r.type} · ${r.canal}`, w: `${r.date} · ${RS[r.status as keyof typeof RS][0]}` })), ...devis.map((d: Devis) => ({ t: `Devis N° ${d.num} · ${eur(d.amount)}`, w: ST[d.status][0] })),
+    ...(facts || []).map(f => ({ t: `Facture ${f.numero || "(brouillon)"} · ${e2(Number(f.total_ttc))}`, w: f.date_emission ? new Date(f.date_emission + "T12:00:00").toLocaleDateString("fr-FR") : "Non émise" }))].map((h, i) => ({ ...h, hot: i === 0 }))
+  const editor = edit > 0 && <div className={dark ? "" : "akno-light"}><FicheEditor key={edit} startEdit name={nm} fiche={fiche} available={ficheOk} defaults={{ phone: ph, email, addr }} onSaved={() => { reloadFiche(); void loadClients(); setEdit(0) }} onCancel={() => setEdit(0)} /></div>
+  const player = playable && <div className="mt-3"><CallInline call={playable} onMic={() => { close(); setChat(true) }} /></div>
+  const notes = fiche?.notes || ""
+  const histV = hist.length ? <Timeline dark={dark} items={hist} /> : <p className={`text-[15px] ${dark ? "text-[#8E8E93]" : "text-[#6E6E73]"}`}>Aucun historique pour l'instant.</p>
+  return <PushLayer dark={dark} onClose={close} label={`Fiche de ${nm}`}>
+    <FicheShell dark={dark} name={nm} status={status} avatar={avatar} acts={acts} tab={tab} onTab={setTab} onBack={close} onEdit={() => { setTab("det"); if (known) { close(); requestEditClient(nm); go("cl") } else setEdit(x => x + 1) }}>
+      {genErr && <div className="mb-3 text-[13px] text-[#FF6961]">{genErr}</div>}
+      {editor ? editor : tab === "hist" ? <div className={dark ? "" : "pt-5"}>{histV}</div> : dark ? <>
+        {call && <DBlk className="px-5 pb-[18px] pt-4"><div className="text-[13px] leading-4 text-[#8E8E93]">Dernier appel</div><div className="mt-1 text-[17px] font-semibold leading-[22px] text-[#fff]">{when(call)}</div>{(call.note || call.besoin) && <p className="mt-2 text-[15px] leading-[21px] text-[#C7C7CC]">{call.note || call.besoin}</p>}{player}</DBlk>}
+        <DBlk>{[raw && ["Téléphone", ph, `tel:${raw}`], email && ["E-mail", email, `mailto:${email}`], addr && ["Adresse", addr, `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`]].filter(Boolean).map((r: any, i) => <DRow key={r[0]} first={i === 0} l={r[0]} v={r[1]} href={r[2]} />)}</DBlk>
+        <DBlk className="px-5 pb-[18px] pt-4"><div className="text-[13px] leading-4 text-[#8E8E93]">Notes</div><p className={`mt-1.5 whitespace-pre-line text-[15px] leading-[21px] ${notes ? "text-[#C7C7CC]" : "text-[#8E8E93]"}`}>{notes || "Aucune note. Code d'accès, préférences, matériel…"}</p></DBlk>
+        {(seed || linked || call) && !unknownName && <DBlk><button type="button" onClick={addClient} className="flex h-14 w-full items-center px-5 text-left text-[17px] font-semibold text-[#fff]">Ajouter aux clients</button></DBlk>}
+        {(seed || linked || call) && unknownName && <DBlk><button type="button" onClick={addClient} className="flex h-14 w-full items-center px-5 text-left text-[17px] font-semibold text-[#fff]">Ajouter aux clients</button></DBlk>}
+      </> : <>
+        <LSec first t="Coordonnées" />
+        <LCard>{raw && <MKV first k="Téléphone" v={ph} href={`tel:${raw}`} />}{email && <MKV first={!raw} k="E-mail" v={email} href={`mailto:${email}`} />}{addr && <MKV first={!raw && !email} k="Adresse" v={String(addr).replace(/,\s*(\d{5})/, "\n$1")} />}{!raw && !email && !addr && <div className="px-[18px] py-4 text-[15px] text-[#6E6E73]">Aucune coordonnée. Touchez Modifier.</div>}</LCard>
+        {myCh.length > 0 && <><LSec t={myCh.length > 1 ? "Chantiers" : "Chantier"} /><LCard>{myCh.map((c, i) => { const es = effectiveStatus(c), pct = progressPct(c); return <button key={c.id} type="button" onClick={() => { close(); requestOpenChantier(c.id); go("ch") }} className={`relative flex h-[84px] w-full items-center px-4 text-left ${i ? "before:absolute before:left-4 before:right-0 before:top-0 before:h-[.5px] before:bg-[rgba(60,60,67,.16)]" : ""}`}>
+          <span className="mr-3 h-14 w-14 shrink-0 overflow-hidden rounded-[14px] bg-[#E5E5EA] shadow-[0_0_0_.5px_rgba(0,0,0,.08)]">{c.lat != null && c.lng != null && <SatThumb lat={c.lat} lng={c.lng} size={56} color={STATUS_COLOR[es]} />}</span>
+          <span className="min-w-0 flex-1"><span className="block truncate text-[17px] font-medium leading-[22px] text-[#000]">{c.title}</span><span className="block truncate text-[14px] leading-[19px] text-[#6E6E73]"><b className="font-semibold" style={{ color: es === "in_progress" ? "#248A3D" : es === "upcoming" ? "#0071E3" : "#6E6E73" }}>● {STATUS_LABEL[es]}</b> · {rangeLabel(c)}</span><span className="mt-2 block h-1 overflow-hidden rounded-sm bg-[rgba(60,60,67,.16)]"><i className="block h-full rounded-sm bg-[#000]" style={{ width: `${pct}%` }} /></span></span>
+        </button> })}</LCard></>}
+        {(devis.length > 0 || (facts && facts.length > 0)) && <><LSec t="Devis et factures" /><LCard>
+          {devis.map((d: Devis, i: number) => <DocLine key={d.id} first={i === 0} I={FileText} t={`Devis N° ${d.num}`} s={d.objet} am={eurM(d.amount)} st={dvSt(d)} on={() => modal({ kind: "devisPrev", data: d })} />)}
+          {(facts || []).map((f, i) => <DocLine key={f.id} first={!devis.length && i === 0} I={FileText} t={`Facture ${f.numero || "(brouillon)"}`} s={[f.objet, f.date_echeance && `échéance ${frShort(f.date_echeance)}`].filter(Boolean).join(" · ") || (f.date_emission ? frShort(f.date_emission) : "Non émise")} am={eurM(Number(f.total_ttc))} st={fLate(f) ? <StDot t="orange">En retard</StDot> : f.statut === "payee" ? <StDot t="grey">Payée</StDot> : f.statut === "brouillon" ? <StDot t="draft">Brouillon</StDot> : <StDot t="grey">À payer</StDot>} on={() => modal({ kind: "factures", data: { id: f.id } })} />)}
+        </LCard></>}
+        {calls.length > 0 && <><LSec t="Appels" /><LCard>{calls.map((c: Call, i: number) => <CallLine key={c.id} first={i === 0} t={c.besoin || c.topic || "Appel"} m={`${c.day || "Aujourd'hui"}, ${c.time}`} s={c.note}>{c.recording && <div className="mt-2.5"><CallInline call={c} onMic={() => { close(); setChat(true) }} /></div>}</CallLine>)}</LCard></>}
+        <LSec t="Notes" /><LCard className="px-[18px] py-4"><p className={`whitespace-pre-line text-[17px] leading-[23px] ${notes ? "text-[#000]" : "text-[#6E6E73]"}`}>{notes || "Aucune note. Code d'accès, préférences, matériel…"}</p></LCard>
+      </>}
+    </FicheShell>
+  </PushLayer>
+}
 const CallInline = ({ call, onMic }: { call: Call; onMic: () => void }) => { const p = usePlayer(secs(call.dur), call.recording); if (!call.recording) return null; return <Player p={p} c={A.rec.c} onMic={onMic} /> }
 const relDelays = (raw: unknown) => { const a = Array.isArray(raw) ? [...new Set(raw.map(Number).filter(n => n >= 1 && n <= 60))].sort((x, y) => x - y).slice(0, 3) : []; return a.length ? a : [3, 7] }
 const relDelaysL = (a: number[]) => a.map(n => `J+${n}`).join(", ").replace(/, (J\+\d+)$/, " et $1")
 function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => void }) {
-  const { s, set, toast, modal, desk } = useC()
+  const { s, set, toast, modal, desk, go } = useC()
   const prof = useProfile().p, delays = relDelays(prof?.relance_delais)
   const [factBusy, setFactBusy] = useState(false)
   const toFacture = async (type: "facture" | "acompte" | "situation", given?: number) => {
@@ -1147,6 +1348,11 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
   }
   const avenant = () => { onClose(); setTimeout(() => modal({ kind: "devisEditor", data: undefined, prefill: { client: dv.client, email: dv.email, phone: dv.phone, addr: dv.addr, objet: `Avenant au devis n° ${dv.num}`, parentId: String(dv.id) } } as never), 0) }
   const tone = nx.key === "refused" || nx.key === "lost" ? "warn" : nx.key === "done" ? "ok" : undefined
+  const [signOn, setSignOn] = useState(false) // passe 2 · signature sur place
+  const signEl = signOn && dv.token ? <SignSheet dv={dv} acPct={acPct} onClose={() => setSignOn(false)} onPdf={download}
+    onSigned={(at, nom) => set(x => ({ ...x, devis: x.devis.map(y => y.id === dv.id ? { ...y, status: "val", signedAt: at, repliedAt: at, reply: y.reply } : y) }))}
+    onConvert={() => { setSignOn(false); void toFacture("facture") }}
+    chantier={ch.chantier ? { title: String((ch.chantier as { title?: string }).title || dv.objet), sub: `${String((ch.chantier as { title?: string }).title || dv.objet)} · À venir`, open: () => { onClose(); requestOpenChantier(String((ch.chantier as { id?: string }).id || "")); go("ch") } } : null} /> : null
   const footer = draft
     ? <Btn primary c={A.dev.c} className="w-full" disabled={busy} onClick={sendAny} data-next-action><Send size={16} />{busy ? "Envoi…" : "Envoyer au client"}</Btn>
     : nx.verb && nx.key !== "send" ? <Btn primary c={A.dev.c} className="w-full" disabled={factBusy} onClick={act} data-next-action>{factBusy ? "Un instant…" : nx.verb}</Btn>
@@ -1183,6 +1389,7 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
     {desk ? <Suspense fallback={null}><DevisPaper d={doc} sig={signed || undefined} /></Suspense>
       : <LinesCard lines={lines as never} tv={tv} tvaNA={CO.tvaNA} head={<div className="min-w-0"><div className="text-[13px] text-white/50">Devis n° {dv.num} · {dv.client || "Client"}</div><div className="mt-0.5 break-words text-[16px] font-medium leading-snug">{dv.objet}</div></div>} />}
     <div className="mt-3 grid grid-cols-1 gap-2"><Btn className="w-full" onClick={download}><FileText size={16} strokeWidth={1.6} />{signed ? "Voir le PDF signé" : "Voir le PDF"}</Btn>
+      {dv.token && (dv.status === "env" || dv.status === "att") && <Btn primary className="w-full" onClick={() => setSignOn(true)} data-sign-onsite><FilePen size={16} strokeWidth={1.6} />Faire signer sur place</Btn>}
       {dv.token && !draft && <Btn className="w-full" onClick={() => { navigator.clipboard.writeText(`${webOrigin()}/accept/${dv.token}`); toast("Lien de signature copié") }}><Copy size={16} />Copier le lien de signature</Btn>}
       {dv.status === "val" && <Btn className="w-full" onClick={() => setMore(m => !m)} aria-expanded={more}>{more ? "Moins d'options" : "Autres actions"}</Btn>}
       {dv.status === "val" && more && <>
@@ -1194,6 +1401,7 @@ function DevisPrevSheet({ initial, onClose }: { initial: Devis; onClose: () => v
       </>}
     </div>
     {dv.ai && <div className="mt-3 flex items-center gap-2 px-1 text-[13px] text-white/45"><Sparkles size={13} strokeWidth={1.5} style={{ color: A.dev.c }} />Généré par Akno depuis l'appel {dv.from ? `d'${dv.from}` : "du client"}</div>}
+    {signEl}
   </Sheet>
 }
 function numField(s: string) {
@@ -1307,7 +1515,7 @@ function Forms({ m, close }: { m: NonNullable<Modal>; close: () => void }) {
     {foot("Programmer", !!f.name.trim(), () => { set(x => ({ ...x, rels: [{ id: uid(), client: f.name.trim(), type: f.type, canal: f.canal, status: "prog", date: f.when || "Demain" }, ...x.rels] })); toast("Relance programmée") })}</Sheet>
   if (m.kind === "pw") return <PwSheet close={close} />
   if (m.kind === "entreprise") return <EntrepriseSheet close={close} />
-  if (m.kind === "abonnement") return billingHidden ? null : <AbonnementSheet close={close} />
+  if (m.kind === "abonnement") return billingHidden ? null : matchMedia("(min-width: 1024px)").matches ? <AbonnementSheet close={close} /> : <AbonnementPage close={close} />
   if (m.kind === "deleteAccount") return <DeleteAccountSheet close={close} />
   if (m.kind === "factures") return <Suspense fallback={null}><FacturesSheet key={String(d?.id || (d?.create ? "new" : "list"))} close={close} openId={d?.id} startNew={!!d?.create} clients={ctInfos(s)} /></Suspense>
   if (m.kind === "conformite") return <ConformiteSheet close={close} />
@@ -1663,7 +1871,7 @@ function AknoApp() {
   // update67 : une page chargée à part est d'abord reçue, puis affichée (la page courante reste visible en attendant : ni flash ni écran de chargement)
   // update72 : changer d'onglet REMPLACE l'entrée d'historique au lieu d'en empiler une. Sinon le geste iOS « glisser depuis le
   // bord gauche » (et history.back) ramenait l'onglet précédent (Factures → Chantiers). Les feuilles et fiches gardent leur entrée.
-  const go = (p: P) => { setQ(""); setM(null); if (p !== page) { const url = `/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`, L = LAZY[p], nav = () => navigate(url, { replace: true }); if (L && !L.ready()) void L.preload().then(nav, nav); else nav() } if (!desk) setChatS(false) }
+  const go = (p: P) => { noteTab(page); setQ(""); setM(null); if (p !== page) { const url = `/${slugOf(p)}${chat && desk ? "?chat=1" : ""}`, L = LAZY[p], nav = () => navigate(url, { replace: true }); if (L && !L.ready()) void L.preload().then(nav, nav); else nav() } if (!desk) setChatS(false) }
   // update72 · Android : le bouton retour, sans historique, ramène de Réglages / Relances / Équipe / Clients vers l'onglet d'accueil
   // (ou Réglages) au lieu de quitter l'app ; sur un onglet principal, l'app se met en arrière-plan comme avant.
   const goRef = useRef(go); goRef.current = go
@@ -1692,7 +1900,7 @@ function AknoApp() {
   const prefetch = (p: P) => { void LAZY[p]?.preload().catch(() => {}) }
   return <C.Provider value={ctx}><MotionConfig reducedMotion="user"><div className="fixed inset-0 flex overflow-hidden bg-black text-white tabular-nums antialiased" style={font(desk)}>
     {desk ? <><Side /><div className="flex min-w-0 flex-1 flex-col"><Top /><main className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><Pages pkey={pkey} page={page} desk loading={loading} /></main></div><AnimatePresence>{chat && <Chat />}</AnimatePresence></>
-      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} /><MobileNav page={page} go={go} badge={(fst.rows || []).filter(isLate).length} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} /><AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
+      : <div className="flex min-w-0 flex-1 flex-col"><Pages pkey={pkey} page={page} desk={false} loading={loading} />{page !== "set" && <MobileNav page={page} go={go} badge={(fst.rows || []).filter(isLate).length} recLocked={!rr.reception} onCreate={onCreate} onIntent={prefetch} employee={isEmploye} />}<AnimatePresence>{chat && <Chat />}</AnimatePresence></div>}
     <AnimatePresence>{ed && <Suspense fallback={null}><DevisEditor key={ed.initial?.id || "new"} req={ed} clients={ctInfos(s)} onClose={() => setEd(null)} onSend={(dv: Devis) => { setEd(null); setM({ kind: "devisPrev", data: dv }) }}
       // Création confirmée : toast du haut + retour haptique léger, puis le document créé s'ouvre.
       onCreated={(dv: Devis) => { setEd(null); flash(dv.num ? `Devis N° ${dv.num} créé` : "Devis créé"); void hapticSuccess(); setM({ kind: "devisPrev", data: dv }) }}

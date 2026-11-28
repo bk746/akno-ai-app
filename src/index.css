@@ -312,6 +312,11 @@ html.akno-portrait-only::after {
 @keyframes ch-fade { from { opacity: 0; transform: translateX(-50%) translateY(-3px); } to { opacity: 1; transform: translateX(-50%); } }
 @keyframes ch-drop { from { transform: translateY(-36px) scale(.8); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes ch-halo { 0% { transform: scale(.5); opacity: .9; } 100% { transform: scale(1.4); opacity: 0; } }
+/* passe 2 · repères maquette chantiers-carte : rond blanc casque noir + pastille statut + nom ; sélection = rond noir */
+.ch-p { position: absolute; left: 3px; top: 0; width: 34px; height: 34px; border-radius: 999px; background: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,.4); transition: transform .18s cubic-bezier(.2,.8,.2,1); }
+.ch-p.on { background: #000; box-shadow: 0 0 0 2.5px #fff, 0 6px 16px rgba(0,0,0,.45); transform: scale(1.12); }
+.ch-p i { position: absolute; right: -3px; top: -3px; width: 12px; height: 12px; border-radius: 999px; border: 2px solid #fff; }
+.ch-p-l { position: absolute; left: 50%; top: 39px; transform: translateX(-50%); white-space: nowrap; color: #fff; font-size: 11px; font-weight: 500; line-height: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .ch-big, .ch-label, .ch-drop, .ch-me-halo { animation: none !important; } }
 .ch-carousel { scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 .ch-carousel::-webkit-scrollbar { display: none; }
@@ -447,7 +452,7 @@ button, a, [role="button"], [role="tab"], [data-press], [data-hit], [data-qa], [
 .ak-caps{background:rgba(255,255,255,.86);border:.5px solid rgba(255,255,255,.95);box-shadow:inset 0 1px 0 #fff,0 0 0 .5px rgba(0,0,0,.08),0 4px 14px rgba(0,0,0,.25);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%)}
 .ak-seg{background:rgba(120,120,128,.32);border:.5px solid rgba(255,255,255,.12)}
 .ak-sheet{background:#fff;border-radius:40px 40px 0 0;color:#000}
-.ak-grab{width:44px;height:5px;border-radius:3px;background:rgba(60,60,67,.28);margin:8px auto 0}
+.ak-grab{flex:none;width:44px;height:5px;border-radius:3px;background:rgba(60,60,67,.28);margin:8px auto 0}
 
 /* Thème clair par portée : à l'intérieur de .akno-light, les utilitaires blanc/noir de Tailwind s'inversent
    (text-white/60 → noir 60 %, bg-white/[.06] → remplissage gris iOS…) et les surfaces sombres deviennent des surfaces claires.
@@ -483,3 +488,11 @@ button, a, [role="button"], [role="tab"], [data-press], [data-hit], [data-qa], [
 .akno-light .text-\[\#4D9BFF\]{color:var(--ak-blue-dot)!important}
 /* interrupteurs des écrans existants : la pastille reste blanche dans la portée claire */
 .akno-light [role=switch] :is(.bg-white,.bg-white\/95,.bg-white\/90){background-color:#fff!important}
+/* passe 2 · bouton rond sombre des fiches (maquette fiche contact .nb) */
+.ak-nb{background:rgba(120,120,128,.28);border:.5px solid rgba(255,255,255,.2);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 4px 14px rgba(0,0,0,.4);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+/* barre d'onglets en verre sombre au-dessus d'un écran sombre (fiche contact) */
+.nav-dark [data-bar-pill]{background:rgba(44,44,46,.55)!important;border-color:rgba(255,255,255,.16)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 8px 24px rgba(0,0,0,.5)!important}
+.nav-dark [data-bar-pill] [data-tab]{color:#AEAEB2!important}
+.nav-dark [data-bar-pill] [data-tab][aria-current=page]{color:#fff!important}
+.nav-dark [data-tab-pill]{background:rgba(255,255,255,.14)!important}
+.nav-dark [data-mobile-nav-fade]{opacity:0}

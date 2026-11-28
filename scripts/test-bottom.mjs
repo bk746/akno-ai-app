@@ -70,14 +70,15 @@ async function main() {
         if (document.head) st(); else document.addEventListener("DOMContentLoaded", st) }, [SAT, SAB])
       // 1. pages
       for (const p of PAGES) {
-        await page.goto(`${H.BASE}/${p}`); await page.waitForSelector("[data-bar-pill]", { timeout: 20000 }); await page.waitForTimeout(1800)
+        await page.goto(`${H.BASE}/${p}`); await page.waitForSelector(p === "parametres" ? "[data-page-scroll]" : "[data-bar-pill]", { timeout: 20000 }) // passe 2 : Réglages sans barre d'onglets; await page.waitForTimeout(3200) /* passe 2 : laisse le préchargement des onglets finir avant de mesurer */
         await closeSheets(page)
         const m = await MEASURE(page, "page")
         check(`${W} · page ${p} : dernier élément entièrement visible au-dessus de la barre et du home indicator`, !m.err && m.lastBottom <= m.limit, JSON.stringify(m))
         if (SHOTS) await page.screenshot({ path: `${SHOTS}/bas-${W}-page-${p}.png` })
       }
       // 2. feuilles des Réglages (Entreprise, Clients, Équipe, Relances, Factures, conformité, agents…)
-      await page.goto(`${H.BASE}/parametres`); await page.waitForSelector("[data-bar-pill]"); await page.waitForTimeout(1500)
+      // passe 2 : Réglages est une page sans barre d'onglets (maquette 08-Reglages)
+      await page.goto(`${H.BASE}/parametres`); await page.waitForSelector("[data-page-scroll]"); await page.waitForTimeout(1500)
       const rows = await page.locator("[data-page] [role=button][aria-label], [data-page] button[aria-label]").evaluateAll(els => els.filter(e => e.getBoundingClientRect().height > 30).map(e => e.getAttribute("aria-label")))
       const seen = new Set()
       for (const name of rows.filter((v, i, a) => a.indexOf(v) === i && !/Réglages|Fermer|Retour|Déconnexion|Se déconnecter|Supprimer|Tester|Activer|Désactiver/i.test(v)).slice(0, 18)) {
@@ -100,7 +101,7 @@ async function main() {
       check(`${W} · assistant : zone de saisie au-dessus du clavier (300 px simulés)`, k.field != null && k.field <= HT - 300 + 1, JSON.stringify(k))
       await page.evaluate(() => { document.documentElement.style.setProperty("--kb", "0px"); document.documentElement.classList.remove("kb-open") })
       // 4. feuilles ouvertes depuis les listes : devis, facture, client
-      for (const [p, sel, tag] of [["devis", "[data-page] [role=button], [data-page] li button", "devis"], ["factures", "[data-page] [role=button], [data-page] button", "facture"], ["clients", "[data-page] button, [data-page] [role=button]", "client"]]) {
+      for (const [p, sel, tag] of [["devis", "[data-page] [role=button], [data-page] li button, [data-page] button", "devis"], ["factures", "[data-page] [role=button], [data-page] button", "facture"], ["clients", "[data-page] button, [data-page] [role=button]", "client"]]) {
         await page.goto(`${H.BASE}/${p}`); await page.waitForTimeout(1800)
         const cands = page.locator(sel)
         const n = Math.min(await cands.count(), 40)
@@ -116,16 +117,13 @@ async function main() {
         if (tag === "devis") { const t = await page.locator("[role=dialog]").last().innerText().catch(() => ""); check(`${W} · liste Devis → aperçu du devis (et non la fiche client)`, /Devis\s*N°|DEVIS N°/i.test(t) && /Voir le PDF|Envoyer|Autres actions/.test(t), t.slice(0, 160).replace(/\n/g, " | ")) }
         await closeSheets(page)
       }
-      // 5. menu + : chaque création
-      await page.goto(`${H.BASE}/reception`); await page.waitForTimeout(1500)
-      await page.locator("[data-create-btn]").click(); await page.waitForTimeout(500)
-      const items = await page.locator("[data-create-menu] button").evaluateAll(els => els.map(e => (e.innerText || "").split("\n")[0].trim()).filter(Boolean))
-      await page.keyboard.press("Escape"); await page.waitForTimeout(300)
-      for (const it of items.filter(x => !/Fermer/.test(x)).slice(0, 6)) {
-        await page.goto(`${H.BASE}/reception`); await page.waitForTimeout(1200)
-        await page.locator("[data-create-btn]").click(); await page.waitForTimeout(450)
-        await page.locator("[data-create-menu] button", { hasText: it }).first().click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(1000)
-        if (await topSheet(page)) await sheetCheck(page, `creer-${it}`, W)
+      // 5. passe 2 (maquettes) : création depuis la capsule + de chaque page (plus de menu + dans la barre)
+      for (const [pg, re] of [["agenda", /Nouveau rendez-vous/], ["equipe", /Ajouter|Inviter|Nouveau/], ["clients", /Nouveau|Ajouter/]]) {
+        await page.goto(`${H.BASE}/${pg}`); await page.waitForTimeout(1500); await closeSheets(page)
+        const b = page.getByRole("button", { name: re }).first()
+        if (!await b.isVisible().catch(() => false)) continue
+        await b.click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(1000)
+        if (await topSheet(page)) await sheetCheck(page, `creer-${pg}`, W)
         await closeSheets(page)
       }
       // 6. Réglages → retour : fondu sur place, aucune page ne glisse horizontalement, jamais d'écran vide
@@ -135,7 +133,7 @@ async function main() {
           const f = () => { const ps = [...document.querySelectorAll("[data-slot]")].filter(e => getComputedStyle(e).visibility !== "hidden" && +getComputedStyle(e).opacity > .02 && e.getBoundingClientRect().height > 0)
             out.push({ n: ps.length, x: Math.max(0, ...ps.map(e => Math.abs(e.getBoundingClientRect().left))) }); if (++n < 24) requestAnimationFrame(f); else res(out) }; requestAnimationFrame(f) }))
         await page.getByRole("button", { name: "Réglages" }).first().click(); const go = await sample(); await page.waitForTimeout(600)
-        await page.getByRole("button", { name: "Retour" }).first().click(); const back = await sample(); await page.waitForTimeout(600)
+        await page.getByRole("button", { name: /^(Retour|Terminé)$/ }).first().click(); const back = await sample(); await page.waitForTimeout(600)
         const all = [...go, ...back]
         check(`${W} · Réglages ↔ retour : aucun glissement horizontal (fondu)`, all.every(f => f.x < 2), JSON.stringify(all.filter(f => f.x >= 2).slice(0, 3)))
         check(`${W} · Réglages ↔ retour : jamais d'écran vide`, all.every(f => f.n >= 1), JSON.stringify(all.map(f => f.n)))

@@ -5,10 +5,11 @@ import { AnimatePresence, motion, useDragControls, useReducedMotion } from "moti
 import { Check, ChevronDown, ChevronLeft, HardHat, Layers, List, LocateFixed, Loader2, MapPin, MoreHorizontal, Plus, Sparkles, X } from "lucide-react"
 import { Capsule } from "../nav/IosPage"
 import ChHistory from "./ChHistory"
+import ChFicheM from "./ChFicheM"
 import { useC } from "../ui"
 import ChMap, { TILES, type MapApi, type MapLayer } from "./ChMap"
 import ChantierForm, { type FormReq } from "./ChantierForm"
-import { ChCard, ChDetail } from "./parts"
+import { ChCard, ChCardL, ChDetail } from "./parts"
 import { chState, loadChantiers, takeNewRequest, takeOpenRequest, teamOf, useChantiers, type Chantier } from "../../lib/chantiers"
 import { STATUS_COLOR, effectiveStatus, type ChStatus } from "../../lib/chantierCalc"
 import { FRANCE, reverseAddress, searchAddress } from "../../lib/geo"
@@ -19,6 +20,7 @@ type Filter = "all" | ChStatus
 const FILTERS: [Filter, string][] = [["all", "Tous"], ["in_progress", "En cours"], ["upcoming", "À venir"], ["done", "Terminés"]]
 const RANK: Record<ChStatus, number> = { in_progress: 0, upcoming: 1, done: 2 }
 const NAV = "var(--page-bottom)"
+const PIN_M: Record<ChStatus, string> = { in_progress: "#30D158", upcoming: "#FF9F0A", done: "#0A84FF" } // passe 2 · couleurs des repères (maquette)
 const ls = { get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* privé */ } } }
 const glass = "bg-[#1C1C1E]/75 backdrop-blur-xl backdrop-saturate-150 border border-white/[.08] shadow-[0_8px_24px_-8px_rgba(0,0,0,.6)]"
 const sortCh = (a: Chantier, b: Chantier) => { const sa = effectiveStatus(a), sb = effectiveStatus(b); if (sa !== sb) return RANK[sa] - RANK[sb]; const da = a.start_date || "9999", db = b.start_date || "9999"; return sa === "done" ? db.localeCompare(da) : da.localeCompare(db) }
@@ -53,7 +55,7 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
   const counts = useMemo(() => { const n = { in_progress: 0, upcoming: 0, done: 0 } as Record<ChStatus, number>; for (const c of all) n[effectiveStatus(c)]++; return n }, [all])
   const list = useMemo(() => filter === "all" ? all : all.filter(c => effectiveStatus(c) === filter), [all, filter])
   const cur = list.find(c => c.id === sel) || null
-  const items = useMemo(() => list.filter(c => c.lat != null && c.lng != null).map(c => ({ id: c.id, lat: c.lat!, lng: c.lng!, color: STATUS_COLOR[effectiveStatus(c)], label: c.title })), [list])
+  const items = useMemo(() => list.filter(c => c.lat != null && c.lng != null).map(c => ({ id: c.id, lat: c.lat!, lng: c.lng!, color: desk ? STATUS_COLOR[effectiveStatus(c)] : PIN_M[effectiveStatus(c)], label: desk ? c.title : (c.client_nom || c.title).trim().split(/\s+/).slice(-1)[0] })), [list, desk])
 
   // décalage vertical : le repère se place au centre de la zone de carte visible (sous l'en-tête, au-dessus des cartes)
   const offsetFor = useCallback((open: boolean) => {
@@ -160,15 +162,22 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
     {roundCtl(layer === "sat" ? "Afficher le plan" : "Afficher le satellite", () => setLayer(layer === "sat" ? "plan" : "sat"), <Layers size={19} strokeWidth={2} />)}
     {roundCtl("Ma position", recenter, locBusy ? <Loader2 size={19} className="animate-spin" /> : <LocateFixed size={19} strokeWidth={2} className={meLoc ? "text-[#4D9BFF]" : ""} />)}
   </div>
+  // passe 2 · colonne de contrôles claire en haut à droite (maquette : calques · position)
+  const ctrlsL = <div className="pointer-events-auto flex w-11 flex-col items-center rounded-[22px] bg-[rgba(250,250,252,.82)] py-1 text-[#1C1C1E] shadow-[0_6px_18px_rgba(0,0,0,.25)] backdrop-blur-xl">
+    <button type="button" aria-label={layer === "sat" ? "Afficher le plan" : "Afficher le satellite"} onClick={() => setLayer(layer === "sat" ? "plan" : "sat")} className="flex h-11 w-11 items-center justify-center"><Layers size={19} strokeWidth={1.8} /></button>
+    <span aria-hidden className="h-px w-6 bg-[rgba(60,60,67,.18)]" />
+    <button type="button" aria-label="Ma position" onClick={recenter} className="flex h-11 w-11 items-center justify-center">{locBusy ? <Loader2 size={19} className="animate-spin" /> : <LocateFixed size={19} strokeWidth={1.8} className={meLoc ? "text-[#007AFF]" : ""} />}</button>
+  </div>
   const attribution = <span className="pointer-events-auto rounded-md bg-black/35 px-1.5 py-0.5 text-[10px] leading-none text-white/60 backdrop-blur-sm">{TILES[layer].attr}</span>
 
   const filterPill = <div className="relative">
-    <motion.button type="button" whileTap={{ scale: .96 }} aria-haspopup="listbox" aria-expanded={fOpen} onClick={() => setFOpen(v => !v)} className={`pointer-events-auto flex h-10 items-center gap-1.5 rounded-full px-4 text-[14.5px] font-semibold text-white ${glass}`}>
-      {filter === "all" ? <><span className="h-1.5 w-1.5 rounded-full bg-white/50" />{st.ready && !st.missing ? countLabel(counts) : "Chantiers"}</> : <><span className="h-1.5 w-1.5 rounded-full bg-white/50" />{FILTERS.find(f => f[0] === filter)![1]} · {counts[filter as ChStatus]}</>}
-      <ChevronDown size={16} strokeWidth={2.4} className={`text-white/60 transition-transform ${fOpen ? "rotate-180" : ""}`} />
+    <motion.button type="button" whileTap={{ scale: .96 }} aria-haspopup="listbox" aria-expanded={fOpen} onClick={() => setFOpen(v => !v)} className={desk ? `pointer-events-auto flex h-10 items-center gap-1.5 rounded-full px-4 text-[14.5px] font-semibold text-white ${glass}` : "pointer-events-auto flex h-10 items-center gap-2 rounded-full bg-[rgba(250,250,252,.82)] px-4 text-[15px] text-[#1C1C1E] shadow-[0_6px_18px_rgba(0,0,0,.25)] backdrop-blur-xl"}>
+      {!desk ? <><HardHat size={17} strokeWidth={1.8} />{filter === "all" ? (() => { const [h, ...r] = (st.ready && !st.missing ? countLabel(counts) : "Chantiers").split(" · "); return <span><b className="font-semibold">{h}</b>{r.length ? <span className="text-[#6E6E73]"> · {r.join(" · ")}</span> : null}</span> })() : <span><b className="font-semibold">{FILTERS.find(f => f[0] === filter)![1]}</b><span className="text-[#6E6E73]"> · {counts[filter as ChStatus]}</span></span>}<ChevronDown size={15} strokeWidth={2.2} className={`text-[#6E6E73] transition-transform ${fOpen ? "rotate-180" : ""}`} /></>
+      : filter === "all" ? <><span className="h-1.5 w-1.5 rounded-full bg-white/50" />{st.ready && !st.missing ? countLabel(counts) : "Chantiers"}</> : <><span className="h-1.5 w-1.5 rounded-full bg-white/50" />{FILTERS.find(f => f[0] === filter)![1]} · {counts[filter as ChStatus]}</>}
+      {desk && <ChevronDown size={16} strokeWidth={2.4} className={`text-white/60 transition-transform ${fOpen ? "rotate-180" : ""}`} />}
     </motion.button>
     <AnimatePresence>{fOpen && <motion.div role="listbox" aria-label="Filtrer les chantiers" initial={{ opacity: 0, y: -6, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: .97 }} transition={{ type: "spring", stiffness: 520, damping: 34 }}
-      className={`pointer-events-auto absolute left-1/2 top-12 z-10 w-[220px] -translate-x-1/2 overflow-hidden rounded-[18px] p-1.5 ${glass} !bg-[#1C1C1E]/95`} style={{ originY: 0 }}>
+      className={`pointer-events-auto absolute top-12 z-10 w-[220px] ${desk ? "left-1/2 -translate-x-1/2" : "left-0"} overflow-hidden rounded-[18px] p-1.5 ${glass} !bg-[#1C1C1E]/95`} style={{ originY: 0 }}>
       {FILTERS.map(([f, l]) => <button key={f} type="button" role="option" aria-selected={filter === f} onClick={() => setFilter(f)} className="flex h-11 w-full items-center gap-2.5 rounded-[12px] px-3 text-left text-[15px] text-white active:bg-white/[.08]">
         <span className="h-2 w-2 rounded-full" style={{ background: f === "all" ? "rgba(255,255,255,.5)" : STATUS_COLOR[f] }} /><span className="flex-1">{l}</span>
         <span className="text-[13px] tabular-nums text-white/40">{f === "all" ? all.length : counts[f]}</span>{filter === f && <Check size={16} className="text-[#7EA6FF]" />}</button>)}
@@ -222,29 +231,30 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
   const fromHist = (id: string) => { setHist(false); setDraft(null); if (filter !== "all") setFilterS("all"); setSel(id); setTimeout(() => { const c = chState().rows.find(x => x.id === id); setSheet(true); flyTo(c, { open: true }); scrollToId(id) }, 320) }
   return <div className="relative min-h-0 flex-1 overflow-hidden overscroll-none bg-[#0b0d0c]">
     {mapEl}
-    <AnimatePresence>{hist && <ChHistory key="hist" rows={all} onPick={fromHist} onClose={() => setHist(false)} />}</AnimatePresence>
+    <AnimatePresence>{hist && <ChHistory key="hist" rows={all} onPick={fromHist} onClose={() => setHist(false)} onNew={st.missing ? undefined : () => { setHist(false); setForm({}) }} amount={c => { const d = c.devis_id ? s.devis.find(x => x.id === c.devis_id) : null; return d ? d.amount : null }} />}</AnimatePresence>
     <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[170px] bg-gradient-to-b from-black/70 via-black/30 to-transparent" />
     <header className="pointer-events-none absolute inset-x-0 top-0 z-20" style={{ paddingTop: "calc(var(--sat) + 2px)" }}>
       <div className="flex h-11 items-center px-5">
         {/* Refonte iOS : titre + capsule en verre clair (+ nouveau chantier · liste / historique · réglages) */}
         <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-white drop-shadow-[0_1px_6px_rgba(0,0,0,.5)]">Chantiers</h1>
         <div className="pointer-events-auto ml-auto flex items-center gap-2">
-          <Capsule items={[{ I: Plus, label: "Nouveau chantier", on: () => { if (st.missing) { toast("Appliquez d'abord la migration Chantiers"); return } setForm({}) } }, { I: List, label: "Liste des chantiers", on: () => setHist(true) }, { I: MoreHorizontal, label: "Réglages", on: () => go("set") }]} />
+          <Capsule items={[{ I: Plus, label: "Nouveau chantier", on: () => { if (st.missing) { toast("Appliquez d'abord la migration Chantiers"); return } setForm({}) } }, { I: List, label: "Liste des chantiers", on: () => setHist(true) }]} />
         </div>
       </div>
-      <div className="mt-2 flex justify-center">{filterPill}</div>
+      <div className="mt-3 flex items-start justify-between px-4"><div className="ak-chf">{filterPill}</div></div>
     </header>
+    <div className="pointer-events-none absolute right-4 z-20" style={{ top: "calc(var(--sat) + 104px)" }}>{ctrlsL}</div>
 
     <AnimatePresence>{!sheet && <motion.div key="bottom" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} transition={{ type: "spring", stiffness: 380, damping: 36 }} className="akno-light ak-on-grey kb-hide data-ch-peek pointer-events-none absolute inset-x-0 z-20 flex flex-col" style={{ bottom: NAV }}>
-      <div className="flex items-end justify-between px-4 pb-2.5">{attribution}{ctrls}</div>
+      <div className="flex items-end justify-between px-4 pb-2.5">{attribution}</div>
       <AnimatePresence mode="popLayout" initial={false}>
         {draft ? <div key="dr" className="px-4">{draftCard}</div>
           : stateCard ? <motion.div key="st" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="pointer-events-auto px-4">{stateCard}</motion.div>
             : <motion.div key="car" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <div ref={sc} className="ch-carousel pointer-events-auto flex snap-x snap-mandatory snap-always gap-2.5 overflow-x-auto scroll-smooth px-7" style={{ touchAction: "pan-x" }} aria-roledescription="carrousel" aria-label="Chantiers">
-                {list.map((c, i) => <motion.div key={c.id} data-ch={c.id} aria-roledescription="diapositive" aria-label={`${i + 1} sur ${list.length}`} className="w-[calc(100%-6px)] shrink-0 snap-center snap-always py-1"
+              <div ref={sc} className="ch-carousel pointer-events-auto flex snap-x snap-mandatory snap-always gap-2.5 overflow-x-auto scroll-smooth px-4" style={{ touchAction: "pan-x" }} aria-roledescription="carrousel" aria-label="Chantiers">
+                {list.map((c, i) => <motion.div key={c.id} data-ch={c.id} aria-roledescription="diapositive" aria-label={`${i + 1} sur ${list.length}`} className="w-full shrink-0 snap-center snap-always py-1"
                   onPanEnd={(_, p) => { if (p.offset.y < -36 && Math.abs(p.offset.y) > Math.abs(p.offset.x) * 1.2) openSheet(c.id) }}>
-                  <ChCard c={c} team={team(c)} active={c.id === sel} onOpen={() => openSheet(c.id)} />
+                  <ChCardL c={c} team={team(c)} onOpen={() => openSheet(c.id)} />
                 </motion.div>)}
               </div>
               {list.length > 1 && <div className="flex justify-center gap-1.5 pt-2" aria-hidden>{list.slice(0, 12).map(c => <motion.span key={c.id} layout className="h-1.5 rounded-full shadow-[0_1px_3px_rgba(0,0,0,.5)]" animate={{ width: c.id === sel ? 16 : 6, backgroundColor: c.id === sel ? "rgba(255,255,255,.95)" : "rgba(255,255,255,.5)" }} transition={{ type: "spring", stiffness: 500, damping: 36 }} />)}</div>}
@@ -252,7 +262,7 @@ export default function ChantiersPage({ me, clients }: { me: ReactNode; clients:
       </AnimatePresence>
     </motion.div>}</AnimatePresence>
 
-    <AnimatePresence>{sheet && cur && <FullSheet key="sheet" onClose={closeSheet}><ChDetail c={cur} team={team(cur)} onClose={closeSheet} onEdit={() => setForm({ initial: cur })} /></FullSheet>}</AnimatePresence>
+    <AnimatePresence>{sheet && cur && <ChFicheM key="fiche" c={cur} team={team(cur)} onClose={closeSheet} onEdit={() => setForm({ initial: cur })} />}</AnimatePresence>
     {formEl}
   </div>
 }

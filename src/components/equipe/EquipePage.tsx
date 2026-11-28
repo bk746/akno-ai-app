@@ -14,6 +14,7 @@ import { inviteEmploye, loadChantiers, requestOpenChantier, setAccess, useChanti
 import { STATUS_COLOR, progressPct, rangeLabel, todayISO, untilLabel } from "../../lib/chantierCalc"
 import { ROLE_LABEL, cityOf, entryDate, frPhone, groupTeam, initialsOf, invitedAgo, longDate, memberToday, rowSite, shortName, sinceLabel, weekPlan, weekRange, type AccessRole, type Today } from "../../lib/equipeCalc"
 import ModalSheet from "../sheet/ModalSheet"
+import EquipeM from "./EquipeM"
 
 const NAV = "var(--page-bottom)"
 const PUSH = { type: "spring" as const, stiffness: 420, damping: 40, mass: .9 }
@@ -24,6 +25,10 @@ const Dot = ({ c }: { c: string }) => <span className="h-[7px] w-[7px] shrink-0 
 const Head = ({ t, n, r }: { t: string; n?: number; r?: ReactNode }) => <div className="mb-2 mt-6 flex items-baseline justify-between px-1"><h2 className="text-[17px] font-semibold tracking-[-0.02em] text-white">{t}</h2>{r ?? (n != null && <span className="text-[15px] font-medium tabular-nums text-white/45">{n}</span>)}</div>
 
 export default function EquipePage({ head }: { head?: ReactNode }) {
+  const { desk } = useC()
+  return desk ? <EquipeD head={head} /> : <EquipeM />
+}
+function EquipeD({ head }: { head?: ReactNode }) {
   const { desk, go, toast } = useC(), st = useChantiers(), reduce = useReducedMotion()
   const [q, setQ] = useState(""), [openId, setOpenId] = useState<string | null>(null), [form, setForm] = useState<{ e: Employe | null } | null>(null)
   const [relBusy, setRelBusy] = useState<string | null>(null), [today] = useState(() => todayISO())

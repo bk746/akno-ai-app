@@ -5,7 +5,7 @@
    - Toucher une facture → historique de ses relances (table facture_relances, lecture RLS). */
 import { useEffect, useMemo, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { Check, ChevronRight, CircleCheck, FileText, Link2, Mail, MessageSquareText, Phone, PhoneCall, Repeat2, ShieldCheck } from "lucide-react"
+import { Check, ChevronRight, CircleCheck, FileText, Link2, Mail, MessageSquareText, Phone, PhoneCall, Repeat2, RotateCcw, ShieldCheck } from "lucide-react"
 import ModalSheet from "../sheet/ModalSheet"
 import { useC, type QAi } from "../ui"
 import { dueOf, isLate, isUnpaid, refreshFactures, useFacturesLite, type FactureLite } from "../../lib/facturesLite"
@@ -28,19 +28,23 @@ export const lateLabel = (f: FactureLite) => { if (!f.date_echeance) return ""; 
 
 const SmallBtn = ({ children, on, label }: { children: React.ReactNode; on: () => void; label: string }) =>
   <motion.button type="button" whileTap={{ scale: .94 }} aria-label={label} onClick={e => { e.stopPropagation(); void hapticTap(); on() }}
-    className="h-8 shrink-0 rounded-full bg-[rgba(118,118,128,.12)] px-3.5 text-[14px] font-semibold text-[#000] [-webkit-tap-highlight-color:transparent]">{children}</motion.button>
+    className="h-9 shrink-0 rounded-[18px] bg-[#F2F2F7] px-3 text-[14px] font-semibold text-[#000] [-webkit-tap-highlight-color:transparent]">{children}</motion.button>
 
-function LRow({ lead, t, tc, s, sc, r, onClick, first }: { lead: React.ReactNode; t: string; tc?: string; s: React.ReactNode; sc?: string; r?: React.ReactNode; onClick?: () => void; first?: boolean }) {
-  // pas de bouton imbriqué dans un bouton : la zone principale (avatar + textes) et l'action de droite sont deux contrôles frères
-  return <div className="flex min-h-[64px] items-center gap-3 pl-1">
-    {lead}
-    <div className={`flex min-h-[64px] min-w-0 flex-1 items-center gap-2 py-2 ${first ? "" : "border-t border-[rgba(60,60,67,.16)]"}`}>
-      <button type="button" disabled={!onClick} onClick={onClick} className="min-w-0 flex-1 text-left [-webkit-tap-highlight-color:transparent] active:opacity-60"><div className="truncate text-[17px] font-semibold leading-[22px] tracking-[-0.01em]" style={{ color: tc || "#000" }}>{t}</div><div className="truncate text-[15px] leading-5" style={{ color: sc || "#6E6E73" }}>{s}</div></button>
-      {r}
+/** Ligne de relance (maquette .rr, 68 pt) : avatar · nom + montant sur la 1re ligne · détail · bouton à droite.
+ *  Zone principale et bouton sont deux contrôles frères (pas de bouton imbriqué). */
+function LRow({ lead, t, tc, s, am, r, onClick, first }: { lead: React.ReactNode; t: string; tc?: string; s: React.ReactNode; am?: string; r?: React.ReactNode; onClick?: () => void; first?: boolean }) {
+  return <div className="flex h-[68px] items-center pl-1">
+    <span className="mr-3">{lead}</span>
+    <div className={`flex h-full min-w-0 flex-1 items-center ${first ? "" : "border-t border-[rgba(60,60,67,.16)]"}`}>
+      <button type="button" disabled={!onClick} onClick={onClick} className="min-w-0 flex-1 text-left [-webkit-tap-highlight-color:transparent] active:opacity-60">
+        <span className="flex items-baseline justify-between gap-2"><span className="truncate text-[17px] font-medium leading-[22px] tracking-[-0.01em]" style={{ color: tc || "#000" }}>{t}</span>{am && <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold tabular-nums text-[#000]">{am}</span>}</span>
+        <span className="block truncate text-[13.5px] leading-[19px] text-[#6E6E73]">{s}</span>
+      </button>
+      <span className="ml-2.5 shrink-0">{r}</span>
     </div>
   </div>
 }
-const H2 = ({ t, aside }: { t: string; aside?: React.ReactNode }) => <div className="flex items-end justify-between px-1 pb-1"><h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] text-[#000]">{t}</h2>{aside && <span className="text-[15px] text-[#6E6E73]">{aside}</span>}</div>
+const H2 = ({ t, aside, first }: { t: string; aside?: React.ReactNode; first?: boolean }) => <div className={`flex h-14 items-center justify-between px-1 ${first ? "pt-2.5" : "pt-4"}`}><h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] text-[#000]">{t}</h2>{aside !== undefined && <span className="text-[15px] text-[#6E6E73]">{aside}</span>}</div>
 
 export function useRelancesCounts() {
   const { s } = useC(), st = useFacturesLite()
@@ -54,55 +58,52 @@ export function useRelancesCounts() {
 export function useRelancesView() {
   const { late, devis, calls, total } = useRelancesCounts()
   const parts = [late.length && `${late.length} facture${late.length > 1 ? "s" : ""}`, devis.length && `${devis.length} devis`, calls.length && `${calls.length} rappel${calls.length > 1 ? "s" : ""}`].filter(Boolean)
-  return { fig: <span>{total}</span>, sub: <span className="flex flex-col items-center"><span>relances en cours</span>{parts.length > 0 && <span className="mt-1 text-[15px] text-[#A1A1A6]">{parts.join(" · ")}</span>}</span>, actions: [] as QAi[], body: <RelancesBody /> }
+  return { fig: <span>{total}</span>, sub: <span className="flex flex-col items-center"><span>relances en cours</span>{parts.length > 0 && <span className="mt-2 text-[15px] leading-5 text-[#A1A1A6]">{parts.join(" · ")}</span>}</span>, actions: [] as QAi[], body: <RelancesBody /> }
 }
 
 function RelancesBody() {
-  const { s, modal, toast, go } = useC(), st = useFacturesLite(), { p: prof, save } = useProfile()
+  const { s, modal, go } = useC(), st = useFacturesLite(), { p: prof } = useProfile()
   const [send, setSend] = useState<FactureLite | null>(null), [hist, setHist] = useState<FactureLite | null>(null)
   useEffect(() => { void refreshFactures() }, [])
   const unpaid = useMemo(() => (st.rows || []).filter(f => isUnpaid(f) && f.type !== "avoir" && !!f.numero).sort((a, b) => Number(isLate(b)) - Number(isLate(a)) || String(a.date_echeance || "").localeCompare(String(b.date_echeance || ""))), [st.rows])
   const devis = s.devis.filter(d => d.status === "env" || d.status === "sans")
   const calls = s.calls.filter(c => c.callback).sort((a, b) => Number(b.urgent) - Number(a.urgent))
   const auto = prof?.relances_auto !== false
-  const toggleAuto = async () => { void hapticTap("select"); const nx = !auto; const e = await save({ relances_auto: nx }); toast(e ? "Réglage indisponible pour le moment." : nx ? "Relances automatiques J+3, J+7, J+15 activées" : "Relances à valider avant envoi") }
   const sinceSent = (d: Devis) => d.sentAt ? daysBetween(d.sentAt.slice(0, 10), todayYmd()) : null
+  const late = (f: FactureLite) => { const l = lateLabel(f); return isLate(f) ? <span className="font-semibold" style={{ color: RED }}>{l}</span> : /^dans [1-7] j$|aujourd/.test(l) ? <span className="font-semibold" style={{ color: ORANGE }}>{l}</span> : <span>{l}</span> }
+  // maquette : Factures impayées · carte « Relances auto » · Devis sans réponse · Clients à rappeler
   return <>
-    <button type="button" onClick={toggleAuto} role="switch" aria-checked={auto} className="flex w-full items-center gap-3 rounded-[16px] bg-[#F2F2F7] px-4 py-3 text-left">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#fff] text-[#000]"><ShieldCheck size={18} strokeWidth={1.75} /></span>
-      <span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold text-[#000]">Relances auto {auto ? "activées" : "en pause"}</span><span className="block text-[13px]" style={{ color: auto ? "#6E6E73" : ORANGE }}>J+3, J+7, J+15 après l'échéance{auto ? "" : " · à valider avant envoi"}</span></span>
-      <span aria-hidden className="relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors" style={{ background: auto ? "#000" : "rgba(120,120,128,.16)" }}><span className="absolute top-[2px] h-[27px] w-[27px] rounded-full bg-[#fff] shadow-[0_3px_8px_rgba(0,0,0,.15)] transition-all" style={{ left: auto ? 22 : 2 }} /></span>
-    </button>
     <section>
-      <H2 t="Factures impayées" aside={unpaid.length || undefined} />
-      {unpaid.length ? unpaid.map((f, i) => <LRow key={f.id} first={i === 0} onClick={() => setHist(f)} lead={<Av n={f.client_nom || "?"} />} t={f.client_nom || "Client"} tc={isLate(f) ? RED : undefined}
-        s={<>{f.numero} · <span style={{ color: isLate(f) ? RED : ORANGE }}>{lateLabel(f)}</span></>}
-        r={<div className="flex items-center gap-2"><span className="text-[15px] font-semibold tabular-nums">{eur(dueOf(f))}</span><SmallBtn label={`Relancer ${f.client_nom || ""}`} on={() => setSend(f)}>Relancer</SmallBtn></div>} />)
+      <H2 first t="Factures impayées" aside={unpaid.length} />
+      {unpaid.length ? unpaid.map((f, i) => <LRow key={f.id} first={i === 0} onClick={() => setHist(f)} lead={<Av n={f.client_nom || "?"} />} t={f.client_nom || "Client"} tc={isLate(f) ? RED : undefined} am={eur(dueOf(f))}
+        s={<>{f.numero} · {late(f)}</>}
+        r={<SmallBtn label={`Relancer ${f.client_nom || ""}`} on={() => setSend(f)}>Relancer</SmallBtn>} />)
         : <Empty t={st.rows === null ? "Chargement…" : "Aucune facture impayée. Tout est encaissé."} />}
     </section>
+    {/* toucher la carte = programmation et historique des relances (ancienne page Relance) ; l'interrupteur est dans Réglages */}
+    <button type="button" onClick={() => { void hapticTap(); go("rel") }} aria-label={`Relances auto ${auto ? "activées" : "en pause"} — réglages des relances`} className="mt-2 flex h-[60px] w-full items-center gap-3 rounded-[20px] bg-[#F2F2F7] px-4 text-left active:opacity-70">
+      <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-[#fff] text-[#1C1C1E]"><RotateCcw size={17} strokeWidth={1.75} /></span>
+      <span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold leading-5 text-[#000]">Relances auto {auto ? "activées" : "en pause"}</span><span className="block text-[13px] leading-[17px]" style={{ color: auto ? "#6E6E73" : ORANGE }}>J+3, J+7, J+15{auto ? "" : " · à valider avant envoi"}</span></span>
+    </button>
     <section>
-      <H2 t="Devis sans réponse" aside={devis.length || undefined} />
-      {devis.length ? devis.map((d, i) => { const n = sinceSent(d); return <LRow key={d.id} first={i === 0} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} tc={n !== null && n >= 10 ? RED : undefined}
-        s={<>D-{d.num} · <span style={{ color: n !== null && n >= 10 ? RED : ORANGE }}>{n === null ? "envoyé" : `sans retour ${n} j`}</span></>}
-        r={<div className="flex items-center gap-2"><span className="text-[15px] font-semibold tabular-nums">{eur(d.amount)}</span><SmallBtn label={`Relancer le devis de ${d.client}`} on={() => modal({ kind: "devisPrev", data: d })}>Relancer</SmallBtn></div>} /> })
+      <H2 t="Devis sans réponse" aside={devis.length} />
+      {devis.length ? devis.map((d, i) => { const n = sinceSent(d); return <LRow key={d.id} first={i === 0} onClick={() => modal({ kind: "devisPrev", data: d })} lead={<Av n={d.client} />} t={d.client} tc={n !== null && n >= 10 ? RED : undefined} am={eur(d.amount)}
+        s={<>D-{d.num} · <span className="font-semibold" style={{ color: n !== null && n >= 10 ? RED : ORANGE }}>{n === null ? "envoyé" : `sans retour ${n} j`}</span></>}
+        r={<SmallBtn label={`Relancer le devis de ${d.client}`} on={() => modal({ kind: "devisPrev", data: d })}>Relancer</SmallBtn>} /> })
         : <Empty t="Aucun devis en attente de réponse." />}
     </section>
     <section>
-      <H2 t="Clients à rappeler" aside={calls.length || undefined} />
+      <H2 t="Clients à rappeler" aside={calls.length} />
       {calls.length ? calls.map((c, i) => <LRow key={c.id} first={i === 0} onClick={() => modal({ kind: "client", data: { name: c.name, call: c.id } })} lead={<Av n={c.name} />} t={c.name}
-        s={<>{c.tag || c.topic}{c.urgent ? <span style={{ color: RED }}> · urgent</span> : c.day ? ` · ${c.day.toLowerCase()}` : ""}</>}
-        r={c.phone ? <a href={`tel:${c.phone.replace(/\s/g, "")}`} onClick={e => { e.stopPropagation(); void hapticTap() }} className="h-8 shrink-0 rounded-full bg-[rgba(118,118,128,.12)] px-3.5 text-[14px] font-semibold leading-8 text-[#000]">Appeler</a> : undefined} />)
+        s={<>{c.tag || c.topic}{c.urgent ? <span className="font-semibold" style={{ color: ORANGE }}> · urgent</span> : c.day ? <span className="font-semibold" style={{ color: ORANGE }}> · demandé {c.day.toLowerCase()}</span> : c.rappelAt ? ` · à rappeler ${c.rappelAt}` : ""}</>}
+        r={c.phone ? <a href={`tel:${c.phone.replace(/\s/g, "")}`} onClick={e => { e.stopPropagation(); void hapticTap() }} className="flex h-9 shrink-0 items-center rounded-[18px] bg-[#F2F2F7] px-3 text-[14px] font-semibold text-[#000]">Appeler</a> : undefined} />)
         : <Empty t="Personne à rappeler." />}
     </section>
-    <button type="button" onClick={() => go("rel")} className="flex w-full items-center gap-3 rounded-[16px] bg-[#F2F2F7] px-4 py-3 text-left">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#fff] text-[#000]"><Repeat2 size={18} strokeWidth={1.75} /></span>
-      <span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold text-[#000]">Relances de devis et demandes d'avis</span><span className="block text-[13px] text-[#6E6E73]">Historique et programmation</span></span><ChevronRight size={18} className="text-[#C7C7CC]" />
-    </button>
     <AnimatePresence>{send && <RelanceSendSheet key="send" f={send} onClose={() => setSend(null)} />}</AnimatePresence>
     <AnimatePresence>{hist && <RelanceHistorySheet key="hist" f={hist} onClose={() => setHist(null)} onSend={() => { const f = hist; setHist(null); setTimeout(() => setSend(f), 260) }} />}</AnimatePresence>
   </>
 }
-const Empty = ({ t }: { t: string }) => <div className="flex h-[72px] items-center justify-center gap-2 rounded-[16px] bg-[#F2F2F7] text-[15px] text-[#6E6E73]"><Check size={16} />{t}</div>
+const Empty = ({ t }: { t: string }) => <div className="mt-1 flex h-[72px] items-center justify-center gap-2 rounded-[16px] bg-[#F2F2F7] text-[15px] text-[#6E6E73]"><Check size={16} />{t}</div>
 
 type Full = { id: string; numero: string | null; client_nom: string | null; client_email: string | null; client_telephone: string | null; token: string | null; date_echeance: string | null; date_emission: string | null; envoyee_le: string | null; payee_le: string | null; statut: string }
 type Canal = "sms" | "email" | "appel"

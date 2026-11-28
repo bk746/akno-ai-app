@@ -44,7 +44,7 @@ export default function MobileNav({ page, go, badge, recLocked, onIntent, employ
   const dest = (t: Tab): P => t === "fac" ? lastDocMode() : t
   const tapTab = (t: Tab) => { void hapticTap("select"); if (page !== dest(t) && !(t === "fac" && (page === "dev" || page === "fac"))) go(dest(t)) }
   return <>
-    <div aria-hidden className="kb-hide pointer-events-none fixed inset-x-0 bottom-0 z-[29] h-[34px] bg-gradient-to-b from-white/0 via-white/85 to-white" style={{ height: "calc(var(--sab, 0px) + 18px)" }} />
+    <div aria-hidden data-mobile-nav-fade className="kb-hide pointer-events-none fixed inset-x-0 bottom-0 z-[29] h-[34px] bg-gradient-to-b from-white/0 via-white/85 to-white" style={{ height: "calc(var(--sab, 0px) + 18px)" }} />
     <nav aria-label="Navigation principale" data-mobile-nav className="kb-hide pointer-events-none fixed inset-x-5 z-30 flex justify-center" style={{ bottom: "var(--nav-gap)" }}>
       <div data-bar-pill className="ak-glass pointer-events-auto flex w-full max-w-[520px] items-center rounded-[28px] px-1" style={{ height: BAR_H }}>
         {employee ? <TabBtn t="ag" on={active === "ag"} badge={badge} recLocked={recLocked} onTap={tapTab} onIntent={onIntent} />

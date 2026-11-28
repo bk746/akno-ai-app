@@ -28,6 +28,7 @@ const HELMET = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stro
 const esc = (t: string) => t.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
 const dotIcon = (c: string) => L.divIcon({ className: "ch-pin", iconSize: [22, 22], iconAnchor: [11, 11], html: `<span class="ch-dot" style="background:${c}"></span>` })
 const bigIcon = (c: string, label: string) => L.divIcon({ className: "ch-pin", iconSize: [48, 56], iconAnchor: [24, 54], html: `<span class="ch-big" style="--c:${c}"><span class="ch-big-in">${HELMET}</span></span><span class="ch-label">${esc(label)}</span>` })
+const pinIcon = (c: string, label: string, on: boolean) => L.divIcon({ className: "ch-pin", iconSize: [40, 52], iconAnchor: [20, 17], html: `<span class="ch-p${on ? " on" : ""}">${HELMET.replace('width="20" height="20"', 'width="17" height="17"').replace(/#fff/g, on ? "#fff" : "#000")}<i style="background:${c}"></i></span><span class="ch-p-l">${esc(label)}</span>` })
 const meIcon = () => L.divIcon({ className: "ch-pin", iconSize: [22, 22], iconAnchor: [11, 11], html: `<span class="ch-me"><span class="ch-me-halo"></span></span>` })
 const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches
 
@@ -118,9 +119,9 @@ const ChMap = forwardRef<MapApi, Props>(function ChMap({ items, selected, layer,
       const cur = marks.current.get(it.id)
       if (cur) {
         cur.m.setLatLng([it.lat, it.lng])
-        if (cur.key !== key) { cur.m.setIcon(sel ? bigIcon(it.color, it.label) : dotIcon(it.color)); cur.m.setZIndexOffset(sel ? 1000 : 0); cur.key = key }
+        if (cur.key !== key) { cur.m.setIcon(pinIcon(it.color, it.label, sel)); cur.m.setZIndexOffset(sel ? 1000 : 0); cur.key = key }
       } else {
-        const mk = L.marker([it.lat, it.lng], { icon: sel ? bigIcon(it.color, it.label) : dotIcon(it.color), keyboard: true, title: it.label, zIndexOffset: sel ? 1000 : 0, riseOnHover: false })
+        const mk = L.marker([it.lat, it.lng], { icon: pinIcon(it.color, it.label, sel), keyboard: true, title: it.label, zIndexOffset: sel ? 1000 : 0, riseOnHover: false })
         mk.on("click", () => cb.current.onSelect(it.id))
         mk.addTo(m); marks.current.set(it.id, { m: mk, key })
       }

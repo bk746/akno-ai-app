@@ -5,7 +5,7 @@ export type EvStatus = "prevu" | "en_route" | "arrive" | "termine" | "annule"
 
 export const EV_KIND: { id: EvKind; label: string; color: string }[] = [
   { id: "chantier", label: "Chantier", color: "#FF9F0A" },
-  { id: "rdv", label: "RDV / visite", color: "#BF5AF2" },
+  { id: "rdv", label: "RDV / visite", color: "#0A84FF" },
   { id: "visite", label: "Visite technique", color: "#64D2FF" },
   { id: "sav", label: "SAV", color: "#FF375F" },
   { id: "urgence", label: "Urgence", color: "#FF453A" },

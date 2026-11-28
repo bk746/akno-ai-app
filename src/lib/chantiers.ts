@@ -82,12 +82,16 @@ export async function deleteChantier(id: string) {
   return ""
 }
 
-export type EmpInput = Omit<Employe, "id" | "created_at" | "invited_at">
+export type EmpInput = Omit<Employe, "id" | "created_at" | "invited_at"> & { habilitations?: string[]; competences?: string[] }
+/** passe 2 · colonnes habilitations / competences présentes (lues sur les lignes chargées) */
+export const skillsCol = () => state.employes.some(e => "competences" in (e as object))
 const EXT = ["email", "hired_on", "access_role", "invite_status"] as const
 export async function saveEmploye(id: string | null, v: EmpInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: "Session expirée." }
   const row: Record<string, unknown> = { first_name: v.first_name.trim(), last_name: v.last_name?.trim() || null, role: v.role?.trim() || null, phone: v.phone?.trim() || null, photo_path: v.photo_path || null }
+  // passe 2 · habilitations / compétences (migration 20261128_18, facultative) : envoyées seulement si la colonne existe
+  if (skillsCol()) { const L = (x: unknown) => Array.isArray(x) ? x.map(String).map(t => t.trim()).filter(Boolean).slice(0, 20) : []; if ((v as any).habilitations !== undefined) row.habilitations = L((v as any).habilitations); if ((v as any).competences !== undefined) row.competences = L((v as any).competences) }
   if (state.ext) { row.email = v.email?.trim() || null; row.hired_on = v.hired_on || null; row.access_role = v.access_role || null; row.invite_status = v.access_role ? (v.invite_status || null) : null }
   const r = id ? await supabase.from("employes").update(row).eq("id", id).select("*").maybeSingle() : await supabase.from("employes").insert({ ...row, artisan_id: user.id }).select("*").maybeSingle()
   if (r.error || !r.data) return { ok: false, error: /email/i.test(r.error?.message || "") ? "Adresse e-mail invalide." : fr(r.error) || "Enregistrement impossible." }
@@ -162,3 +166,31 @@ export const takeNewRequest = () => { const p = pendingNew; pendingNew = false; 
 let pendingOpen: string | null = null
 export const requestOpenChantier = (id: string) => { pendingOpen = id; dispatchEvent(new Event("akno-chantier-open")) }
 export const takeOpenRequest = () => { const p = pendingOpen; pendingOpen = null; return p }
+
+/* passe 2 · Photos de chantier : bucket privé « equipe » existant (politique {uid}/…), dossier {uid}/chantiers/{id}/.
+   Aucune migration nécessaire ; la liste est lue depuis le stockage. */
+export type ChPhoto = { path: string; at: string }
+export async function listChantierPhotos(id: string): Promise<ChPhoto[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const dir = `${user.id}/chantiers/${id}`
+  const { data, error } = await supabase.storage.from("equipe").list(dir, { limit: 200, sortBy: { column: "created_at", order: "desc" } })
+  if (error || !Array.isArray(data)) return []
+  return data.filter(f => /\.jpe?g$/i.test(f.name)).map(f => ({ path: `${dir}/${f.name}`, at: String(f.created_at || f.updated_at || "") }))
+}
+export async function uploadChantierPhoto(id: string, file: File): Promise<{ path?: string; error?: string }> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "Session expirée." }
+  if (!/^image\//.test(file.type)) return { error: "Choisissez une image." }
+  let blob: Blob = file
+  try {
+    const bmp = await createImageBitmap(file), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height))
+    const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k)
+    cv.getContext("2d")!.drawImage(bmp, 0, 0, cv.width, cv.height)
+    blob = await new Promise<Blob>((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error("toBlob")), "image/jpeg", .82))
+  } catch { /* image d'origine */ }
+  const path = `${user.id}/chantiers/${id}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.jpg`
+  const { error } = await supabase.storage.from("equipe").upload(path, blob, { contentType: "image/jpeg", upsert: false })
+  if (error) return { error: /bucket|not found/i.test(error.message) ? "Photos indisponibles : appliquez la migration update64." : "Envoi de la photo impossible." }
+  return { path }
+}

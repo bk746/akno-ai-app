@@ -6,9 +6,9 @@
    update63 · refonte visuelle « iOS » : sections groupées (Client, Chantier, Prestations, Conditions), libellés en ligne,
    choix du client en feuille de recherche, coordonnées repliables, « Identique à l'adresse client », lignes en cartes
    (balayer pour supprimer), barre du bas compacte HT / TVA / TTC. Logique, champs, modèles et brouillons inchangés. */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, animate, motion, Reorder, useDragControls, useMotionValue, useReducedMotion, useTransform } from "motion/react"
-import { X, Plus, GripVertical, MoreHorizontal, Copy, ArrowUp, ArrowDown, Trash2, BookmarkPlus, Clock, Package, Tag, Layers, Eye, Send, Check, AlertCircle, Loader2, Search, AlignLeft, Download, LayoutTemplate, Percent } from "lucide-react"
+import { X, Plus, GripVertical, MoreHorizontal, Copy, ArrowUp, ArrowDown, Trash2, BookmarkPlus, Clock, Package, Tag, Layers, Eye, Send, Check, AlertCircle, Loader2, Search, AlignLeft, Download, LayoutTemplate, Percent, ChevronsUpDown, BookOpen } from "lucide-react"
 import { useC } from "../ui"
 import DevisPaper from "../DevisPaper"
 import { CO, buildDoc, missingLegal } from "../../lib/devisDoc"
@@ -343,6 +343,115 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
     <Pill onDismiss={() => { dropLocal("new"); setRestoreNew(null) }} action={<button type="button" onClick={() => { setDoc(restoreNew); setRestoreNew(null); setSiteDiff(!!restoreNew.meta?.site); setCoordOpen(!(restoreNew.email || restoreNew.phone || restoreNew.addr)) }} className="shrink-0 rounded-full bg-white px-3 py-1 text-[12.5px] font-semibold text-black">Reprendre</button>}>Brouillon{restoreNew.client ? ` · ${restoreNew.client}` : ""} gardé</Pill>
   </div>}</AnimatePresence>
 
+  const dlgs = <>
+    <ContactSheet open={pickC} desk={desk} clients={clients} current={doc.client} onClose={() => setPickC(false)} onPick={(c, isNew) => {
+      const nx = { client: c.name, email: c.email || (isNew ? "" : doc.email), phone: c.phone || (isNew ? "" : doc.phone), addr: c.addr || (isNew ? "" : doc.addr) }
+      set(nx)
+      setCoordOpen(!(nx.email || nx.phone || nx.addr) || !!isNew)
+      setPickC(false)
+    }} />
+    <AnimatePresence>{modeles && <Modeles desk={desk} current={{ objet: doc.objet, lignes: serialize(doc).lines }} onClose={() => setModeles(false)} onApply={applyModele} />}</AnimatePresence>
+    <AnimatePresence>{picker && <PrestaPicker desk={desk} onClose={() => setPicker(false)} onPick={p => fromPresta(p)} onNew={name => setForm({ initial: name ? { libelle: name } : {} })} />}</AnimatePresence>
+    <AnimatePresence>{form && <PrestaForm initial={form.initial} title={form.initial?.libelle && !picker ? "Enregistrer comme prestation" : undefined} onCancel={() => setForm(null)} onDone={p => { setForm(null); if (p) { toast(`« ${p.libelle} » ajoutée à vos prestations`); if (!form.initial?.libelle || picker) fromPresta(p) } }} />}</AnimatePresence>
+    {createPortal(<AnimatePresence>{preview && <motion.div className="fixed inset-0 z-[55] flex flex-col bg-black/85 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setPreview(false)}>
+      <div className="flex shrink-0 items-center gap-3 px-4 py-3 lg:px-6" style={{ paddingTop: desk ? undefined : "calc(var(--sat) + 8px)" }} onClick={e => e.stopPropagation()}>
+        <span className="flex-1 text-[15px] font-semibold">Aperçu · ce que reçoit le client</span>
+        <button type="button" onClick={() => import("../../lib/devisPdf").then(m => { m.downloadPdf(pdoc()); toast(`Devis-${num || "brouillon"}.pdf téléchargé`) })} className="flex h-10 items-center gap-2 rounded-full bg-white/[.1] px-4 text-[14px] font-medium hover:bg-white/[.14]"><Download size={16} />PDF</button>
+        <button type="button" aria-label="Fermer l'aperçu" onClick={() => setPreview(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[.1] hover:bg-white/[.14]"><X size={18} /></button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-10 lg:px-6" onClick={e => e.stopPropagation()}><div className="mx-auto w-full max-w-[820px]"><DevisPaper d={pdoc()} /></div></div>
+    </motion.div>}</AnimatePresence>, document.body)}
+  </>
+  const label = num ? `Devis N° ${num}` : "Nouveau devis"
+  /* ---------- passe 2 · mobile fidèle à la maquette 06-Factures/nouveau-devis (fond clair, 4 étapes, un seul bouton) ---------- */
+  const StepM = ({ n, t, aside, first }: { n: number; t: string; aside?: ReactNode; first?: boolean }) => <div className={`flex items-center justify-between pb-2.5 ${first ? "pt-3" : "pt-7"}`}><h2 className="flex items-center gap-2.5 text-[22px] font-semibold leading-7 text-[#000]"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#000] text-[13px] font-semibold text-[#fff]">{n}</span>{t}</h2>{aside}</div>
+  const cardM = "overflow-hidden rounded-[20px] bg-[#fff]"
+  const sepM = "relative before:absolute before:left-4 before:right-0 before:top-0 before:h-[.5px] before:bg-[rgba(60,60,67,.16)]"
+  const cityM = (a: string) => { const m = a.match(/\d{5}\s+([^,]+)/); return (m ? m[1] : a.split(",").slice(-1)[0] || "").trim() }
+  const iniM = (n: string) => n.replace(/^(M\.|Mme)\s*/i, "").split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase()
+  const siteVal = siteDiff ? doc.meta.site || "" : doc.addr
+  const acOn = (doc.meta.acompte ?? 30) > 0
+  const setAc = (n: number) => setDoc(d => ({ ...d, meta: { ...d.meta, acompte: n, conditions: withAcompte(d.meta.conditions || "", n) } }))
+  const qtyL = (x: EdLine) => `${fmtN(x.q)}${x.u === "h" ? " h" : ""} × ${fmtE(x.pu)}`
+  const mBody = <>
+    <div className="flex h-[54px] shrink-0 items-center justify-between px-5 pt-2.5">
+      <button type="button" onClick={() => void close()} className="text-[17px] text-[#000] active:opacity-60">Annuler</button>
+      <span className="truncate px-2 text-[17px] font-semibold text-[#000]">{label}</span>
+      <button type="button" onClick={() => setPreview(true)} className="text-[17px] font-semibold text-[#000] active:opacity-60">Aperçu</button>
+    </div>
+    {st === "error" && err && !errQuiet && <div role="alert" className="mx-5 mb-1 flex items-center gap-2 rounded-[14px] bg-[#FFE5E3] px-3.5 py-2.5 text-[14px] text-[#B3261E]"><AlertCircle size={15} className="shrink-0" /><span className="flex-1">{err}</span><button type="button" onClick={() => void saveNow()} className="font-semibold">Réessayer</button></div>}
+    <div data-devis-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5" style={{ paddingBottom: `calc(${footH}px + 24px)` }}>
+      {restorePill}
+      <StepM n={1} t="Client" first />
+      <div className={cardM}>
+        <button type="button" onClick={() => setPickC(true)} aria-label={doc.client ? `Changer de client (actuel : ${doc.client})` : "Choisir le client"} className="flex min-h-[72px] w-full items-center gap-3 px-4 py-3 text-left active:bg-black/[.03]">
+          {doc.client.trim() ? <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(180deg,#A2A2A7,#7C7C81)] text-[17px] font-semibold text-[#fff]">{iniM(doc.client)}</span> : <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#F2F2F7] text-[#000]"><Plus size={20} /></span>}
+          <span className="min-w-0 flex-1"><span className="block truncate text-[17px] font-semibold leading-[22px] text-[#000]">{doc.client.trim() || "Choisir ou ajouter un client"}</span><span className="block truncate text-[15px] leading-5 text-[#6E6E73]">{doc.client.trim() ? [doc.phone, cityM(doc.addr)].filter(Boolean).join(" · ") || "Coordonnées à compléter" : "Dans vos contacts ou nouveau"}</span></span>
+          <ChevronsUpDown size={17} className="shrink-0 text-[#8E8E93]" />
+        </button>
+        {doc.client.trim() && (!doc.email || !doc.phone || !doc.addr || coordOpen) && <div className={sepM}>
+          <DisclosureRow open={coordOpen} onToggle={() => setCoordOpen(o => !o)} title="Coordonnées" sub={!doc.email ? "E-mail à ajouter pour l’envoi" : coordSum} />
+          <Reveal open={coordOpen}><div>
+            <IRow label="E-mail" htmlFor="dv-email"><input id="dv-email" type="email" inputMode="email" autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck={false} enterKeyHint="next" className={ival} value={doc.email} placeholder="Pour l'envoi du devis" onChange={e => set({ email: e.target.value })} /></IRow>
+            <IRow label="Téléphone" htmlFor="dv-tel"><input id="dv-tel" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next" className={ival} value={doc.phone} placeholder="06 12 34 56 78" onChange={e => set({ phone: e.target.value })} /></IRow>
+            <IRow label="Adresse" htmlFor="dv-addr"><input id="dv-addr" autoComplete="street-address" autoCapitalize="words" enterKeyHint="done" className={ival} value={doc.addr} placeholder="N°, rue, code postal, ville" onChange={e => set({ addr: e.target.value })} /></IRow>
+          </div></Reveal>
+        </div>}
+      </div>
+      <StepM n={2} t="Chantier" />
+      <div className={cardM}>
+        <input id="dv-objet" aria-label="Objet des travaux" className="h-[56px] w-full bg-transparent px-4 text-[17px] text-[#000] outline-none placeholder:text-[#8E8E93]" value={doc.objet} maxLength={160} autoCapitalize="sentences" enterKeyHint="done" placeholder="Objet · ex. Rénovation salle de bain" onChange={e => set({ objet: e.target.value })} />
+        <label className={`flex h-[56px] items-center gap-3 px-4 ${sepM}`}><span className="w-[72px] shrink-0 text-[17px] text-[#6E6E73]">Adresse</span><input id="dv-site" autoComplete="street-address" autoCapitalize="words" enterKeyHint="done" className="h-full min-w-0 flex-1 bg-transparent text-[17px] text-[#000] outline-none placeholder:text-[#8E8E93]" value={siteVal} placeholder="Adresse du chantier" onChange={e => { setSiteDiff(true); setMeta({ site: e.target.value }) }} /></label>
+      </div>
+      <StepM n={3} t="Prestations" aside={<button type="button" onClick={() => setPicker(true)} className="flex h-9 items-center gap-1.5 rounded-full bg-[#fff] px-3.5 text-[15px] font-semibold text-[#000] shadow-[0_0_0_.5px_rgba(0,0,0,.06)]"><BookOpen size={15} strokeWidth={1.8} />Mes prestations</button>} />
+      <div data-prestations className={cardM}>
+        {doc.items.map((x, i) => focusId === x.id ? <div key={x.id} className={`px-1 py-2 ${i ? sepM : ""}`}>
+            <LineRow x={x} n={doc.items.slice(0, i + 1).filter(y => y.k !== "sec").length} desk={false} focused taux={taux} tv0={tv0} subtotal={x.k === "sec" ? sub(i) : 0} first={i === 0} last={i === doc.items.length - 1} offerSave={offerSaveId === x.id}
+              onFocus={() => setFocusId(x.id)} onPatch={p => patch(x.id, p)} onMove={d => move(x.id, d)} onDup={() => dup(x.id)} onRemove={() => { if (offerSaveId === x.id) setOfferSaveId(null); setFocusId(null); remove(x.id) }} onSave={() => asPresta(x)} onEnter={() => addKind(x.k)} />
+            <div className="flex justify-end px-3 pb-1"><button type="button" onClick={() => setFocusId(null)} className="h-9 rounded-full bg-[#000] px-4 text-[15px] font-semibold text-[#fff]">OK</button></div>
+          </div>
+          : <button key={x.id} type="button" onClick={() => setFocusId(x.id)} className={`flex min-h-[62px] w-full items-center gap-3 px-4 py-2 text-left active:bg-black/[.03] ${i ? sepM : ""}`}>
+            {x.k === "sec" ? <span className="text-[15px] font-semibold uppercase tracking-[.04em] text-[#6E6E73]">{x.l || "Section"}</span>
+              : <><span className="min-w-0 flex-1"><span className="block truncate text-[17px] leading-[22px] text-[#000]">{x.l || "Prestation sans nom"}</span><span className="block truncate text-[14px] leading-[19px] text-[#6E6E73]">{qtyL(x)}</span></span><b className="shrink-0 text-[17px] font-medium tabular-nums text-[#000]">{fmtE(lineHT(x))}</b></>}
+          </button>)}
+        <div className={doc.items.length ? sepM : ""}><AddPrestaRow light onPick={p => fromPresta(p)} onCreate={addFree} /></div>
+      </div>
+      <StepM n={4} t="Total" />
+      <div className={cardM}>
+        <div className="flex h-[52px] items-center justify-between px-[18px] text-[17px]"><span className="text-[#6E6E73]">{T.remise > 0 ? "Total HT après remise" : "Total HT"}</span><span className="tabular-nums text-[#000]">{fmtE(T.ht)}</span></div>
+        {CO.tvaNA ? <div className={`flex h-[52px] items-center justify-between px-[18px] text-[15px] ${sepM}`}><span className="text-[#6E6E73]">TVA non applicable, art. 293 B du CGI</span></div>
+          : T.rates.map(r => <div key={r.r} className={`flex h-[52px] items-center justify-between px-[18px] text-[17px] ${sepM}`}><span className="text-[#6E6E73]">TVA {fmtN(r.r)} %</span><span className="tabular-nums text-[#000]">{fmtE(r.tva)}</span></div>)}
+        <div className="flex h-[60px] items-center justify-between border-t border-[rgba(60,60,67,.16)] px-[18px]"><span className="text-[17px] font-semibold text-[#000]">Total TTC</span><span className="text-[28px] font-semibold tabular-nums tracking-[-0.02em] text-[#000]">{fmtE(T.ttc)}</span></div>
+      </div>
+      <div className={`mt-3 flex min-h-[72px] items-center gap-3 px-[18px] ${cardM}`}>
+        <span className="min-w-0 flex-1 py-3"><span className="block text-[17px] text-[#000]">Demander un acompte</span><span className="block text-[14px] tabular-nums text-[#6E6E73]">{acOn ? `${fmtN(doc.meta.acompte ?? 30)} % à la signature · ${fmtE(T.acompte)}` : "Aucun acompte à la signature"}</span></span>
+        <button type="button" role="switch" aria-checked={acOn} aria-label="Demander un acompte" onClick={() => setAc(acOn ? 0 : 30)} className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors ${acOn ? "bg-[#000]" : "bg-[rgba(120,120,128,.16)]"}`}><span className="absolute top-[2px] h-[27px] w-[27px] rounded-full bg-[#fff] shadow-[0_3px_8px_rgba(0,0,0,.15)] transition-[left]" style={{ left: acOn ? 22 : 2 }} /></button>
+      </div>
+      <div className="mt-7 space-y-7">{missing.length > 0 && <div className="rounded-[14px] bg-[#FFF4E0] px-4 py-3 text-[13px] leading-5 text-[#7A4A00]">Mentions obligatoires manquantes : {missing.join(", ")}. À compléter dans Réglages → Entreprise avant l'envoi.</div>}
+        <IGroup id="dv-g-cond">
+          <DisclosureRow open={moreOpen} onToggle={() => setMoreOpen(o => !o)} title="Plus d'options" sub={`Remise, validité ${doc.meta.validite || 30} jours, paiement, modèles`} />
+          <Reveal open={moreOpen}><div>
+            {!remOpen ? <button type="button" onClick={() => { setRemOpen(true); if (!doc.meta.remise) setMeta({ remise: { t: "pct", v: 0 } }) }} className="ig-row flex min-h-12 w-full items-center gap-2 pl-4 pr-4 text-left text-[15px] text-[#0071E3]"><Percent size={16} />Ajouter une remise</button>
+              : <div data-remise-globale className="ig-row flex min-h-12 items-center gap-2 py-1.5 pl-4 pr-2"><span className="min-w-0 flex-1 text-[15px] text-white/60">Remise</span>
+                <Seg size="sm" label="Type de remise" value={doc.meta.remise?.t || "pct"} onChange={t => setMeta({ remise: { t, v: doc.meta.remise?.v || 0 } })} opts={[["pct", "%"], ["eur", "€"]]} />
+                <NumField className="w-[96px]" inputClass={numIn} value={doc.meta.remise?.v || null} placeholder="0" onChange={n => setMeta({ remise: { t: doc.meta.remise?.t || "pct", v: n || 0 } })} max={doc.meta.remise?.t === "eur" ? undefined : 100} ariaLabel="Montant de la remise" suffix={doc.meta.remise?.t === "eur" ? "€" : "%"} />
+                <button type="button" aria-label="Retirer la remise" onClick={() => { setRemOpen(false); setMeta({ remise: undefined }) }} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/40"><X size={16} /></button></div>}
+            {acOn && <div className="ig-row flex min-h-12 items-center gap-3 py-1.5 pl-4 pr-3"><span className="min-w-0 flex-1 text-[15px] text-white/50">Acompte</span><NumField className="w-[84px]" inputClass={numIn} value={doc.meta.acompte ?? 30} max={100} onChange={n => setAc(n ?? 0)} ariaLabel="Pourcentage d'acompte" suffix="%" /></div>}
+            <div className="ig-row flex min-h-12 items-center gap-3 py-1.5 pl-4 pr-3"><span className="min-w-0 flex-1 text-[15px] text-white/50">Validité</span><Seg size="sm" label="Validité du devis" value={doc.meta.validite || 30} onChange={v => setMeta({ validite: v })} opts={[[15, "15 j"], [30, "30 j"], [60, "60 j"], [90, "90 j"]]} /></div>
+            <IRow top label="Paiement" htmlFor="dv-cond"><textarea id="dv-cond" rows={2} style={{ fieldSizing: "content" } as any} className={ival + " !h-auto min-h-12 resize-none py-[13px] leading-[22px]"} maxLength={300} value={doc.meta.conditions || ""} onChange={e => setMeta({ conditions: e.target.value, acompte: acompteFrom(e.target.value) ?? doc.meta.acompte })} /></IRow>
+            <IRow top label="Remarques" htmlFor="dv-notes"><textarea id="dv-notes" rows={1} style={{ fieldSizing: "content" } as any} className={ival + " !h-auto min-h-12 resize-none py-[13px] leading-[22px]"} maxLength={1000} placeholder="Facultatif : accès, délais…" value={doc.meta.notes || ""} onChange={e => setMeta({ notes: e.target.value })} /></IRow>
+            <button type="button" onClick={() => setModeles(true)} className="ig-row flex min-h-12 w-full items-center gap-2 pl-4 pr-4 text-left text-[15px] text-[#0071E3]"><LayoutTemplate size={16} />Partir d’un modèle</button>
+            <button type="button" data-create-devis disabled={!!busy} onClick={() => void createDevis()} className="ig-row flex min-h-12 w-full items-center gap-2 pl-4 pr-4 text-left text-[15px] text-[#0071E3]">{busy === "devis" ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}Enregistrer sans envoyer</button>
+            <button type="button" data-create-facture disabled={!!busy} onClick={() => void createFacture()} className="ig-row flex min-h-12 w-full items-center gap-2 pl-4 pr-4 text-left text-[15px] text-[#0071E3]">{busy === "facture" ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}Créer une facture directement</button>
+          </div></Reveal>
+        </IGroup>
+        <p className="px-1 text-[13px] leading-[18px] text-[#6E6E73]">Les mentions légales sont ajoutées automatiquement au devis.</p>
+      </div>
+    </div>
+    <div ref={footRef} data-devis-footer className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-[#F2F2F7] via-[#F2F2F7] to-[rgba(242,242,247,0)] px-5 pt-5" style={{ paddingBottom: "max(12px, var(--sab))" }}>
+      <button type="button" data-send-devis onClick={() => void send()} className="flex h-[56px] w-full items-center justify-center rounded-full bg-[#000] text-[17px] font-semibold text-[#fff] active:scale-[.98]">Envoyer pour signature</button>
+    </div>
+  </>
   const body = <>
     {header}
     {st === "error" && err && !errQuiet && <div role="alert" className="flex shrink-0 items-center gap-3 border-b border-[#FF453A]/20 bg-[#FF453A]/10 px-4 py-2.5 text-[13px] text-[#FFB4AF] lg:px-6"><AlertCircle size={15} className="shrink-0" /><span className="flex-1">{err}</span><button type="button" onClick={() => void saveNow()} className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-[12.5px] font-semibold text-white hover:bg-white/15">Réessayer</button></div>}
@@ -380,29 +489,12 @@ export default function DevisEditor({ req, onClose, onSend, onCreateFacture, onC
       </div>
     </>}
 
-    <ContactSheet open={pickC} desk={desk} clients={clients} current={doc.client} onClose={() => setPickC(false)} onPick={(c, isNew) => {
-      const nx = { client: c.name, email: c.email || (isNew ? "" : doc.email), phone: c.phone || (isNew ? "" : doc.phone), addr: c.addr || (isNew ? "" : doc.addr) }
-      set(nx)
-      setCoordOpen(!(nx.email || nx.phone || nx.addr) || !!isNew)
-      setPickC(false)
-    }} />
-    <AnimatePresence>{modeles && <Modeles desk={desk} current={{ objet: doc.objet, lignes: serialize(doc).lines }} onClose={() => setModeles(false)} onApply={applyModele} />}</AnimatePresence>
-    <AnimatePresence>{picker && <PrestaPicker desk={desk} onClose={() => setPicker(false)} onPick={p => fromPresta(p)} onNew={name => setForm({ initial: name ? { libelle: name } : {} })} />}</AnimatePresence>
-    <AnimatePresence>{form && <PrestaForm initial={form.initial} title={form.initial?.libelle && !picker ? "Enregistrer comme prestation" : undefined} onCancel={() => setForm(null)} onDone={p => { setForm(null); if (p) { toast(`« ${p.libelle} » ajoutée à vos prestations`); if (!form.initial?.libelle || picker) fromPresta(p) } }} />}</AnimatePresence>
-    {createPortal(<AnimatePresence>{preview && <motion.div className="fixed inset-0 z-[55] flex flex-col bg-black/85 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setPreview(false)}>
-      <div className="flex shrink-0 items-center gap-3 px-4 py-3 lg:px-6" style={{ paddingTop: desk ? undefined : "calc(var(--sat) + 8px)" }} onClick={e => e.stopPropagation()}>
-        <span className="flex-1 text-[15px] font-semibold">Aperçu · ce que reçoit le client</span>
-        <button type="button" onClick={() => import("../../lib/devisPdf").then(m => { m.downloadPdf(pdoc()); toast(`Devis-${num || "brouillon"}.pdf téléchargé`) })} className="flex h-10 items-center gap-2 rounded-full bg-white/[.1] px-4 text-[14px] font-medium hover:bg-white/[.14]"><Download size={16} />PDF</button>
-        <button type="button" aria-label="Fermer l'aperçu" onClick={() => setPreview(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[.1] hover:bg-white/[.14]"><X size={18} /></button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-10 lg:px-6" onClick={e => e.stopPropagation()}><div className="mx-auto w-full max-w-[820px]"><DevisPaper d={pdoc()} /></div></div>
-    </motion.div>}</AnimatePresence>, document.body)}
+    {dlgs}
   </>
-  const label = num ? `Devis N° ${num}` : "Nouveau devis"
   // update67 · ordinateur : plein écran (fondu) ; mobile : grande feuille iOS (poignée, glisser vers le bas = fermer, avec la même garde « non enregistré »)
   return desk
     ? <motion.div className="fixed inset-0 z-[45] flex flex-col bg-black text-white" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .2 }} role="dialog" aria-modal="true" aria-label={label}>{body}</motion.div>
-    : <ModalSheet label={label} onClose={() => void close()} z={45} size="large" escape={false} className="bg-black">{body}</ModalSheet>
+    : <ModalSheet label={label} onClose={() => void close()} z={45} size="large" escape={false} className="bg-[#F2F2F7]">{mBody}{dlgs}</ModalSheet>
 }
 
 /** update73 · titre d'étape numéroté (1. Client, 2. Chantier, 3. Prestations, 4. Total) */
@@ -413,7 +505,7 @@ const TotRow = ({ l, v, strong, hint }: { l: string; v: string; strong?: boolean
 
 function normQ(s: string) { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") }
 /** update85 · une seule ligne compacte pour ajouter une prestation (catalogue ou texte libre). */
-function AddPrestaRow({ onPick, onCreate }: { onPick: (p: Prestation) => void; onCreate: (name: string) => void }) {
+function AddPrestaRow({ onPick, onCreate, light }: { onPick: (p: Prestation) => void; onCreate: (name: string) => void; light?: boolean }) {
   const lib = usePrestations()
   const [q, setQ] = useState(""), [on, setOn] = useState(false)
   const words = normQ(q).trim().split(/\s+/).filter(Boolean)
@@ -425,10 +517,10 @@ function AddPrestaRow({ onPick, onCreate }: { onPick: (p: Prestation) => void; o
     else { const hit = list.find(x => x.libelle.toLowerCase() === t.toLowerCase()); if (hit) onPick(hit); else onCreate(t) }
     setQ(""); setOn(false)
   }
-  return <div data-add-presta className="relative mt-2.5">
-    <div className="flex h-12 items-center gap-2 rounded-[16px] bg-[#141416] px-3.5 ring-1 ring-white/[.06]">
-      <Plus size={16} strokeWidth={2.2} className="shrink-0 text-[#7EA6FF]" />
-      <input data-add-presta-input value={q} maxLength={200} placeholder="Ajouter une prestation" aria-label="Ajouter une prestation" autoComplete="off" autoCorrect="off" className="h-full min-w-0 flex-1 bg-transparent text-[15.5px] text-white outline-none placeholder:text-white/40"
+  return <div data-add-presta className={light ? "relative" : "relative mt-2.5"}>
+    <div className={light ? "flex h-[56px] items-center gap-3 px-4" : "flex h-12 items-center gap-2 rounded-[16px] bg-[#141416] px-3.5 ring-1 ring-white/[.06]"}>
+      {light ? <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#000] text-[#fff]"><Plus size={17} strokeWidth={2.4} /></span> : <Plus size={16} strokeWidth={2.2} className="shrink-0 text-[#7EA6FF]" />}
+      <input data-add-presta-input value={q} maxLength={200} placeholder="Ajouter une prestation" aria-label="Ajouter une prestation" autoComplete="off" autoCorrect="off" className={light ? "h-full min-w-0 flex-1 bg-transparent text-[17px] text-[#000] outline-none placeholder:text-[#000]" : "h-full min-w-0 flex-1 bg-transparent text-[15.5px] text-white outline-none placeholder:text-white/40"}
         onChange={e => { setQ(e.target.value); setOn(true) }} onFocus={() => setOn(true)} onBlur={() => setTimeout(() => setOn(false), 180)}
         onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(q) } }} />
     </div>

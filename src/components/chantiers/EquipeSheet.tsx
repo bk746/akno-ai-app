@@ -8,7 +8,7 @@ import { Camera, ChevronRight, Loader2, Phone, Trash2, UserPlus, X } from "lucid
 import { useC } from "../ui"
 import ModalSheet from "../sheet/ModalSheet"
 import PhotoCropper from "../photo/PhotoCropper"
-import { deleteEmploye, empName, inviteEmploye, loadChantiers, saveEmploye, uploadPhoto, useChantiers, type Employe } from "../../lib/chantiers"
+import { deleteEmploye, empName, inviteEmploye, loadChantiers, saveEmploye, skillsCol, uploadPhoto, useChantiers, type Employe } from "../../lib/chantiers"
 import { METIERS, ROLE_LABEL, frPhone, isMobile, shortName, todayISOsafe, validEmail, type AccessRole } from "../../lib/equipeCalc"
 import { EmpAvatar } from "./parts"
 
@@ -33,15 +33,16 @@ export function RoleSeg({ value, onChange }: { value: AccessRole; onChange: (v: 
   </div>
 }
 
-type Draft = { first_name: string; last_name: string; metier: string; autre: string; phone: string; email: string; hired_on: string; photo_path: string | null; access: boolean; role: AccessRole }
+type Draft = { habil: string; comp: string; first_name: string; last_name: string; metier: string; autre: string; phone: string; email: string; hired_on: string; photo_path: string | null; access: boolean; role: AccessRole }
 const draftOf = (e?: Employe | null): Draft => {
   const r = e?.role?.trim() || "", known = (METIERS as readonly string[]).includes(r)
-  return { first_name: e?.first_name || "", last_name: e?.last_name || "", metier: r ? (known ? r : "Autre") : "", autre: known ? "" : r, phone: e?.phone || "", email: e?.email || "", hired_on: e?.hired_on || "", photo_path: e?.photo_path || null, access: !!e?.access_role, role: e?.access_role || "ouvrier" }
+  const ls = (x: unknown) => Array.isArray(x) ? x.join(", ") : ""
+  return { habil: ls((e as any)?.habilitations), comp: ls((e as any)?.competences), first_name: e?.first_name || "", last_name: e?.last_name || "", metier: r ? (known ? r : "Autre") : "", autre: known ? "" : r, phone: e?.phone || "", email: e?.email || "", hired_on: e?.hired_on || "", photo_path: e?.photo_path || null, access: !!e?.access_role, role: e?.access_role || "ouvrier" }
 }
 
 /** Formulaire membre (feuille modale). */
 export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 }: { initial?: Employe | null; desk: boolean; onClose: () => void; onSaved?: (id: string) => void; onDeleted?: (id: string) => void; z?: number }) {
-  const { toast } = useC(), st = useChantiers(), edit = !!initial
+  const { toast } = useC(), st = useChantiers(), edit = !!initial, skills = skillsCol()
   const [d, setD] = useState<Draft>(() => draftOf(initial)), [busy, setBusy] = useState(""), [errs, setErrs] = useState<Record<string, string>>({}), [confirmDel, setConfirmDel] = useState(false)
   const file = useRef<HTMLInputElement>(null), autreRef = useRef<HTMLInputElement>(null)
   const [crop, setCrop] = useState<File | null>(null)
@@ -75,6 +76,7 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
     const r = await saveEmploye(initial?.id || null, {
       first_name: d.first_name, last_name: d.last_name, role: d.metier === "Autre" ? d.autre : d.metier || null, phone: ph || null, photo_path: d.photo_path,
       email: d.email, hired_on: d.hired_on || (edit ? null : todayISOsafe()), access_role: d.access ? d.role : null, invite_status: d.access ? (was === "accepted" ? "accepted" : "pending") : null,
+      ...(skills ? { habilitations: d.habil.split(",").map(x => x.trim()).filter(Boolean), competences: d.comp.split(",").map(x => x.trim()).filter(Boolean) } : {}),
     })
     if (!r.ok) { setBusy(""); toast(r.error); return }
     if (newlyInvited) {
@@ -122,6 +124,10 @@ export function MemberForm({ initial, desk, onClose, onSaved, onDeleted, z = 72 
           {st.ext && <Field label="Email" htmlFor="mf-mail" err={errs.email}><input id="mf-mail" className={inp} type="email" inputMode="email" autoComplete="off" autoCapitalize="none" enterKeyHint="done" placeholder="Obligatoire pour l'accès" maxLength={254} value={d.email} onChange={e => set({ email: e.target.value })} /></Field>}
           {st.ext && edit && <Field label="Date d'entrée" htmlFor="mf-hired"><input id="mf-hired" className={inp + " akno-dt"} type="date" max="2100-12-31" value={d.hired_on} onChange={e => set({ hired_on: e.target.value })} /></Field>}
         </Group>
+        {skills && <Group className="mt-5">
+          <Field label="Habilitations" htmlFor="mf-hab"><input id="mf-hab" className={inp} autoCapitalize="sentences" placeholder="Ex. B1V, SST, travail en hauteur" maxLength={400} value={d.habil} onChange={e => set({ habil: e.target.value })} /></Field>
+          <Field label="Compétences" htmlFor="mf-comp"><input id="mf-comp" className={inp} autoCapitalize="sentences" placeholder="Ex. plomberie, carrelage" maxLength={400} value={d.comp} onChange={e => set({ comp: e.target.value })} /></Field>
+        </Group>}
         {st.ext ? <div className="mt-5 rounded-[16px] bg-white/[.07] px-4 py-3.5">
           <div className="flex items-center gap-3"><div className="min-w-0 flex-1"><div className="text-[16.5px] font-medium">Accès à l'app</div><div className="mt-0.5 text-[13.5px] text-white/50">{initial?.invite_status === "accepted" ? "Compte activé" : initial?.access_role && initial.invited_at ? "Invitation déjà envoyée" : "Envoyer une invitation par e-mail"}</div></div><GreenSwitch on={d.access} onChange={v => set({ access: v, phone: d.phone })} label="Accès à l'app" /></div>
           <AnimatePresence initial={false}>{d.access && <motion.div key="seg" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ height: SPRING, opacity: { duration: .15 } }} className="overflow-hidden"><div className="pt-3.5"><RoleSeg value={d.role} onChange={r => set({ role: r })} /></div></motion.div>}</AnimatePresence>

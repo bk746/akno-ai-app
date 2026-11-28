@@ -116,7 +116,7 @@ export function statusOf(c: Client, today = todayISO()): Status | null {
   return null
 }
 export type Filter = "all" | "onsite" | "devis" | "relance"
-export const FILTERS: [Filter, string][] = [["all", "Tous"], ["onsite", "Chantier en cours"], ["devis", "Devis en attente"], ["relance", "À relancer"]]
+export const FILTERS: [Filter, string][] = [["all", "Tous"], ["onsite", "En chantier"], ["devis", "Devis"], ["relance", "À relancer"]]
 /** À relancer : devis envoyé sans réponse depuis au moins `delay` jours (1er délai des relances, 3 j par défaut) ou facture en retard. */
 export function toRelance(c: Client, today = todayISO(), delay = 3) {
   return c.factures.some(f => factLate(f, today)) || c.devis.some(d => devisPending(d) && !!d.sentAt && daysBetween(day(d.sentAt), today) >= delay)

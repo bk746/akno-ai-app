@@ -7,10 +7,10 @@ import { empName, patchChantier, photoUrl, usePhotoTick, type Chantier, type Emp
 import { itineraryUrl } from "../../lib/geo"
 
 const ini = (e: Employe) => `${e.first_name[0] || ""}${e.last_name?.[0] || ""}`.toUpperCase()
-export function EmpAvatar({ e, size = 36, ring }: { e: Employe; size?: number; ring?: boolean }) {
+export function EmpAvatar({ e, size = 36, ring, light }: { e: Employe; size?: number; ring?: boolean; light?: boolean }) {
   usePhotoTick()
   const url = photoUrl(e.photo_path)
-  return <span aria-hidden className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white ${ring ? "ring-2 ring-[#232326]" : ""}`} style={{ width: size, height: size, fontSize: size * .38, background: "#2C2C2E" }}>
+  return <span aria-hidden className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white ${ring ? "ring-2 ring-[#232326]" : ""}`} style={{ width: size, height: size, fontSize: size * .38, background: light ? "linear-gradient(180deg,#A2A2A7,#7C7C81)" : "#2C2C2E" }}>
     {url ? <img src={url} alt="" className="h-full w-full object-cover" draggable={false} /> : ini(e)}
   </span>
 }
@@ -50,6 +50,33 @@ export function ChCard({ c, team, onOpen, active, handle = true }: { c: Chantier
       {team.length > 0 && <span className="ml-1 shrink-0"><AvatarStack team={team} /></span>}
     </div>
     {!hasPos && <div className="mt-2 flex items-center gap-1 text-[12px] text-white/45"><MapPin size={12} />Adresse à placer sur la carte</div>}
+  </div>
+}
+
+/** passe 2 · carte du bas, version claire (maquette chantiers-carte) */
+export function ChCardL({ c, team, onOpen }: { c: Chantier; team: Employe[]; onOpen: () => void }) {
+  const st = effectiveStatus(c), pct = progressPct(c), late = isLateCh(c), hasPos = c.lat != null && c.lng != null
+  const col = late ? "#E0221B" : st === "in_progress" ? "#1E9E4A" : st === "upcoming" ? "#0071E3" : "#6E6E73"
+  const names = team.map(e => e.first_name || empName(e))
+  const onSite = names.length ? `${names.length > 1 ? `${names.slice(0, -1).join(", ")} et ${names[names.length - 1]}` : names[0]} sur place` : "Personne d’assigné"
+  return <div role="button" tabIndex={0} aria-label={`${c.title}, ${STATUS_LABEL[st]}. Ouvrir la fiche`} onClick={onOpen} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}
+    className="relative block w-full cursor-pointer select-none rounded-[28px] bg-[rgba(255,255,255,.94)] px-[18px] pb-4 pt-4 text-left shadow-[0_10px_30px_rgba(0,0,0,.25)] outline-none backdrop-blur-xl">
+    <div className="flex items-start gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: col }}><span className="h-[7px] w-[7px] rounded-full" style={{ background: col }} />{late ? "En retard" : STATUS_LABEL[st]}</div>
+        <div className="mt-1 truncate text-[20px] font-semibold leading-[25px] tracking-[-0.01em] text-[#000]">{c.title}</div>
+        <div className="mt-0.5 truncate text-[15px] leading-5 text-[#6E6E73]">{[c.client_nom, rangeLabel(c)].filter(Boolean).join(" · ")}</div>
+      </div>
+      {(hasPos || c.address) && <a href={itineraryUrl(c)} target="_blank" rel="noopener" aria-label={`Itinéraire vers ${c.title}`} onClick={e => e.stopPropagation()} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#000] text-[#fff] active:scale-90"><Navigation size={18} strokeWidth={2} className="-ml-px" /></a>}
+    </div>
+    <div className="mt-4 flex items-center gap-3">
+      <div className="h-1 flex-1 overflow-hidden rounded-full bg-[rgba(120,120,128,.2)]"><div className="h-full rounded-full bg-[#000]" style={{ width: `${st === "upcoming" ? 0 : pct}%` }} /></div>
+      <span className="shrink-0 text-[15px] font-semibold tabular-nums text-[#000]">{st === "upcoming" ? untilLabel(c) : `${pct} %`}</span>
+    </div>
+    <div className="mt-3 flex items-center gap-2.5 text-[14px] text-[#6E6E73]">
+      {team.length > 0 && <span className="flex">{team.slice(0, 3).map((e, i) => <span key={e.id} className="rounded-full border-2 border-[#fff]" style={{ marginLeft: i ? -8 : 0 }}><EmpAvatar e={e} size={26} light /></span>)}</span>}
+      <span className="truncate">{onSite}</span>
+    </div>
   </div>
 }
 

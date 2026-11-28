@@ -26,10 +26,11 @@ export function NavBar({ title, caps, lead, scroller, compact }: { title: ReactN
   const { scrollY } = useScroll({ container: scroller as React.RefObject<HTMLElement> })
   const bg = useTransform(scrollY, [24, 64], [0, 1])
   const sc = useTransform(scrollY, [0, 56], [1, .78])
-  const tx = useTransform(scrollY, [0, 56], [0, 6])
-  return <div data-mobile-head className="sticky top-0 z-20 shrink-0" style={{ paddingTop: "calc(var(--sat) + 2px)" }}>
+  const tx = useTransform(scrollY, [0, 56], [0, 4])
+  // maquettes : barre de 36 pt posée à 42 pt du haut (barre d'état 47 pt) → titre 22 pt, capsule 36 pt
+  return <div data-mobile-head className="sticky top-0 z-20 shrink-0 pb-1.5" style={{ paddingTop: "max(calc(var(--sat) - 5px), 6px)" }}>
     <motion.div aria-hidden className="absolute inset-0 border-b border-white/[.08] bg-black/70 backdrop-blur-[20px] backdrop-saturate-150" style={{ opacity: bg }} />
-    <div className="relative flex h-11 items-center gap-2 px-5">
+    <div className="relative flex h-9 items-center gap-2 px-5">
       {lead}
       <motion.h1 className={`min-w-0 flex-1 origin-left truncate font-semibold tracking-[-0.01em] text-[#fff] ${compact ? "text-[17px]" : "text-[22px] leading-7"}`} style={reduce || compact ? undefined : { scale: sc, y: tx }}>{title}</motion.h1>
       {caps && <Capsule items={caps} />}
@@ -37,20 +38,30 @@ export function NavBar({ title, caps, lead, scroller, compact }: { title: ReactN
   </div>
 }
 
-export function IosPage({ title, caps, mid, hero, chips, children, lead }: { title: ReactNode; caps?: CapsBtn[]; mid?: ReactNode; hero?: ReactNode; chips?: ReactNode; children: ReactNode; lead?: ReactNode }) {
+/** dernière page à onglet visitée (retour des pages hors barre : Clients, Équipe, Réglages) */
+let lastTabP = "rec"
+export const noteTab = (p: string) => { if (p === "rec" || p === "ag" || p === "ch" || p === "dev" || p === "fac") lastTabP = p }
+export const lastTab = () => lastTabP
+
+export function IosPage({ title, caps, mid, hero, chips, children, lead, sheetTop, spacer, flush, heroPt }: { heroPt?: number; title: ReactNode; caps?: CapsBtn[]; mid?: ReactNode; hero?: ReactNode; chips?: ReactNode; children: ReactNode; lead?: ReactNode; sheetTop?: number
+  /** hauteur noire sous le sélecteur quand il n'y a pas de haut de page (défaut 14 / 18) ; flush : contenu de la feuille sans marge latérale */
+  spacer?: number; flush?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
+  // gabarit des maquettes : sans sélecteur, bot à 52 pt sous la barre et feuille à 74 pt sous le texte ; avec sélecteur, 18 / 52 pt
+  const pt = heroPt ?? (mid ? 18 : 52), pb = sheetTop ?? (mid ? 52 : 74)
   return <div ref={ref} data-page-scroll className="ak-page flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-y-contain" style={{ background: "#fff" }}>
     <div className="relative flex flex-col bg-[#000]">
       {/* fond noir au-dessus du haut de page pour le rebond iOS (pas de dégradé sur le conteneur : artefacts de tuiles WebKit) */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-full h-[100vh] bg-[#000]" />
       <NavBar title={title} caps={caps} lead={lead} scroller={ref} />
-      {mid && <div className="relative z-10 px-5 pt-3">{mid}</div>}
-      {hero && <div className="flex flex-col items-center px-5 pb-8 pt-6 text-center">{hero}</div>}
+      {mid && <div className="relative z-10 px-5 pt-2">{mid}</div>}
+      {hero ? <div className="flex flex-col items-center px-5 text-center" style={{ paddingTop: pt, paddingBottom: pb + 40 }}>{hero}</div> : <div style={{ height: (spacer ?? (mid ? 14 : 18)) + 40 }} />}
     </div>
-    <div data-ios-sheet className="ak-sheet akno-light relative -mt-px flex flex-1 flex-col" style={{ minHeight: "62dvh" }}>
+    {/* la feuille recouvre les 40 derniers points du haut noir : le noir passe sous ses coins arrondis */}
+    <div data-ios-sheet className="ak-sheet akno-light relative z-[1] -mt-10 flex flex-1 flex-col" style={{ minHeight: "62dvh" }}>
       <div aria-hidden className="ak-grab" />
       {chips && <div className="no-scrollbar flex gap-2 overflow-x-auto px-5 pt-4">{chips}</div>}
-      <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className="flex flex-col gap-8 px-4 pt-4">{children}</motion.div>
+      <motion.div initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: .03 } } }} className={`flex flex-col ${flush ? "" : "px-4"}`}>{children}</motion.div>
       <div aria-hidden className="shrink-0" style={{ height: "var(--page-bottom)" }} />
     </div>
   </div>
@@ -78,7 +89,7 @@ export const Chip = ({ I, l, on, dis }: { I: any; l: string; on: () => void; dis
 export function IRow({ ini, name, red, sub, time, href, onClick, onInfo, first, infoLabel }: { ini: string; name: string; red?: boolean; sub?: ReactNode; time?: ReactNode; href?: string; onClick?: () => void; onInfo?: () => void; first?: boolean; infoLabel?: string }) {
   const body = <>
     <span data-av aria-hidden className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold">{ini}</span>
-    <span className={`flex min-h-[64px] min-w-0 flex-1 items-center ${first ? "" : "border-t border-[rgba(60,60,67,.16)]"}`}>
+    <span className={`flex min-h-[60px] min-w-0 flex-1 items-center ${first ? "" : "border-t border-[rgba(60,60,67,.16)]"}`}>
       <span className="min-w-0 flex-1 py-2"><span className="block truncate text-[17px] font-semibold leading-[22px] tracking-[-0.01em]" style={{ color: red ? "var(--ak-red)" : "#000" }}>{name}</span>{sub && <span className="block truncate text-[15px] leading-5 text-[#6E6E73]">{sub}</span>}</span>
       {time && <span className="ml-2 shrink-0 text-[15px] tabular-nums text-[#6E6E73]">{time}</span>}
       {onInfo && <span className="w-[50px] shrink-0" />}
@@ -91,4 +102,4 @@ export function IRow({ ini, name, red, sub, time, href, onClick, onInfo, first, 
     </button>}
   </div>
 }
-export const IH2 = ({ t, more, moreL = "Tout voir" }: { t: string; more?: () => void; moreL?: string }) => <div className="flex items-end justify-between px-1 pb-1"><h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] text-[#000]">{t}</h2>{more && <button type="button" onClick={more} className="text-[15px] text-[#6E6E73]">{moreL}</button>}</div>
+export const IH2 = ({ t, more, moreL = "Tout voir", first }: { t: ReactNode; more?: () => void; moreL?: string; first?: boolean }) => <div className={`flex items-end justify-between px-1 pb-2.5 ${first ? "pt-[21px]" : "pt-[30px]"}`}><h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] text-[#000]">{t}</h2>{more && <button type="button" onClick={more} className="text-[15px] text-[#6E6E73]">{moreL}</button>}</div>

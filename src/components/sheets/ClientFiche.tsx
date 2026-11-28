@@ -27,9 +27,9 @@ export function useFiche(name: string) {
   return { fiche: f, available: ok, reload: () => setTick(x => x + 1) }
 }
 
-export function FicheEditor({ name, fiche, defaults, available, onSaved }: { name: string; fiche: Fiche | null; defaults: { phone?: string; email?: string; addr?: string }; available: boolean; onSaved: () => void }) {
+export function FicheEditor({ name, fiche, defaults, available, onSaved, startEdit, onCancel }: { name: string; fiche: Fiche | null; defaults: { phone?: string; email?: string; addr?: string }; available: boolean; onSaved: () => void; startEdit?: boolean; onCancel?: () => void }) {
   const init = (): Fiche => ({ nom: fiche?.nom || name, telephone: fiche?.telephone || defaults.phone || "", email: fiche?.email || defaults.email || "", adresse: fiche?.adresse || defaults.addr || "", siren: fiche?.siren || "", notes: fiche?.notes || "" })
-  const [edit, setEdit] = useState(false), [d, setD] = useState<Fiche>(init), [busy, setBusy] = useState(false), [err, setErr] = useState("")
+  const [edit, setEdit] = useState(!!startEdit), [d, setD] = useState<Fiche>(init), [busy, setBusy] = useState(false), [err, setErr] = useState("")
   useEffect(() => { if (!edit) setD(init()) }, [fiche, edit]) // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => {
     const siren = d.siren.replace(/\s/g, "")
@@ -55,7 +55,7 @@ export function FicheEditor({ name, fiche, defaults, available, onSaved }: { nam
     <F l="SIREN (client professionnel)"><input className={inp} inputMode="numeric" placeholder="9 chiffres" value={d.siren} onChange={e => setD({ ...d, siren: e.target.value })} /></F>
     <F l="Notes privées"><textarea className={`${inp} h-28 py-3 leading-snug`} placeholder="Code d'accès, préférences, matériel en place…" value={d.notes} onChange={e => setD({ ...d, notes: e.target.value })} /></F>
     {err && <div className="text-[13px] text-[#FF9B96]">{err}</div>}
-    <div className="flex gap-2"><Btn className="flex-1" onClick={() => { setEdit(false); setErr("") }}>Annuler</Btn><Btn primary className="flex-1" disabled={busy} onClick={() => void save()}>{busy ? "…" : "Enregistrer"}</Btn></div>
+    <div className="flex gap-2"><Btn className="flex-1" onClick={() => { setEdit(false); setErr(""); onCancel?.() }}>Annuler</Btn><Btn primary className="flex-1" disabled={busy} onClick={() => void save()}>{busy ? "…" : "Enregistrer"}</Btn></div>
   </div>
 }
 
